@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# project
+web/node_modules/
+web/dist/
+.venv/
+*.tsbuildinfo
+.claude/worktrees/
