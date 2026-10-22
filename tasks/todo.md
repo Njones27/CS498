@@ -45,3 +45,39 @@ One photo goes upload -> queue -> worker -> status -> driver map, fully local, s
 - Known follow-ups: `Repository.transition_job` needs an atomic "unfinished only" condition so the worker's re-claim of a retryable FAILED job is race-free; `useFetch` has an exhaustive-deps lint warning; `AuthContext.tsx` exports a hook and a component (fast-refresh warning).
 - Open for teammates: Snapshots page + Retry UI (US-06), admin lot picker (US-16 #3), PKLot fixture pair for a real seed lot.
 - Wave 2 next: ACPDS + YOLO26m scorer and ORB alignment behind the existing interfaces, closures CRUD, admin create-lot.
+
+# Wave 2 (Nathan Jones): closures, vision, brief
+
+Plan of record: `~/.claude/plans/glimmering-sleeping-blum.md` (approved Oct 22 2026 after review).
+Four PRs, each from up-to-date `main`, never stacked; Opus 5.5 subagents implement, code review before `gh pr create`.
+
+## PR1 Closures (US-10), `wave2/nathan-closures` (by Oct 24)
+- [x] `closures_schemas.py`, `routes/closures.py` (GET/POST/DELETE), one `include_router`
+- [x] Validate space ids against the published layout (409 `not_published`), 422 `invalid_window` / `unknown_space`
+- [x] `api.delete`, `LotMapSvg` toggle props, `ClosuresPage.tsx`, admin home link
+- [x] Test per US-10 criterion + auth tests; contract and types regenerated
+- [x] Reviewed; PR #7 open (Oct 22), CI green
+
+## PR2a ORB aligner, `wave2/nathan-aligner` (by Oct 26)
+- [x] Content-addressed `reference_image_key(lot, view, sha256)`; seed loader hashes bytes
+- [x] `ALIGNER` settings, `aligners/orb.py`, `build_aligner`, cache keyed by object key
+- [x] opencv-python-headless + uv override for `opencv-python`
+- [x] Synthetic known-transform tests; reviewed; PR #8 open (Oct 22), CI green
+
+## PR2b ACPDS + YOLO26m, `wave2/nathan-vision` (by Oct 28)
+- [x] Vendored ACPDS (MIT, weights=None), `scorers/acpds_yolo.py`, `YOLO_OVERLAP_MODE`
+- [x] `models/manifest.json`, `scripts/download_weights.py`, `.pt` ignored
+- [x] `vision` extra, pytorch-cpu index, `WORKER_EXTRAS` build arg, `worker-vision-image` CI job
+- [x] `eval/fetch_pklot_sample.py --count 30`, one committed fixture, `eval/benchmark.py`
+- [x] Benchmark tables in PR #9; cutoffs unchanged (Nathan decides; YOLO_IMGSZ=1280 default added)
+- [x] README weights + AGPL note; reviewed; PR #9 open (Oct 22), CI green
+
+## PR3 Brief, `wave2/nathan-brief` (after the three merge)
+- [x] Fill section 3 TBDs, fix 4.2/7.2 reference key, 5-8, 10 (drafted in the working tree Oct 22)
+- [x] Branched from main (`wave2/nathan-brief`, local), `README 2.md` removed, brief + lessons + this file committed and reviewed (Oct 22)
+- [x] #7, #8 and #9 merged to main (Oct 22); rebased onto main, re-reviewed, pushed, PR opened (Oct 22)
+
+## Review (Oct 22, 2026)
+- PRs #7 (closures), #8 (aligner), #9 (scorer + benchmark) are merged to main (merge commits, Oct 22). The brief PR needs one teammate review and a merge commit.
+- PKLot (30 photos): acpds_yolo box mode false-free 2.8%, accuracy 91.7%, UNKNOWN 5.8% with YOLO at 1280 px; ACPDS alone 14.5% false-free. Cutoffs unchanged; the pilot decides cutoffs, overlap mode and ORB thresholds.
+- Decided for Rylan's reference upload: `complete` re-hashes the object before pointing a viewpoint at it (brief 4.2).

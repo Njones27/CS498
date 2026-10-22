@@ -26,3 +26,25 @@
 - 2026-10-22 `minio/minio` disappeared from Docker Hub (pull access denied). Check that pinned
   images still exist (Docker Hub tags API) before relying on them; prefer configuring storage
   through the S3 API (PutBucketCors) over vendor env vars so the emulator stays swappable.
+- 2026-10-22 Stacked PRs merged in order still landed in their base branches, not `main`, because each
+  base branch wasn't deleted (and the next PR retargeted) before the next merge. For stacks, either
+  merge top-down into `main` after retargeting, or land the stack with one PR from its tip.
+- 2026-10-22 The repo lives in iCloud-synced ~/Documents: iCloud created "name 2" duplicates inside
+  `.git/refs`, which broke `git fetch`. Keep git repos outside iCloud Drive.
+- 2026-10-22 ship-gate fingerprints the *working tree* (tracked edits via `git add -u`, plus all
+  non-ignored files) when a reviewer agent is spawned, and opens `gh pr create` only when HEAD's
+  committed tree equals one of those fingerprints. So: stash uncommitted tracked edits (e.g.
+  tasks/*.md notes) before spawning the final review, or the review never matches HEAD. Untracked
+  files don't matter (the tracked-only tree still matches), dirty tracked files do.
+- 2026-10-22 Review finding worth keeping: never derive a record's lifecycle state in the browser from
+  `Date.now()` when the server already knows it (a scheduled closure flipped to "Ended" on the
+  client). Return the state from the API and render it.
+- 2026-10-22 YOLO's default 640 px inference size silently missed most small, distant cars in
+  1280 px photos. Always set `imgsz` explicitly for high-resolution photos and benchmark it.
+- 2026-10-22 Never let a clamped or out-of-frame ROI reach a classifier: a crop of a half-visible
+  space gets a confident, meaningless score. Null the score instead and let the rules handle it.
+- 2026-10-22 uv optional extras are removed by a plain `uv sync`; use `uv sync --all-packages --extra <name>`.
+- 2026-10-22 ultralytics pulls in `opencv-python`, which installs a second, GUI-linked `cv2` over the
+  headless one. Override it away (uv `override-dependencies`) and keep only `opencv-python-headless`.
+- 2026-10-22 The PKLot `samples.json` is sorted by camera, so streaming from the start yields one
+  camera only. Sample ranged windows across the file instead.
