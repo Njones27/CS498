@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api, configureClient } from '../api/client'
 import type { LoginRequest, LoginResponse } from '../api/schemas'
-import { clearSession, loadSession, saveSession, type Session } from './session'
+import { clearSession, loadSession, saveSession, setFlash, type Session } from './session'
 
 export const SESSION_EXPIRED_MESSAGE = 'Your session expired. Please sign in again'
 
@@ -26,12 +26,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getToken: () => loadSession()?.token ?? null,
     onSessionExpired: () => {
       clearSession()
+      setFlash(SESSION_EXPIRED_MESSAGE)
       setSession(null)
       const next = location.pathname + location.search
-      navigate(`/signin?next=${encodeURIComponent(next)}`, {
-        replace: true,
-        state: { message: SESSION_EXPIRED_MESSAGE },
-      })
+      navigate(`/signin?next=${encodeURIComponent(next)}`, { replace: true })
     },
   })
 
@@ -51,8 +49,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(() => {
     clearSession()
-    setSession(null)
-    navigate('/', { replace: true })
+    // Leave the guarded page before dropping the principal, or RequireAdmin redirects to /signin.
+    void Promise.resolve(navigate('/', { replace: true })).then(() => setSession(null))
   }, [navigate])
 
   const value = useMemo<AuthValue>(

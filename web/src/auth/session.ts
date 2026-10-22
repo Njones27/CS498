@@ -24,3 +24,18 @@ export function saveSession(s: Session): void {
 export function clearSession(): void {
   sessionStorage.removeItem(KEY)
 }
+
+const FLASH_KEY = 'parking.flash'
+
+/** One-shot message shown on the next sign-in page render (e.g. session expired). */
+export function setFlash(message: string): void {
+  sessionStorage.setItem(FLASH_KEY, message)
+}
+
+export function peekFlash(): string | null {
+  return sessionStorage.getItem(FLASH_KEY)
+}
+
+export function clearFlash(): void {
+  sessionStorage.removeItem(FLASH_KEY)
+}

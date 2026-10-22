@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react'
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect, useState, type FormEvent } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ApiError, errorMessage } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { clearFlash, peekFlash } from '../auth/session'
 
 /** Only same-app paths may be used as a post-login destination. */
 function safeNext(next: string | null): string {
@@ -11,9 +12,9 @@ function safeNext(next: string | null): string {
 export function SignInPage() {
   const { signIn } = useAuth()
   const navigate = useNavigate()
-  const location = useLocation()
   const [params] = useSearchParams()
-  const notice = (location.state as { message?: string } | null)?.message
+  const [notice] = useState(peekFlash)
+  useEffect(clearFlash, [])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
