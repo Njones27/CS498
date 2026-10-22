@@ -19,7 +19,7 @@ from enum import Enum
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Attr, Key
+from boto3.dynamodb.conditions import Key
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from pydantic import BaseModel
@@ -103,7 +103,8 @@ def item_to_model[M: BaseModel](item: dict[str, Any], cls: type[M]) -> M:
 
 
 def lot_item(lot: Lot) -> dict[str, Any]:
-    return model_to_item(lot, k.lot_pk(lot.lot_id), k.META)
+    gpk, gsk = k.gsi1_lot(lot.lot_id)
+    return model_to_item(lot, k.lot_pk(lot.lot_id), k.META, **{k.GSI1PK: gpk, k.GSI1SK: gsk})
 
 
 def space_item(space: ParkingSpace) -> dict[str, Any]:
@@ -119,12 +120,8 @@ def layout_item(layout: LayoutVersion) -> dict[str, Any]:
 
 
 def snapshot_item(snap: Snapshot) -> dict[str, Any]:
-    return model_to_item(
-        snap,
-        k.image_pk(snap.image_id),
-        k.META,
-        **{k.GSI1PK: k.lot_pk(snap.lot_id), k.GSI1SK: format_dt(snap.capture_time)},
-    )
+    gpk, gsk = k.gsi1_snapshot(snap.lot_id, snap.capture_time, snap.image_id)
+    return model_to_item(snap, k.image_pk(snap.image_id), k.META, **{k.GSI1PK: gpk, k.GSI1SK: gsk})
 
 
 def observation_item(obs: SpaceObservation) -> dict[str, Any]:
@@ -284,15 +281,16 @@ class DynamoRepository:
     def list_lots(self) -> list[Lot]:
         items: list[dict[str, Any]] = []
         kwargs: dict[str, Any] = {
-            "FilterExpression": Attr(k.SK).eq(k.META) & Attr(k.PK).begins_with("LOT#")
+            "IndexName": k.GSI1,
+            "KeyConditionExpression": Key(k.GSI1PK).eq(k.LOTS_INDEX_PK),
         }
         while True:
-            resp = self._table.scan(**kwargs)
+            resp = self._table.query(**kwargs)
             items.extend(resp.get("Items", []))
             if "LastEvaluatedKey" not in resp:
                 break
             kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
-        return sorted((item_to_model(i, Lot) for i in items), key=lambda lot: lot.lot_id)
+        return [item_to_model(i, Lot) for i in items]
 
     def put_spaces(self, spaces: Iterable[ParkingSpace]) -> None:
         self._put_many(space_item(s) for s in spaces)

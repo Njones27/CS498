@@ -160,7 +160,7 @@ def test_queue_receive_count_and_visibility():
 
 
 def test_object_store_test_upload():
-    adapters = build_memory_adapters(Settings(app_env="test"))
+    adapters = build_memory_adapters(Settings(app_env="test", _env_file=None))
     store = adapters.object_store
     key = raw_photo_key("L", "v", "img-1", "png")
     assert image_id_from_raw_key(key) == "img-1"
@@ -180,7 +180,8 @@ def test_snapshot_item_round_trip():
     item = aws.snapshot_item(s)
     assert item["PK"] == "IMG#i1" and item["SK"] == "META"
     assert item["GSI1PK"] == "LOT#L"
-    assert item["GSI1SK"] == "2026-10-21T12:00:00.000000Z" == item["captureTime"]
+    assert item["GSI1SK"] == "2026-10-21T12:00:00.000000#i1"
+    assert item["captureTime"] == "2026-10-21T12:00:00.000000Z"
     assert item["jobStatus"] == "UPLOAD_PENDING"
     assert aws.item_to_model(item, Snapshot) == s
 
@@ -239,4 +240,5 @@ def test_lot_item_keys():
     lot = Lot(lot_id="L", name="Lot", created_at=NOW, current_layout_version=2)
     item = aws.lot_item(lot)
     assert (item["PK"], item["SK"]) == ("LOT#L", "META")
+    assert (item["GSI1PK"], item["GSI1SK"]) == ("LOTS", "L")
     assert aws.item_to_model(item, Lot) == lot

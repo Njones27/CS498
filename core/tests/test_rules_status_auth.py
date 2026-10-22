@@ -233,7 +233,7 @@ def test_jwt_malformed(token):
 
 
 def test_dev_users():
-    users = dev_users(Settings(app_env="test"))
-    s = Settings(app_env="test")
+    users = dev_users(Settings(app_env="test", _env_file=None))
+    s = Settings(app_env="test", _env_file=None)
     assert users[s.dev_admin_email] == (s.dev_admin_password, ["admin"])
     assert users[s.dev_user_email] == (s.dev_user_password, [])
