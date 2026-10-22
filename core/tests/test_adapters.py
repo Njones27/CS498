@@ -15,6 +15,7 @@ from parking_core.adapters.memory import (
 from parking_core.errors import NotPublishedError
 from parking_core.keys import layout_snapshot_key, raw_photo_key
 from parking_core.models import (
+    CarBox,
     JobStatus,
     LayoutVersion,
     Lot,
@@ -215,6 +216,69 @@ def test_float_fields_become_decimal_and_back():
     st = status(NOW)
     assert aws.status_item(st)["SK"] == "STATUS#s1"
     assert aws.item_to_model(aws.status_item(st), SpaceStatus) == st
+
+
+BOX = CarBox(cls_name="car", conf=0.87, box=(0.1, 0.2, 0.35, 0.5))
+TRUCK = CarBox(cls_name="truck", conf=0.4, box=(0.6, 0.6, 0.9, 1.0))
+
+
+def overlay_observation() -> SpaceObservation:
+    return SpaceObservation(
+        image_id="i1",
+        lot_id="L",
+        space_id="s1",
+        state=SpaceState.OCCUPIED,
+        acpds_score=0.93,
+        car_overlap=0.71,
+        capture_time=NOW,
+        polygon=[(0.1, 0.2), (0.3, 0.2), (0.3, 0.45), (0.1, 0.45)],
+        car_boxes=[BOX],
+    )
+
+
+def test_overlay_fields_round_trip_memory(repo):
+    repo.put_snapshot(snap(status=JobStatus.PROCESSING))
+    assert repo.get_snapshot("i1").detections == []  # default for older records
+    assert repo.transition_job(
+        "i1", {JobStatus.PROCESSING}, JobStatus.COMPLETE, detections=[BOX, TRUCK]
+    )
+    assert repo.get_snapshot("i1").detections == [BOX, TRUCK]
+    obs = overlay_observation()
+    repo.put_observations([obs])
+    assert repo.list_observations("i1") == [obs]
+
+
+def test_overlay_fields_round_trip_dynamo_items():
+    s = snap().model_copy(update={"detections": [BOX, TRUCK]})
+    item = aws.snapshot_item(s)
+    assert item["detections"][0] == {
+        "clsName": "car",
+        "conf": Decimal("0.87"),
+        "box": [Decimal("0.1"), Decimal("0.2"), Decimal("0.35"), Decimal("0.5")],
+    }
+    assert aws.item_to_model(item, Snapshot) == s
+
+    obs = overlay_observation()
+    item = aws.observation_item(obs)
+    assert item["polygon"][1] == [Decimal("0.3"), Decimal("0.2")]
+    assert item["carBoxes"][0]["box"][2] == Decimal("0.35")
+    assert aws.item_to_model(item, SpaceObservation) == obs
+
+    # Items written before the overlay existed still load.
+    old = {k: v for k, v in item.items() if k not in {"polygon", "carBoxes"}}
+    loaded = aws.item_to_model(old, SpaceObservation)
+    assert loaded.polygon is None and loaded.car_boxes == []
+
+    upd = aws.transition_update({JobStatus.PROCESSING}, JobStatus.COMPLETE, {"detections": [BOX]})
+    assert upd["ExpressionAttributeNames"]["#f0"] == "detections"
+    assert upd["ExpressionAttributeValues"][":f0"] == [aws.to_dynamo(BOX)]
+    assert upd["ExpressionAttributeValues"][":f0"][0]["conf"] == Decimal("0.87")
+
+
+def test_memory_presign_get_points_at_test_route():
+    store = MemoryObjectStore()
+    key = raw_photo_key("L", "v", "img-1")
+    assert store.presign_get(key) == f"/api/_test/objects/{key}"
 
 
 def test_format_dt_is_sortable():

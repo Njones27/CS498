@@ -8,6 +8,7 @@ import pytest
 from conftest import LOT, T0, V1_SPACES, World
 from parking_core.errors import AlignmentError, PermanentJobError, RetryableJobError
 from parking_core.models import (
+    CarBox,
     Cutoffs,
     JobStatus,
     SpaceScore,
@@ -61,6 +62,43 @@ def test_happy_path_writes_only_this_viewpoint(world: World):
     assert snap.processing_ms is not None and snap.processing_ms >= 0
     assert snap.completed_at is not None
     assert len(world.queue) == 0
+
+
+def test_complete_job_stores_outlines_and_car_boxes(world: World):
+    world.add_snapshot("img-1", view_id="V1")
+    a01 = CarBox(cls_name="car", conf=0.91, box=(0.0, 0.05, 0.06, 0.25))
+    stray = CarBox(cls_name="truck", conf=0.4, box=(0.9, 0.9, 1.0, 1.0))  # touches no space
+    boxes = {"A-01": [a01]}
+    scorer = FakeScorer(
+        lambda o: SpaceScore(
+            space_id=o.space_id,
+            acpds_score=0.9,
+            car_overlap=1.0 if o.space_id in boxes else 0.0,
+            car_boxes=boxes.get(o.space_id, []),
+        ),
+        detections=[a01, stray],
+    )
+    assert step(world, scorer=scorer).outcome == "completed"
+
+    snap = world.repo.get_snapshot("img-1")
+    assert snap.detections == [a01, stray]
+    viewpoint = world.repo.get_viewpoint(LOT, "V1")
+    obs = {o.space_id: o for o in world.repo.list_observations("img-1")}
+    assert sorted(obs) == sorted(V1_SPACES)
+    for space_id, o in obs.items():
+        assert o.polygon == viewpoint.outlines[space_id]  # the aligned outline
+        assert o.car_boxes == boxes.get(space_id, [])
+
+
+def test_failed_job_stores_no_detections(world: World):
+    world.add_snapshot("img-1")
+    step(
+        world,
+        aligner=FailingAligner(),
+        scorer=FakeScorer(detections=[CarBox(cls_name="car", conf=1, box=(0, 0, 1, 1))]),
+    )
+    snap = world.repo.get_snapshot("img-1")
+    assert snap.job_status is JobStatus.FAILED and snap.detections == []
 
 
 def test_reprocessing_same_message_is_noop(world: World):

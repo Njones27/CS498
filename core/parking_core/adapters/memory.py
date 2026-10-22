@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import quote
 
 from ..auth import HS256Verifier
 from ..errors import NotPublishedError
@@ -36,6 +37,7 @@ from ..models import (
 from ..settings import Adapters, Settings
 
 TEST_UPLOAD_PREFIX = "/api/_test/uploads/"
+TEST_OBJECT_PREFIX = "/api/_test/objects/"
 
 
 def image_id_from_raw_key(key: str) -> str:
@@ -84,7 +86,8 @@ class MemoryObjectStore:
         return f"{TEST_UPLOAD_PREFIX}{image_id}"
 
     def presign_get(self, key: str, expires_seconds: int = 300) -> str:
-        return f"memory://{key}"
+        """Served by the test-only route GET /_test/objects/{key} (APP_ENV=test)."""
+        return f"{TEST_OBJECT_PREFIX}{quote(key, safe='/')}"
 
     def put_for_image(self, image_id: str, data: bytes, content_type: str) -> bool:
         """Store bytes under the key registered by `presign_put`. False if none was."""

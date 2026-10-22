@@ -13,6 +13,7 @@ from typing import Protocol
 
 from .models import (
     AlignedOutline,
+    CarBox,
     ClaimResult,
     Closure,
     JobStatus,
@@ -145,6 +146,9 @@ class Aligner(Protocol):
 
 class SpaceScorer(Protocol):
     model_version: str
+    last_detections: list[CarBox]
+    """Every detection (any class) on the photo passed to the last `score` call, as photo
+    fractions. A debug view: only car classes feed `SpaceScore.car_boxes` and car overlap."""
 
     def score(self, image: bytes, outlines: list[AlignedOutline]) -> list[SpaceScore]: ...
 

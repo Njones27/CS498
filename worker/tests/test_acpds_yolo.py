@@ -26,6 +26,7 @@ from parking_worker.scorers.acpds_yolo import (
     Detection,
     acpds_rois,
     bgr_to_rgb_chw,
+    car_coverage,
     car_overlaps,
     decode_photo,
     header_size,
@@ -179,6 +180,56 @@ def test_score_combines_acpds_and_overlap_in_input_order():
     assert out[0].car_overlap == 1.0 and out[1].car_overlap == 0.0
     assert out[0].acpds_score > 0.99 and out[1].acpds_score < 0.01
     assert detector.calls == 1
+
+
+def test_score_reports_car_boxes_per_space_and_last_detections():
+    pytest.importorskip("torch")
+    near = car((20, 20, 60, 60), conf=0.8)  # covers S1
+    corner = car((70, 70, 90, 90), cls_name="truck", conf=0.5)  # clips S2's corner
+    beside = car((60, 20, 80, 60), conf=0.6)  # touches S1's right edge, covers none of it
+    phone = car((20, 20, 60, 60), cls_name="cell phone", conf=0.7)  # a top-down car, misread
+    faint = car((0, 0, 100, 100), conf=0.1)  # below yolo_conf: dropped everywhere
+    detector = FakeDetector([near, corner, beside, phone, faint])
+    s2 = [(0.8, 0.8), (0.95, 0.8), (0.95, 0.95), (0.8, 0.95)]
+    s3 = [(0.0, 0.8), (0.1, 0.8), (0.1, 0.95), (0.0, 0.95)]
+    sc = scorer(detector=detector)
+    out = sc.score(png(blank()), [outline("S1"), outline("S2", s2), outline("S3", s3)])
+
+    # Every class above yolo_conf is reported for the overlay, the misread phone included...
+    assert [(d.cls_name, d.conf) for d in sc.last_detections] == [
+        ("car", 0.8),
+        ("truck", 0.5),
+        ("car", 0.6),
+        ("cell phone", 0.7),
+    ]
+    assert sc.last_detections[0].box == pytest.approx((0.2, 0.2, 0.6, 0.6))
+    assert sc.last_detections[1].box == pytest.approx((0.7, 0.7, 0.9, 0.9))
+    by_id = {s.space_id: s for s in out}
+    # ...but only cars, trucks and buses become per-space car boxes and car overlap.
+    assert by_id["S1"].car_boxes == [sc.last_detections[0]]
+    assert all(b.cls_name != "cell phone" for s in out for b in s.car_boxes)
+    assert by_id["S2"].car_boxes == [sc.last_detections[1]]
+    assert by_id["S2"].car_overlap > 0
+    assert by_id["S3"].car_boxes == [] and by_id["S3"].car_overlap == 0.0
+
+    assert sc.score(png(blank()), []) == [] and sc.last_detections == []
+
+
+def test_non_car_detections_never_count_as_cars():
+    pytest.importorskip("torch")
+    phone = car((20, 20, 60, 60), cls_name="cell phone", conf=0.9)
+    sc = scorer(detector=FakeDetector([phone]))
+    [s1] = sc.score(png(blank()), [outline("S1")])
+    assert s1.car_overlap == 0.0 and s1.car_boxes == []
+    assert [d.cls_name for d in sc.last_detections] == ["cell phone"]
+
+
+def test_car_coverage_lists_only_touching_cars():
+    cars = [car((20, 20, 40, 60)), car((60, 20, 80, 60)), car((50, 20, 70, 60))]
+    [(best, touching)] = car_coverage([outline()], cars, W, H)
+    assert best == pytest.approx(0.5, abs=0.02)
+    assert touching == [0, 2]  # the box starting at the space's right edge does not touch
+    assert car_coverage([outline(polygon=[(0.3, 0.3)] * 4)], cars, W, H) == [(0.0, [])]
 
 
 def test_out_of_frame_space_gets_no_acpds_score_and_is_never_free():

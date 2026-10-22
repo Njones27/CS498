@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/_test/objects/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve a stored object the way a presigned GET would */
+        get: operations["test_object__test_objects__key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/_test/uploads/{image_id}": {
         parameters: {
             query?: never;
@@ -80,7 +97,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One snapshot with its observations */
+        /** One snapshot with its observations, car detections and a photo URL */
         get: operations["get_snapshot_admin_snapshots__image_id__get"];
         put?: never;
         post?: never;
@@ -230,6 +247,21 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** CarBoxOut */
+        CarBoxOut: {
+            /**
+             * Box
+             * @description [x1, y1, x2, y2] as fractions of the photo size
+             */
+            box: number[];
+            /**
+             * Clsname
+             * @description Detector class, e.g. car, truck, bus, or a non-car class such as cell phone
+             */
+            clsName: string;
+            /** Conf */
+            conf: number;
+        };
         /** ClosureCreate */
         ClosureCreate: {
             /**
@@ -459,10 +491,23 @@ export interface components {
         ObservationOut: {
             /** Acpdsscore */
             acpdsScore: number | null;
+            /**
+             * Carboxes
+             * @description Car/truck/bus detections that touch this space
+             */
+            carBoxes: components["schemas"]["CarBoxOut"][];
             /** Caroverlap */
             carOverlap: number | null;
             /** Inframe */
             inFrame: boolean;
+            /**
+             * Polygon
+             * @description Aligned outline on this photo as [x, y] fractions; null on older observations
+             */
+            polygon: [
+                number,
+                number
+            ][] | null;
             /** Spaceid */
             spaceId: string;
             state: components["schemas"]["SpaceState"];
@@ -509,6 +554,11 @@ export interface components {
              * Format: date-time
              */
             createdAt: string;
+            /**
+             * Detections
+             * @description Every detection on the photo, any class (debug view; only car, truck and bus count towards car overlap)
+             */
+            detections: components["schemas"]["CarBoxOut"][];
             /** Error */
             error: string | null;
             /** Finished */
@@ -528,6 +578,11 @@ export interface components {
             modelVersion: string | null;
             /** Observations */
             observations: components["schemas"]["ObservationOut"][];
+            /**
+             * Photourl
+             * @description Short-lived URL for the uploaded photo; null when it is not in storage
+             */
+            photoUrl: string | null;
             /** Processingms */
             processingMs: number | null;
             /** Viewid */
@@ -672,6 +727,44 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    test_object__test_objects__key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stored bytes with their content type */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     test_upload__test_uploads__image_id__put: {
         parameters: {
             query?: never;

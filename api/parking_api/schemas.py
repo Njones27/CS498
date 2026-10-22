@@ -195,13 +195,34 @@ class SnapshotOut(CamelModel):
     created_at: datetime
 
 
+class CarBoxOut(CamelModel):
+    cls_name: str = Field(
+        description="Detector class, e.g. car, truck, bus, or a non-car class such as cell phone"
+    )
+    conf: float
+    box: list[float] = Field(
+        min_length=4, max_length=4, description="[x1, y1, x2, y2] as fractions of the photo size"
+    )
+
+
 class ObservationOut(CamelModel):
     space_id: str
     state: SpaceState
     acpds_score: float | None
     car_overlap: float | None
     in_frame: bool
+    polygon: list[tuple[float, float]] | None = Field(
+        description="Aligned outline on this photo as [x, y] fractions; null on older observations"
+    )
+    car_boxes: list[CarBoxOut] = Field(description="Car/truck/bus detections that touch this space")
 
 
 class SnapshotDetail(SnapshotOut):
     observations: list[ObservationOut]
+    detections: list[CarBoxOut] = Field(
+        description="Every detection on the photo, any class (debug view; only car, truck and bus "
+        "count towards car overlap)"
+    )
+    photo_url: str | None = Field(
+        description="Short-lived URL for the uploaded photo; null when it is not in storage"
+    )

@@ -129,6 +129,16 @@ class LayoutVersion(CamelModel):
     snapshot_key: str
 
 
+class CarBox(CamelModel):
+    """One object detection on a photo (any class, e.g. car or a misread "cell phone"), kept
+    for the admin photo overlay. Only car/truck/bus count towards car overlap."""
+
+    cls_name: str
+    conf: float
+    box: tuple[float, float, float, float]
+    """(x1, y1, x2, y2) as fractions of the photo size, like `Point`."""
+
+
 class Snapshot(CamelModel):
     """One uploaded photo plus its job record (HDD §1.3, §5.1)."""
 
@@ -153,6 +163,9 @@ class Snapshot(CamelModel):
     created_at: datetime
     queued_at: datetime | None = None
     completed_at: datetime | None = None
+    detections: list[CarBox] = Field(default_factory=list)
+    """Every detection on the photo at the detector's confidence floor, any class (set on
+    COMPLETE), including ones touching no space."""
 
 
 def effective_status(snapshot: Snapshot, now: datetime) -> str:
@@ -174,6 +187,10 @@ class SpaceObservation(CamelModel):
     car_overlap: float | None = None
     in_frame: bool = True
     capture_time: datetime
+    polygon: Polygon | None = None
+    """The space's aligned outline on this photo (fractions); None on older observations."""
+    car_boxes: list[CarBox] = Field(default_factory=list)
+    """Car/truck/bus detections that touch this space (overlap > 0)."""
 
 
 class SpaceStatus(CamelModel):
@@ -240,6 +257,8 @@ class SpaceScore(CamelModel):
     acpds_score: float | None = None
     car_overlap: float | None = None
     in_frame: bool = True
+    car_boxes: list[CarBox] = Field(default_factory=list)
+    """Car/truck/bus detections whose car region overlaps this space (overlap > 0)."""
 
 
 class Message(CamelModel):

@@ -32,7 +32,7 @@ function rememberedLot(): string {
 }
 
 type Outcome =
-  | { kind: 'success' }
+  | { kind: 'success'; imageId: string }
   | { kind: 'duplicate'; uploadedAt: string | null | undefined; imageId: string | null | undefined }
   | { kind: 'error'; message: string }
 
@@ -122,7 +122,7 @@ export function UploadPage() {
       const slot = await api.post<UploadSlot>('/admin/uploads', body)
       await putFile(slot.uploadUrl, file, setProgress)
       await api.post<UploadCompleteResponse>(`/admin/uploads/${encodeURIComponent(slot.imageId)}/complete`)
-      setOutcome({ kind: 'success' })
+      setOutcome({ kind: 'success', imageId: slot.imageId })
     } catch (err) {
       setProgress(null)
       if (err instanceof ApiError && err.status === 409 && err.code === 'duplicate') {
@@ -212,7 +212,8 @@ export function UploadPage() {
       </form>
       {outcome?.kind === 'success' && (
         <p className="notice notice--ok" role="status">
-          Photo queued for processing
+          <span>Photo queued for processing</span>{' '}
+          <Link to={`/admin/snapshots/${encodeURIComponent(outcome.imageId)}/photo`}>View the photo with results</Link>
         </p>
       )}
       {outcome?.kind === 'duplicate' && (

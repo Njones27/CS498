@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Query
-from parking_core.models import JobStatus, Snapshot, effective_status
+from parking_core.models import CarBox, JobStatus, Snapshot, effective_status
 
 from ..deps import AdaptersDep, AdminDep, NowDep, error
 from ..jobs import enqueue_job
-from ..schemas import ErrorResponse, ObservationOut, SnapshotDetail, SnapshotOut
+from ..schemas import CarBoxOut, ErrorResponse, ObservationOut, SnapshotDetail, SnapshotOut
 
 router = APIRouter(prefix="/admin/snapshots", tags=["admin"])
 
@@ -57,7 +57,7 @@ def list_snapshots(
         403: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
     },
-    summary="One snapshot with its observations",
+    summary="One snapshot with its observations, car detections and a photo URL",
 )
 def get_snapshot(
     image_id: str, admin: AdminDep, adapters: AdaptersDep, now: NowDep
@@ -73,10 +73,23 @@ def get_snapshot(
             acpds_score=o.acpds_score,
             car_overlap=o.car_overlap,
             in_frame=o.in_frame,
+            polygon=o.polygon,
+            car_boxes=[car_box_out(b) for b in o.car_boxes],
         )
         for o in repo.list_observations(image_id)
     ]
-    return SnapshotDetail(**snapshot_out(snap, now), observations=observations)
+    store = adapters.object_store
+    photo_url = store.presign_get(snap.s3_key) if store.exists(snap.s3_key) else None
+    return SnapshotDetail(
+        **snapshot_out(snap, now),
+        observations=observations,
+        detections=[car_box_out(b) for b in snap.detections],
+        photo_url=photo_url,
+    )
+
+
+def car_box_out(box: CarBox) -> CarBoxOut:
+    return CarBoxOut(cls_name=box.cls_name, conf=box.conf, box=list(box.box))
 
 
 @router.post(

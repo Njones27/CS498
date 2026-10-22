@@ -7,6 +7,7 @@ import { ClosuresPage } from './pages/ClosuresPage'
 import { LotListPage } from './pages/LotListPage'
 import { LotMapPage } from './pages/LotMapPage'
 import { SignInPage } from './pages/SignInPage'
+import { SnapshotPhotoPage } from './pages/SnapshotPhotoPage'
 import { SnapshotsPlaceholderPage } from './pages/SnapshotsPlaceholderPage'
 import { UploadPage } from './pages/UploadPage'
 
@@ -22,6 +23,7 @@ export function AppRoutes() {
           <Route path="/admin" element={<RequireAdmin><AdminHomePage /></RequireAdmin>} />
           <Route path="/admin/upload" element={<RequireAdmin><UploadPage /></RequireAdmin>} />
           <Route path="/admin/snapshots" element={<RequireAdmin><SnapshotsPlaceholderPage /></RequireAdmin>} />
+          <Route path="/admin/snapshots/:imageId/photo" element={<RequireAdmin><SnapshotPhotoPage /></RequireAdmin>} />
           <Route path="/admin/closures" element={<RequireAdmin><ClosuresPage /></RequireAdmin>} />
           <Route path="*" element={<main className="page"><h1>Page not found</h1></main>} />
         </Route>
