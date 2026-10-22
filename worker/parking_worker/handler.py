@@ -32,8 +32,15 @@ MAX_ATTEMPTS = 3
 EXHAUSTED_ERROR = f"Failed after {MAX_ATTEMPTS} attempts"
 
 Outcome = Literal[
-    "completed", "skipped", "failed_permanent", "failed_retryable", "failed_exhausted"
+    "completed",
+    "skipped",
+    "deferred",
+    "failed_permanent",
+    "failed_retryable",
+    "failed_exhausted",
 ]
+"""`skipped`: the job is finished or unknown, message dropped. `deferred`: the job exists but
+could not be claimed (not queued yet, or another worker holds it); message left for redelivery."""
 
 # A job may be (re)claimed from these states. FAILED is included only for jobs that
 # are not finished (a retryable failure awaiting redelivery); see `_claim`.
@@ -64,17 +71,21 @@ def process_message(
         adapters.queue.delete(msg.receipt)
         return ProcessResult(None, "failed_permanent", "Malformed job message")
 
-    if not _claim(adapters, image_id):
+    claim = _claim(adapters, image_id)
+    if claim == "skip":
         log.info("Job %s already finished or unknown; skipping", image_id)
         adapters.queue.delete(msg.receipt)
         return ProcessResult(image_id, "skipped")
+    if claim == "defer":
+        log.info("Job %s not claimable right now; leaving message for redelivery", image_id)
+        return ProcessResult(image_id, "deferred")
 
     started = time.monotonic()
     try:
         written, layout_version = _run(image_id, adapters, aligner, scorer, cutoffs)
     except PermanentJobError as exc:
         log.warning("Job %s failed permanently: %s", image_id, exc)
-        repo.transition_job(
+        moved = repo.transition_job(
             image_id,
             {JobStatus.PROCESSING},
             JobStatus.FAILED,
@@ -83,12 +94,12 @@ def process_message(
             attempts=msg.receive_count,
             completed_at=now(),
         )
-        adapters.queue.delete(msg.receipt)
+        _settle(adapters, msg, image_id, moved)
         return ProcessResult(image_id, "failed_permanent", str(exc))
     except Exception as exc:
         if msg.receive_count >= MAX_ATTEMPTS:
             log.exception("Job %s exhausted retries; last error: %s", image_id, exc)
-            repo.transition_job(
+            moved = repo.transition_job(
                 image_id,
                 {JobStatus.PROCESSING},
                 JobStatus.FAILED,
@@ -97,7 +108,7 @@ def process_message(
                 attempts=msg.receive_count,
                 completed_at=now(),
             )
-            adapters.queue.delete(msg.receipt)
+            _settle(adapters, msg, image_id, moved)
             return ProcessResult(image_id, "failed_exhausted", EXHAUSTED_ERROR)
         log.warning("Job %s attempt %d failed, will retry: %s", image_id, msg.receive_count, exc)
         repo.transition_job(
@@ -110,7 +121,7 @@ def process_message(
         )
         return ProcessResult(image_id, "failed_retryable", str(exc))
 
-    repo.transition_job(
+    moved = repo.transition_job(
         image_id,
         {JobStatus.PROCESSING},
         JobStatus.COMPLETE,
@@ -122,20 +133,40 @@ def process_message(
         model_version=scorer.model_version,
         layout_version=layout_version,
     )
-    adapters.queue.delete(msg.receipt)
+    if not moved:
+        # Another worker changed the job while we ran (visibility timeout expired). Our
+        # observation/status writes were idempotent and conditional, so nothing is lost.
+        log.warning("Job %s changed under us; final COMPLETE transition rejected", image_id)
+    _settle(adapters, msg, image_id, moved)
     log.info("Job %s complete: %d spaces", image_id, written)
     return ProcessResult(image_id, "completed", spaces_written=written)
 
 
-def _claim(adapters: Adapters, image_id: str) -> bool:
-    """Move the job to PROCESSING unless it is finished or unknown.
+def _settle(adapters: Adapters, msg: Message, image_id: str, transitioned: bool) -> None:
+    """Delete the message once the job is finished. If our final transition lost a race,
+    re-read the job and keep the message unless someone else finished it."""
+    if transitioned:
+        adapters.queue.delete(msg.receipt)
+        return
+    snapshot = adapters.repository.get_snapshot(image_id)
+    if snapshot is None or snapshot.finished:
+        adapters.queue.delete(msg.receipt)
 
-    A redelivered message for a job stuck in PROCESSING (worker died) is re-claimed.
+
+def _claim(adapters: Adapters, image_id: str) -> Literal["claimed", "skip", "defer"]:
+    """Move the job to PROCESSING.
+
+    "skip" when the job is unknown or already finished (drop the message); "defer" when it
+    exists but is not claimable yet (still UPLOAD_PENDING, or the conditional write lost a
+    race), so the message stays on the queue. A redelivered message for a job stuck in
+    PROCESSING (worker died) is re-claimed.
     """
     snapshot = adapters.repository.get_snapshot(image_id)
     if snapshot is None or snapshot.finished:
-        return False
-    return adapters.repository.transition_job(image_id, _CLAIMABLE, JobStatus.PROCESSING)
+        return "skip"
+    if adapters.repository.transition_job(image_id, _CLAIMABLE, JobStatus.PROCESSING):
+        return "claimed"
+    return "defer"
 
 
 def _run(

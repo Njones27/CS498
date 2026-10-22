@@ -242,3 +242,27 @@ def test_build_scorer():
     assert isinstance(build_scorer(Settings(app_env="test", _env_file=None)), StubScorer)
     with pytest.raises(NotImplementedError):
         build_scorer(Settings(app_env="test", detector="acpds_yolo", _env_file=None))
+
+
+def test_message_for_pending_upload_is_deferred(world: World):
+    snap = world.add_snapshot("img-1")
+    world.repo.put_snapshot(snap.model_copy(update={"job_status": JobStatus.UPLOAD_PENDING}))
+    assert step(world).outcome == "deferred"
+    assert len(world.queue) == 1  # left for redelivery, not dropped
+    assert world.repo.get_snapshot("img-1").job_status is JobStatus.UPLOAD_PENDING
+
+
+def test_lost_final_transition_keeps_message_unless_finished(world: World, monkeypatch):
+    world.add_snapshot("img-1")
+    real = world.repo.transition_job
+
+    def racing(image_id, from_states, to_state, **fields):
+        if to_state is JobStatus.COMPLETE:
+            # another worker recorded a retryable failure while we were scoring
+            real(image_id, {JobStatus.PROCESSING}, JobStatus.FAILED, finished=False, error="x")
+        return real(image_id, from_states, to_state, **fields)
+
+    monkeypatch.setattr(world.repo, "transition_job", racing)
+    assert step(world).outcome == "completed"
+    assert len(world.queue) == 1  # job is unfinished, so the message is kept
+    assert world.repo.get_snapshot("img-1").finished is False
