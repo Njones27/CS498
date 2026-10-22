@@ -20,6 +20,7 @@ from .models import (
     Message,
     ParkingSpace,
     Principal,
+    PublishedLayout,
     Snapshot,
     SpaceObservation,
     SpaceScore,
@@ -59,6 +60,10 @@ class Repository(Protocol):
     def list_layout_versions(self, lot_id: str) -> list[LayoutVersion]: ...
     def publish_layout(self, lot_id: str, layout: LayoutVersion) -> None:
         """Write the LayoutVersion item and move currentLayoutVersion in one transaction."""
+        ...
+
+    def get_published_layout(self, lot_id: str) -> PublishedLayout | None:
+        """The lot's current layout snapshot from the object store; None if unpublished."""
         ...
 
     # Snapshots and jobs
