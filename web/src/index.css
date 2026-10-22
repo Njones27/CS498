@@ -215,10 +215,8 @@ a { color: var(--accent); }
 .photo-label { fill: #fff; stroke: var(--photo-halo); paint-order: stroke; font-weight: 700; pointer-events: none; }
 .photo-box__rect { fill: none; stroke-width: 2; }
 .photo-box--car .photo-box__rect { stroke: var(--photo-car); stroke-dasharray: 8 4; }
-.photo-box--car .photo-box__label { fill: var(--photo-car); }
 /* Non-car classes (debug only): lighter grey, thinner, short dashes, so they read as secondary. */
 .photo-box--other .photo-box__rect { stroke: var(--photo-other); stroke-width: 1.25; stroke-dasharray: 3 4; opacity: 0.85; }
-.photo-box--other .photo-box__label { fill: var(--photo-other); }
 .box-swatch.photo-box--car .photo-box__rect { stroke-dasharray: 4 2; }
 .box-swatch.photo-box--other .photo-box__rect { stroke: #8a94a3; stroke-dasharray: 2 2; }
 .photo-model { margin-top: 0.75rem; overflow-wrap: anywhere; }

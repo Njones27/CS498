@@ -84,8 +84,9 @@ describe('snapshot photo page', () => {
       'B-18: Unknown, ACPDS 0.00, car overlap 0.07, in frame',
     )
     expect(screen.getByTestId('outline-B-19').querySelector('title')).toHaveTextContent('partly out of frame')
-    const labels = Array.from(overlay.querySelectorAll('text.photo-box__label'), (t) => t.textContent)
-    expect(labels).toEqual(['car 0.90', 'car 0.42', 'car 0.90', 'cell phone 0.66'])
+    expect(overlay.querySelectorAll('text.photo-box__label')).toHaveLength(0)
+    const titles = Array.from(overlay.querySelectorAll('[data-testid="detection-box"] title'), (t) => t.textContent)
+    expect(titles).toEqual(['car 0.90', 'car 0.42', 'car 0.90', 'cell phone 0.66'])
     // A non-car class is drawn, labelled with its class, and styled apart from cars.
     const phone = overlay.querySelector('[data-class="cell phone"]')
     expect(phone).toHaveClass('photo-box--other')
@@ -118,7 +119,7 @@ describe('snapshot photo page', () => {
     ])
   })
 
-  it('hides car boxes and outlines with their toggles', async () => {
+  it('always draws detection boxes and hides outlines with their toggle', async () => {
     mockFetch({ [API]: { body: complete } })
     renderApp(URL, ADMIN)
     await screen.findByRole('heading', { name: /Photo: drone-lot/ })
@@ -126,14 +127,11 @@ describe('snapshot photo page', () => {
     const user = userEvent.setup()
     const overlay = () => screen.getByTestId('photo-overlay')
 
-    await user.click(screen.getByRole('checkbox', { name: 'Detections' }))
-    expect(overlay().querySelectorAll('rect.photo-box__rect')).toHaveLength(0)
-    expect(overlay().querySelectorAll('polygon.photo-space__line')).toHaveLength(3)
+    expect(screen.queryByRole('checkbox', { name: 'Detections' })).not.toBeInTheDocument()
+    expect(overlay().querySelectorAll('rect.photo-box__rect')).toHaveLength(4)
 
     await user.click(screen.getByRole('checkbox', { name: 'Outlines' }))
     expect(overlay().querySelectorAll('polygon')).toHaveLength(0)
-
-    await user.click(screen.getByRole('checkbox', { name: 'Detections' }))
     expect(overlay().querySelectorAll('rect.photo-box__rect')).toHaveLength(4)
   })
 

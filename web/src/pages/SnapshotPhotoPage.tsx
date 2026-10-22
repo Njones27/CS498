@@ -30,7 +30,6 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
   const path = `/admin/snapshots/${encodeURIComponent(imageId)}`
   const snap = useFetch(() => api.get<SnapshotDetail>(path), path)
   const [showOutlines, setShowOutlines] = useState(true)
-  const [showBoxes, setShowBoxes] = useState(true)
   const [size, setSize] = useState<Size | null>(null)
   const [photoFailed, setPhotoFailed] = useState(false)
   // Keep the first photo URL: a presigned URL changes on every poll and would reload the image.
@@ -83,10 +82,6 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
             <input type="checkbox" checked={showOutlines} onChange={(e) => setShowOutlines(e.target.checked)} />
             Outlines
           </label>
-          <label>
-            <input type="checkbox" checked={showBoxes} onChange={(e) => setShowBoxes(e.target.checked)} />
-            Detections
-          </label>
         </div>
       )}
       {settled && !available && (
@@ -107,7 +102,7 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
             <Overlay
               size={size}
               observations={showOutlines ? data.observations : []}
-              boxes={showBoxes ? data.detections : []}
+              boxes={data.detections}
             />
           )}
         </div>
@@ -171,15 +166,6 @@ function Overlay({ size, observations, boxes }: { size: Size; observations: Obse
                 className="photo-box__rect"
                 vectorEffect="non-scaling-stroke"
               />
-              <text
-                x={x1 * w + halo}
-                y={top > font ? top - halo : top + font}
-                fontSize={font * 0.85}
-                strokeWidth={halo}
-                className="photo-label photo-box__label"
-              >
-                {`${b.clsName} ${b.conf.toFixed(2)}`}
-              </text>
             </g>
           )
         })}
@@ -282,8 +268,8 @@ function Legend() {
       </ul>
       <p className="hint">
         Outlines differ by line as well as colour: solid is free, double is occupied, dotted is unknown. Detections are
-        dashed boxes labelled with their class and confidence; only car, truck and bus count towards a space&apos;s car
-        overlap. Hover an outline for its scores.
+        dashed boxes; only car, truck and bus count towards a space&apos;s car overlap. Hover an outline for its scores
+        or a box for its class and confidence.
       </p>
     </section>
   )
