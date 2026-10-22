@@ -9,7 +9,7 @@ from parking_core.interfaces import Aligner, SpaceScorer
 from parking_core.models import Cutoffs
 from parking_core.settings import Adapters, build_adapters, get_settings
 
-from .aligners import IdentityAligner
+from .aligners import build_aligner
 from .handler import ProcessResult, process_message
 from .scorers import build_scorer
 
@@ -53,8 +53,9 @@ def run_forever(
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     settings = get_settings()
+    adapters = build_adapters(settings)
     run_forever(
-        build_adapters(settings), IdentityAligner(), build_scorer(settings), settings.cutoffs
+        adapters, build_aligner(settings, adapters), build_scorer(settings), settings.cutoffs
     )
 
 

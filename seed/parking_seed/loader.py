@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,11 +62,12 @@ def seed_lot(
         created_at=existing.created_at if existing else now,
     )
     spaces = [ParkingSpace.model_validate({**s, "lotId": lot_id}) for s in data["spaces"]]
+    ref_sha = hashlib.sha256(reference_image).hexdigest() if reference_image is not None else ""
     viewpoints = []
     for v in data["viewpoints"]:
         vp = Viewpoint.model_validate({**v, "lotId": lot_id})
         if reference_image is not None:
-            ref_key = keys.reference_image_key(lot_id, vp.view_id)
+            ref_key = keys.reference_image_key(lot_id, vp.view_id, ref_sha)
             store.put(ref_key, reference_image, "image/jpeg")
             vp.reference_image_key = ref_key
         viewpoints.append(vp)

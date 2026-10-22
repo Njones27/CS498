@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 
-const COMING_SOON = ['Snapshots', 'Map', 'Closures']
+const COMING_SOON = ['Snapshots', 'Map']
 
 export function AdminHomePage() {
   return (
@@ -10,6 +10,11 @@ export function AdminHomePage() {
         <li>
           <Link to="/admin/upload" className="admin-link">
             Upload
+          </Link>
+        </li>
+        <li>
+          <Link to="/admin/closures" className="admin-link">
+            Closures
           </Link>
         </li>
         {COMING_SOON.map((name) => (

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -29,7 +30,12 @@ def test_seed_twice_is_idempotent():
     v1 = layout.viewpoint("V1")
     assert v1 is not None and len(v1.outlines) == 10
     assert len(layout.viewpoint("V2").outlines) == 7
-    assert adapters.object_store.exists(keys.reference_image_key("test-lot", "V1"))
+    sha12 = hashlib.sha256(b"ref").hexdigest()[:12]
+    assert v1.reference_image_key == f"reference/test-lot/V1/{sha12}.jpg"
+    assert v1.reference_image_key == keys.reference_image_key(
+        "test-lot", "V1", hashlib.sha256(b"ref").hexdigest()
+    )
+    assert adapters.object_store.exists(v1.reference_image_key)
 
 
 def test_lot_json_outlines_are_normalized():

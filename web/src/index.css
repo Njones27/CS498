@@ -160,3 +160,28 @@ a { color: var(--accent); }
   .page { padding: 0.75rem; }
   .topbar__email { display: none; }
 }
+
+/* Closures page (US-10) */
+.closures-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.closures-toolbar__count { color: var(--muted); margin-right: auto; }
+.closures-list { margin-top: 1.5rem; }
+.closures-table-wrap { overflow-x: auto; }
+.closures-table { width: 100%; border-collapse: collapse; background: var(--surface); }
+.closures-table th, .closures-table td {
+  text-align: left; vertical-align: top; padding: 0.5rem; border-bottom: 1px solid var(--border);
+}
+.closure-status { font-weight: 600; }
+.closure-status--active::before { content: '● '; }
+.closure-status--scheduled::before { content: '◷ '; }
+.closure-status--ended { color: var(--muted); }
+.closure-status--ended::before { content: '✓ '; }
+.modal-backdrop {
+  position: fixed; inset: 0; display: grid; place-items: center; padding: 1rem;
+  background: rgba(28, 36, 48, 0.45); z-index: 10;
+}
+.modal {
+  width: 100%; max-width: 440px; max-height: 100%; overflow-y: auto; padding: 1rem;
+  background: var(--surface); border-radius: 8px; border: 1px solid var(--border);
+}
+.modal__spaces { margin: 0; font-weight: 600; }
+.modal__actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
