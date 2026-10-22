@@ -73,7 +73,7 @@ jobs:
       - name: Start the stack
         run: |
           cp .env.example .env
-          docker compose up --build -d api worker minio elasticmq dynamodb-local
+          docker compose up --build -d api worker rustfs elasticmq dynamodb-local
       - name: Wait for the API
         run: |
           for i in $(seq 1 60); do
@@ -84,6 +84,14 @@ jobs:
           exit 1
       - name: Seed
         run: set -a && . ./.env.ci-host && set +a && uv run python seed/seed.py
+      - name: Bucket allows browser uploads from the web origin (CORS preflight)
+        run: |
+          set -a && . ./.env.ci-host && set +a
+          curl -sS -i -X OPTIONS "http://localhost:9000/$BUCKET_NAME/raw/probe.jpg" \
+            -H "Origin: http://localhost:5173" \
+            -H "Access-Control-Request-Method: PUT" \
+            -H "Access-Control-Request-Headers: content-type" | tee /tmp/cors.txt
+          grep -qi "^access-control-allow-origin: http://localhost:5173" /tmp/cors.txt
       - name: End-to-end test
         run: set -a && . ./.env.ci-host && set +a && RUN_COMPOSE_TESTS=1 uv run pytest -q -m compose tests/compose
       - name: Logs on failure

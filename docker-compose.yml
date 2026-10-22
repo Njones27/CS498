@@ -32,7 +32,7 @@ services:
       timeout: 3s
       retries: 20
     depends_on:
-      minio:
+      rustfs:
         condition: service_healthy
       elasticmq:
         condition: service_started
@@ -48,42 +48,38 @@ services:
     # step ever touches them before that, come back instead of staying dead.
     restart: on-failure
     depends_on:
-      minio:
+      rustfs:
         condition: service_healthy
       elasticmq:
         condition: service_started
       dynamodb-local:
         condition: service_started
 
-  minio:
-    # MinIO stopped publishing free images to Docker Hub (minio/minio is gone). This is
-    # Bitnami's frozen MinIO build: same S3 API and env vars, but no further updates.
-    # Revisit before Phase 2 (alternatives: RustFS, Adobe S3Mock); AWS S3 replaces it anyway.
-    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+  rustfs:
+    # S3-compatible object store standing in for AWS S3 (HDD 7.1 originally named MinIO,
+    # whose free images left Docker Hub). It checks request signatures like S3, so a bad
+    # presigned URL fails here the same way it would on AWS. Bucket CORS is set through
+    # the S3 API by `ensure_resources` (seed), not by env vars.
+    # Fallback if RustFS misbehaves: bitnamilegacy/minio:2025.7.23-debian-12-r5.
+    image: rustfs/rustfs:1.0.3
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-      MINIO_CONSOLE_PORT_NUMBER: "9001"
-      # Browser PUTs to presigned URLs come from the Vite origin.
-      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:5173
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_ACCESS_KEY: ${AWS_ACCESS_KEY_ID:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY:-rustfsadmin}
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - minio_data:/bitnami/minio/data
+      - rustfs_data:/data
     healthcheck:
-      # Plain bash, so it does not depend on curl or an mc alias being in the image.
-      test:
-        - CMD
-        - bash
-        - -c
-        - >-
-          exec 3<>/dev/tcp/127.0.0.1/9000 &&
-          printf 'GET /minio/health/live HTTP/1.0\r\n\r\n' >&3 &&
-          grep -q ' 200 ' <&3
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
       interval: 5s
       timeout: 3s
       retries: 30
+      start_period: 10s
 
   elasticmq:
     image: softwaremill/elasticmq-native:1.6.12
@@ -100,5 +96,5 @@ services:
       - "8001:8000"
 
 volumes:
-  minio_data:
+  rustfs_data:
   web_node_modules:

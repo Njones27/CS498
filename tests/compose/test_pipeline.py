@@ -6,7 +6,7 @@ Run after `docker compose up` and the seed script, with the host env loaded:
     RUN_COMPOSE_TESTS=1 uv run pytest -m compose tests/compose
 
 It drives the real API: sign in, request an upload slot for a fixture photo, PUT the bytes to the
-presigned MinIO URL, complete the upload, wait for the worker, and check the public status.
+presigned RustFS URL, complete the upload, wait for the worker, and check the public status.
 """
 
 from __future__ import annotations

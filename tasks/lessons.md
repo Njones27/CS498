@@ -23,3 +23,6 @@
   `gh pr create` cannot share one turn; a code-reviewer subagent's completion counts.
 - 2026-10-21 Shell: a failing command inside a long `&&` chain silently skips the rest; check
   `git show --stat` after every multi-step commit command.
+- 2026-10-22 `minio/minio` disappeared from Docker Hub (pull access denied). Check that pinned
+  images still exist (Docker Hub tags API) before relying on them; prefer configuring storage
+  through the S3 API (PutBucketCors) over vendor env vars so the emulator stays swappable.

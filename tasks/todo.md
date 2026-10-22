@@ -31,7 +31,7 @@ One photo goes upload -> queue -> worker -> status -> driver map, fully local, s
 - [ ] Left for Nathan Galante: Snapshots page + Retry (US-06), admin lot picker (US-16 #3)
 
 ## Infra (PR 5)
-- [x] `docker-compose.yml` (6 services, MinIO CORS, elasticmq DLQ), `.github/workflows/ci.yml` with compose job
+- [x] `docker-compose.yml` (6 services, RustFS with bucket CORS via the S3 API, elasticmq DLQ), `.github/workflows/ci.yml` with compose job
 - [x] Compose integration test (`tests/compose`, `-m compose`); `scripts/dev_inmemory.py` for Docker-free runs
 
 ## Verification
@@ -41,7 +41,7 @@ One photo goes upload -> queue -> worker -> status -> driver map, fully local, s
 
 ## Review (Oct 21, 2026)
 - Five stacked PRs: contract (#1), core/API/seed (`wave1/backend`), worker (`wave1/worker`), web (`wave1/web`), infra (`wave1/infra`). Each needs a teammate review before merge.
-- Not yet verified anywhere: the boto3 adapters, `ensure_resources`, MinIO path-style presigning and the seed CLI against the compose emulators. The CI compose job is the first real run; expect fixes there.
+- Not yet verified anywhere: the boto3 adapters, `ensure_resources`, RustFS path-style presigning and bucket CORS and the seed CLI against the compose emulators. The CI compose job is the first real run; expect fixes there.
 - Known follow-ups: `Repository.transition_job` needs an atomic "unfinished only" condition so the worker's re-claim of a retryable FAILED job is race-free; `useFetch` has an exhaustive-deps lint warning; `AuthContext.tsx` exports a hook and a component (fast-refresh warning).
 - Open for teammates: Snapshots page + Retry UI (US-06), admin lot picker (US-16 #3), PKLot fixture pair for a real seed lot.
 - Wave 2 next: ACPDS + YOLO26m scorer and ORB alignment behind the existing interfaces, closures CRUD, admin create-lot.

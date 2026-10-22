@@ -1,4 +1,4 @@
-"""boto3 adapters (MinIO / ElasticMQ / DynamoDB Local in Phase 1, AWS in Phase 2).
+"""boto3 adapters (RustFS / ElasticMQ / DynamoDB Local in Phase 1, AWS in Phase 2).
 
 Only endpoint URLs differ between phases. The S3 client used for *presigning* is built with
 `settings.s3_public_endpoint_url` when set, because the hostname is part of the signature.
@@ -620,6 +620,22 @@ def _ensure_bucket(settings: Settings) -> None:
     except ClientError as exc:
         if _error_code(exc) not in {"BucketAlreadyOwnedByYou", "BucketAlreadyExists"}:
             raise
+    # Browsers PUT photos straight to presigned URLs, so the bucket must allow the web
+    # origin. Set through the S3 API so the same code works on RustFS and on AWS S3.
+    client.put_bucket_cors(
+        Bucket=settings.bucket_name,
+        CORSConfiguration={"CORSRules": [bucket_cors_rule(settings)]},
+    )
+
+
+def bucket_cors_rule(settings: Settings) -> dict[str, Any]:
+    return {
+        "AllowedOrigins": list(settings.cors_allowed_origins),
+        "AllowedMethods": ["PUT", "GET", "HEAD"],
+        "AllowedHeaders": ["*"],
+        "ExposeHeaders": ["ETag"],
+        "MaxAgeSeconds": 3000,
+    }
 
 
 def _ensure_queues(settings: Settings) -> None:
