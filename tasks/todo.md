@@ -25,9 +25,9 @@ One photo goes upload -> queue -> worker -> status -> driver map, fully local, s
 - [x] Worker tests listed in the plan
 
 ## Web (PR 4)
-- [ ] Auth (sign-in, guard, expired/non-admin messages, sign out)
-- [ ] Lot list (US-15), lot map (US-01/02), upload form (US-04/05)
-- [ ] Vitest suite; `npm run typecheck`; `npm run build`
+- [x] Auth (sign-in, guard, expired/non-admin messages, sign out)
+- [x] Lot list (US-15), lot map (US-01/02), upload form (US-04/05)
+- [x] Vitest suite; `npm run typecheck`; `npm run build`
 - [ ] Left for Nathan Galante: Snapshots page + Retry (US-06), admin lot picker (US-16 #3)
 
 ## Infra (PR 5)
