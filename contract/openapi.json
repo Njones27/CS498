@@ -1,6 +1,47 @@
 {
   "components": {
     "schemas": {
+      "ClosureCreate": {
+        "properties": {
+          "endsAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for an open-ended closure; must be after startsAt",
+            "title": "Endsat"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/ClosureReason"
+          },
+          "spaceIds": {
+            "description": "Spaces to close; duplicates dropped",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Spaceids",
+            "type": "array"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "title": "Startsat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "spaceIds",
+          "reason",
+          "startsAt"
+        ],
+        "title": "ClosureCreate",
+        "type": "object"
+      },
       "ClosureInfo": {
         "properties": {
           "endsAt": {
@@ -24,6 +65,86 @@
           "endsAt"
         ],
         "title": "ClosureInfo",
+        "type": "object"
+      },
+      "ClosureOut": {
+        "properties": {
+          "active": {
+            "description": "In effect right now",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "closureId": {
+            "title": "Closureid",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "createdBy": {
+            "title": "Createdby",
+            "type": "string"
+          },
+          "endedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when an admin ended the closure early",
+            "title": "Endedat"
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endsat"
+          },
+          "lotId": {
+            "title": "Lotid",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/ClosureReason"
+          },
+          "spaceIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Spaceids",
+            "type": "array"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "title": "Startsat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "closureId",
+          "lotId",
+          "spaceIds",
+          "reason",
+          "startsAt",
+          "endsAt",
+          "createdBy",
+          "createdAt",
+          "endedAt",
+          "active"
+        ],
+        "title": "ClosureOut",
         "type": "object"
       },
       "ClosureReason": {
@@ -993,6 +1114,311 @@
         "summary": "Accept the bytes a presigned PUT would",
         "tags": [
           "test-only"
+        ]
+      }
+    },
+    "/admin/lots/{lot_id}/closures": {
+      "get": {
+        "operationId": "list_closures_admin_lots__lot_id__closures_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ClosureOut"
+                  },
+                  "title": "Response List Closures Admin Lots  Lot Id  Closures Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "Every closure for a lot, including ended ones, latest start first",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "create_closure_admin_lots__lot_id__closures_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClosureCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClosureOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "not_published: lot has no layout"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_window, unknown_space, or validation_error"
+          }
+        },
+        "summary": "Close spaces now, on a schedule, or until further notice",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/lots/{lot_id}/closures/{closure_id}": {
+      "delete": {
+        "operationId": "end_closure_admin_lots__lot_id__closures__closure_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "closure_id",
+            "required": true,
+            "schema": {
+              "title": "Closure Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClosureOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "already_ended"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "End a closure now; the record is kept",
+        "tags": [
+          "admin"
         ]
       }
     },

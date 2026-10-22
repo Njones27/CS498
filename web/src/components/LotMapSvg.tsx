@@ -8,10 +8,14 @@ interface Props {
   selectedId: string | null
   onSelect: (spaceId: string | null) => void
   describe: (spaceId: string) => string
+  /** Extra highlighted spaces (multi-select, e.g. the closures page). */
+  selectedIds?: ReadonlySet<string>
+  /** Toggle mode: click, Enter and Space call this; hover and focus no longer call onSelect. */
+  onToggle?: (spaceId: string) => void
 }
 
 /** Schematic lot map: one <rect> per space at `layout.spaces[].rect`. */
-export function LotMapSvg({ layout, statusById, selectedId, onSelect, describe }: Props) {
+export function LotMapSvg({ layout, statusById, selectedId, onSelect, describe, selectedIds, onToggle }: Props) {
   const { width, height } = layout.schematic
   return (
     <svg
@@ -35,21 +39,26 @@ export function LotMapSvg({ layout, statusById, selectedId, onSelect, describe }
         const { x, y, w, h } = space.rect
         const icon = Math.min(w, h) * 0.6
         const text = describe(space.spaceId)
+        const selected = selectedId === space.spaceId || (selectedIds?.has(space.spaceId) ?? false)
         return (
           <g
             key={space.spaceId}
-            className={`space ${v.className}${stale ? ' space--stale' : ''}${selectedId === space.spaceId ? ' space--selected' : ''}`}
+            className={`space ${v.className}${stale ? ' space--stale' : ''}${selected ? ' space--selected' : ''}`}
             data-testid={`space-${space.spaceId}`}
             data-state={state}
             data-stale={stale ? 'true' : 'false'}
             tabIndex={0}
             role="button"
             aria-label={text}
-            onMouseEnter={() => onSelect(space.spaceId)}
-            onFocus={() => onSelect(space.spaceId)}
-            onClick={() => onSelect(space.spaceId)}
+            aria-pressed={onToggle ? selected : undefined}
+            onMouseEnter={onToggle ? undefined : () => onSelect(space.spaceId)}
+            onFocus={onToggle ? undefined : () => onSelect(space.spaceId)}
+            onClick={() => (onToggle ? onToggle(space.spaceId) : onSelect(space.spaceId))}
             onKeyDown={(e) => {
-              if (e.key === 'Escape') onSelect(null)
+              if (onToggle && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault()
+                onToggle(space.spaceId)
+              } else if (e.key === 'Escape') onSelect(null)
             }}
           >
             <title>{text}</title>
