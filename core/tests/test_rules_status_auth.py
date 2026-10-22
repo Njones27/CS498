@@ -165,6 +165,24 @@ def test_build_status_closure_overlay():
     assert out["isStale"] is False  # the only old observation is on a closed space
 
 
+def test_overlapping_closures_pick_deterministically():
+    later = NOW + timedelta(hours=5)
+    timed = [
+        closure(["s0"], closure_id="b", reason=ClosureReason.MAINTENANCE, ends_at=later),
+        closure(["s0"], closure_id="a", reason=ClosureReason.RESERVED, ends_at=later),
+        closure(["s0"], closure_id="c", reason=ClosureReason.EVENT),
+    ]
+    open_ended = closure(["s0"], closure_id="z", reason=ClosureReason.CONSTRUCTION, ends_at=None)
+    for order in (timed, timed[::-1]):
+        s0 = build_status(make_lot(), make_layout(1), [], order, None, NOW)["spaces"][0]
+        assert s0["closure"] == {"reason": ClosureReason.RESERVED, "endsAt": later}
+        s0 = build_status(make_lot(), make_layout(1), [], [*order, open_ended], None, NOW)
+        assert s0["spaces"][0]["closure"] == {
+            "reason": ClosureReason.CONSTRUCTION,
+            "endsAt": None,
+        }
+
+
 @pytest.mark.parametrize(
     ("status", "expected"),
     [
