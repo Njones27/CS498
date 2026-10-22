@@ -7,10 +7,11 @@ Settings (APP_ENV=test -> memory adapters) without touching environment variable
 from __future__ import annotations
 
 import threading
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request
-from parking_core.models import Principal
+from parking_core.models import Principal, utcnow
 from parking_core.settings import Adapters, Settings, build_adapters
 
 
@@ -30,6 +31,12 @@ def get_adapters_dep(request: Request) -> Adapters:
     return state.adapters
 
 
+def get_now_dep(request: Request) -> datetime:
+    """Current time. Tests freeze it by setting `app.state.now` to another callable."""
+    return getattr(request.app.state, "now", utcnow)()
+
+
+NowDep = Annotated[datetime, Depends(get_now_dep)]
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
 AdaptersDep = Annotated[Adapters, Depends(get_adapters_dep)]
 

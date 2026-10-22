@@ -8,6 +8,7 @@ seed) depends only on these Protocols and gets concrete objects from
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Protocol
 
 from .models import (
@@ -18,8 +19,10 @@ from .models import (
     LayoutVersion,
     Lot,
     Message,
+    ObjectInfo,
     ParkingSpace,
     Principal,
+    PublishedLayout,
     Snapshot,
     SpaceObservation,
     SpaceScore,
@@ -32,6 +35,10 @@ class ObjectStore(Protocol):
     def put(self, key: str, data: bytes, content_type: str) -> None: ...
     def get(self, key: str) -> bytes: ...
     def exists(self, key: str) -> bool: ...
+    def head(self, key: str) -> ObjectInfo | None:
+        """Size and content type of the stored object; None if it does not exist."""
+        ...
+
     def presign_put(self, key: str, content_type: str, expires_seconds: int = 300) -> str:
         """URL the *browser* can PUT to. Signed with the public endpoint when configured."""
         ...
@@ -61,7 +68,12 @@ class Repository(Protocol):
     def put_layout_version(self, layout: LayoutVersion) -> None: ...
     def list_layout_versions(self, lot_id: str) -> list[LayoutVersion]: ...
     def publish_layout(self, lot_id: str, layout: LayoutVersion) -> None:
-        """Write the LayoutVersion item and move currentLayoutVersion in one transaction."""
+        """Write the LayoutVersion item and move currentLayoutVersion in one transaction.
+        Raises LookupError if the lot does not exist."""
+        ...
+
+    def get_published_layout(self, lot_id: str) -> PublishedLayout | None:
+        """The lot's current layout snapshot from the object store; None if unpublished."""
         ...
 
     # Snapshots and jobs
@@ -84,12 +96,25 @@ class Repository(Protocol):
         ...
 
     # Duplicate detection (HDD §4.3)
-    def claim_hash(self, sha256: str, image_id: str) -> ClaimResult:
-        """Conditional put on HASH#sha256. On conflict returns the original image id."""
+    def claim_hash(
+        self, sha256: str, image_id: str, claimed_at: datetime | None = None
+    ) -> ClaimResult:
+        """Conditional put on HASH#sha256 (stamped with `claimed_at`, default now).
+        On conflict returns the original image id and when it was claimed."""
         ...
 
-    def takeover_hash(self, sha256: str, old_image_id: str, new_image_id: str) -> bool:
+    def takeover_hash(
+        self,
+        sha256: str,
+        old_image_id: str,
+        new_image_id: str,
+        claimed_at: datetime | None = None,
+    ) -> bool:
         """Re-point an existing claim; succeeds only if it still points at `old_image_id`."""
+        ...
+
+    def release_hash(self, sha256: str, image_id: str) -> bool:
+        """Delete the claim; succeeds only if it still points at `image_id`."""
         ...
 
     # Observations and status

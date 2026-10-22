@@ -465,10 +465,14 @@ version = "0.1.0"
 source = { editable = "seed" }
 dependencies = [
     { name = "parking-core" },
+    { name = "pillow" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "parking-core", editable = "core" }]
+requires-dist = [
+    { name = "parking-core", editable = "core" },
+    { name = "pillow", specifier = ">=11.0" },
+]
 
 [[package]]
 name = "parking-worker"

@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# The root .gitignore ignores lib/ (Python template); web keeps source there.
+!src/lib/

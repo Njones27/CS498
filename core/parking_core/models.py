@@ -257,6 +257,16 @@ class JobMessage(CamelModel):
 class ClaimResult(CamelModel):
     claimed: bool
     original_image_id: str | None = None
+    claimed_at: datetime | None = Field(
+        default=None, description="When the existing claim was made (on conflict)"
+    )
+
+
+class ObjectInfo(CamelModel):
+    """Stored object metadata (S3 HeadObject): what actually arrived at a presigned PUT."""
+
+    size_bytes: int
+    content_type: str
 
 
 def utcnow() -> datetime:

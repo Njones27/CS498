@@ -1,15 +1,49 @@
-"""Public driver routes (HDD §6.1). Bodies are filled in by the backend wave-1 work."""
+"""Public driver routes (HDD §6.1)."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter
+from parking_core.errors import NotPublishedError
+from parking_core.interfaces import Repository
+from parking_core.models import Lot, PublishedLayout
+from parking_core.status import build_status, lot_summary
 
-from ..deps import AdaptersDep, SettingsDep, error
-from ..schemas import ErrorResponse, HealthResponse, LotDetail, LotListItem, LotStatusOut
+from ..deps import AdaptersDep, NowDep, error
+from ..schemas import (
+    ErrorResponse,
+    HealthResponse,
+    LayoutOut,
+    LotDetail,
+    LotInfo,
+    LotListItem,
+    LotStatusOut,
+    LotSummary,
+    RectOut,
+    SchematicOut,
+    SchematicSpace,
+    ViewpointOut,
+)
 
 router = APIRouter(tags=["public"])
 
-NOT_IMPLEMENTED = error(501, "not_implemented", "Contract stub")
+
+def find_published(repo: Repository, lot_id: str) -> tuple[Lot, PublishedLayout] | None:
+    """The lot and its current layout, or None when unknown or unpublished."""
+    lot = repo.get_lot(lot_id)
+    if lot is None or lot.current_layout_version is None:
+        return None
+    try:
+        layout = repo.get_published_layout(lot_id)
+    except NotPublishedError:
+        return None
+    return (lot, layout) if layout is not None else None
+
+
+def require_published(repo: Repository, lot_id: str) -> tuple[Lot, PublishedLayout]:
+    found = find_published(repo, lot_id)
+    if found is None:
+        raise error(404, "not_found", "Lot not found")
+    return found
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -18,8 +52,30 @@ def health() -> HealthResponse:
 
 
 @router.get("/lots", response_model=list[LotListItem], summary="List published lots")
-def list_lots(adapters: AdaptersDep, settings: SettingsDep) -> list[LotListItem]:
-    raise NOT_IMPLEMENTED
+def list_lots(adapters: AdaptersDep, now: NowDep) -> list[LotListItem]:
+    repo = adapters.repository
+    items = []
+    for candidate in sorted(repo.list_lots(), key=lambda lot: lot.name.lower()):
+        if candidate.current_layout_version is None:
+            continue
+        found = find_published(repo, candidate.lot_id)
+        if found is None:
+            continue
+        lot, layout = found
+        summary = lot_summary(
+            lot, layout, repo.get_statuses(lot.lot_id), repo.list_closures(lot.lot_id), now
+        )
+        items.append(
+            LotListItem(
+                lot_id=lot.lot_id,
+                name=lot.name,
+                location=lot.location,
+                stale_after_minutes=lot.stale_after_minutes,
+                layout_version=layout.version,
+                summary=LotSummary.model_validate(summary),
+            )
+        )
+    return items
 
 
 @router.get(
@@ -29,7 +85,29 @@ def list_lots(adapters: AdaptersDep, settings: SettingsDep) -> list[LotListItem]
     summary="Lot details, published schematic layout and viewpoints",
 )
 def get_lot(lot_id: str, adapters: AdaptersDep) -> LotDetail:
-    raise NOT_IMPLEMENTED
+    lot, layout = require_published(adapters.repository, lot_id)
+    return LotDetail(
+        lot=LotInfo(
+            lot_id=lot.lot_id,
+            name=lot.name,
+            location=lot.location,
+            stale_after_minutes=lot.stale_after_minutes,
+        ),
+        layout=LayoutOut(
+            version=layout.version,
+            schematic=SchematicOut(width=layout.schematic.width, height=layout.schematic.height),
+            spaces=[
+                SchematicSpace(
+                    space_id=s.space_id,
+                    label=s.label,
+                    type=s.space_type,
+                    rect=RectOut(x=s.rect.x, y=s.rect.y, w=s.rect.w, h=s.rect.h),
+                )
+                for s in layout.active_spaces()
+            ],
+        ),
+        viewpoints=[ViewpointOut(view_id=v.view_id, name=v.name) for v in layout.viewpoints],
+    )
 
 
 @router.get(
@@ -38,5 +116,15 @@ def get_lot(lot_id: str, adapters: AdaptersDep) -> LotDetail:
     responses={404: {"model": ErrorResponse}},
     summary="Current state of every space (HDD §6.2)",
 )
-def get_status(lot_id: str, adapters: AdaptersDep) -> LotStatusOut:
-    raise NOT_IMPLEMENTED
+def get_status(lot_id: str, adapters: AdaptersDep, now: NowDep) -> LotStatusOut:
+    repo = adapters.repository
+    lot, layout = require_published(repo, lot_id)
+    out = build_status(
+        lot,
+        layout,
+        repo.get_statuses(lot_id),
+        repo.list_closures(lot_id),
+        repo.get_latest_snapshot(lot_id),
+        now,
+    )
+    return LotStatusOut.model_validate(out)

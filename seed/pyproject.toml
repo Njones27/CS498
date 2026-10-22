@@ -5,6 +5,7 @@ description = "Seed and calibration CLI: creates local resources and loads a lot
 requires-python = ">=3.12"
 dependencies = [
   "parking-core",
+  "pillow>=11.0",
 ]
 
 [build-system]

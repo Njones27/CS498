@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     upload_url_ttl_seconds: int = 300
     max_upload_bytes: int = 15 * 1024 * 1024
     allowed_upload_types: tuple[str, ...] = Field(default=("image/jpeg", "image/png"))
+    cors_allowed_origins: tuple[str, ...] = Field(default=("http://localhost:5173",))
+    """Browser origins allowed to PUT to presigned URLs; written to the bucket's CORS rules."""
 
     @model_validator(mode="after")
     def _guard_production(self) -> Settings:

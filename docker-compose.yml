@@ -1,0 +1,100 @@
+# Phase 1 local stack (HDD §7.1). Every service maps one to one to an AWS service in Phase 2.
+#   cp .env.example .env && docker compose up --build
+#   uv run python seed/seed.py            # creates table, bucket, queue and loads the test lot
+
+services:
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
+    environment:
+      API_PROXY_TARGET: http://api:8000
+    volumes:
+      - ./web:/app
+      - ./contract:/contract:ro
+      - web_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    env_file: .env
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      rustfs:
+        condition: service_healthy
+      elasticmq:
+        condition: service_started
+      dynamodb-local:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    env_file: .env
+    # The table, bucket and queue are created by the seed script after `up`; if a startup
+    # step ever touches them before that, come back instead of staying dead.
+    restart: on-failure
+    depends_on:
+      rustfs:
+        condition: service_healthy
+      elasticmq:
+        condition: service_started
+      dynamodb-local:
+        condition: service_started
+
+  rustfs:
+    # S3-compatible object store standing in for AWS S3 (HDD 7.1 originally named MinIO,
+    # whose free images left Docker Hub). It checks request signatures like S3, so a bad
+    # presigned URL fails here the same way it would on AWS. Bucket CORS is set through
+    # the S3 API by `ensure_resources` (seed), not by env vars.
+    # Fallback if RustFS misbehaves: bitnamilegacy/minio:2025.7.23-debian-12-r5.
+    image: rustfs/rustfs:1.0.3
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_ACCESS_KEY: ${AWS_ACCESS_KEY_ID:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY:-rustfsadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  elasticmq:
+    image: softwaremill/elasticmq-native:1.6.12
+    volumes:
+      - ./infra/local/elasticmq.conf:/opt/elasticmq.conf:ro
+    ports:
+      - "9324:9324"
+      - "9325:9325"
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:2.6.1
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    ports:
+      - "8001:8000"
+
+volumes:
+  rustfs_data:
+  web_node_modules:
