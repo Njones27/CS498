@@ -1,0 +1,9 @@
+# Keep the build context small: images install from uv.lock and never bake in weights or data.
+.git
+.venv
+**/__pycache__
+**/node_modules
+web/dist
+models/**/*.pt
+models/**/*.part
+eval/data

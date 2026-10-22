@@ -4,8 +4,14 @@ version = "0.1.0"
 description = "Queue poller: alignment, scoring, state rules, status writes"
 requires-python = ">=3.12"
 dependencies = [
+  "numpy>=1.26",
+  "opencv-python-headless>=4.5.4",
   "parking-core",
 ]
+
+[project.optional-dependencies]
+# The real detector (DETECTOR=acpds_yolo). The stub worker and CI unit tests run without it.
+vision = ["torch>=2.4", "torchvision>=0.19", "ultralytics>=8.4.0,<9"]
 
 [build-system]
 requires = ["hatchling"]

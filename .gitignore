@@ -225,6 +225,8 @@ web/dist/
 .venv/
 *.tsbuildinfo
 .claude/worktrees/
+# PKLot benchmark cache (eval/fetch_pklot_sample.py); only eval/fixtures/ is committed
+eval/data/
 
 # Claude Code personal settings
 .claude/settings.local.json

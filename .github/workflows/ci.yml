@@ -57,6 +57,24 @@ jobs:
           npm test
           npm run build
 
+  worker-vision-image:
+    name: Worker image with the vision extra
+    runs-on: ubuntu-latest
+    needs: lint-test
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (torch CPU wheels, torchvision, ultralytics)
+        run: docker build --build-arg WORKER_EXTRAS=vision -f worker/Dockerfile -t parking-worker:vision .
+      - name: Imports work in the image
+        run: >
+          docker run --rm parking-worker:vision python -c
+          "import torch, ultralytics, cv2; print(torch.__version__, ultralytics.__version__, cv2.__version__)"
+      - name: Vendored ACPDS model builds without downloading anything
+        run: >
+          docker run --rm --network none parking-worker:vision python -c
+          "from parking_worker.scorers.acpds.rcnn import RCNN; RCNN(roi_res=128, pooling_type='square')"
+
   compose:
     name: Compose stack end to end
     runs-on: ubuntu-latest

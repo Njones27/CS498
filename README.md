@@ -13,6 +13,8 @@ Design docs live in `Docs/` (High-Level Design v0.3, Milestone 1 user stories, d
 | `core/` | Shared Python package: domain models, the interfaces and their adapters |
 | `seed/` | Seed CLI and lot definition files |
 | `eval/` | Fixture photos and the benchmark script |
+| `models/` | Weight manifest (SHA-256 pins); the weights are downloaded, not committed |
+| `scripts/` | Dev runner and the weight downloader |
 | `contract/openapi.json` | API contract exported from FastAPI; `web/` generates its types from it |
 
 ## Local development (Phase 1)
@@ -32,6 +34,44 @@ uv sync
 APP_ENV=test uv run uvicorn parking_api.main:create_app --factory --reload --port 8000
 cd web && npm install && npm run dev
 ```
+
+## Model weights and detector
+
+The worker scores spaces with `DETECTOR=stub` by default (fast, no ML). The real detector,
+`DETECTOR=acpds_yolo`, runs ACPDS on every mapped space and YOLO26m as a car safety net
+(`worker/parking_worker/scorers/acpds_yolo.py`, detection plan in `Docs/CV_processing_CS498.pdf`).
+It needs the worker's `vision` extra and three pinned weight files (`models/README.md`):
+
+```bash
+uv sync --all-packages --extra vision                 # torch, torchvision, ultralytics
+uv run python scripts/download_weights.py             # fetch + verify against models/manifest.json
+uv run python scripts/download_weights.py --check     # verify only; exit 1 if missing/mismatched
+```
+
+The worker refuses to start with `DETECTOR=acpds_yolo` if a file is missing or its SHA-256
+differs from the manifest. Settings (`.env`): `MODELS_DIR`, `YOLO_CONF` (0.25),
+`YOLO_OVERLAP_MODE` = `box` (default), `box_lower_half` or `seg` (loads `yolo26m-seg.pt`).
+
+With Docker, build the worker with the extra; `./models` is mounted read-only into it:
+
+```bash
+WORKER_EXTRAS=vision docker compose up --build        # plus DETECTOR=acpds_yolo in .env
+```
+
+Pilot benchmark (PKLot sample first, then labeled drone photos; see `eval/README.md`):
+
+```bash
+uv run python eval/fetch_pklot_sample.py --count 30
+uv run python eval/benchmark.py eval/data/pklot --setup acpds --setup acpds_yolo --setup yolo
+RUN_MODEL_TESTS=1 uv run pytest -m real_model         # real-model smoke test on the fixture
+```
+
+### Licenses
+
+The ACPDS code (vendored in `worker/parking_worker/scorers/acpds/`) and its weights are MIT.
+The YOLO26 weights and the `ultralytics` package are AGPL-3.0, which is acceptable for this
+public course repository; a closed-source deployment would need an Ultralytics Enterprise
+license. The PKLot photos in `eval/fixtures/` are CC BY 4.0.
 
 ## Contract workflow
 
