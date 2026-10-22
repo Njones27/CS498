@@ -40,6 +40,13 @@ TOO_FEW_MATCHES = "Too few matches"
 """Shown to admins on the Snapshots page (US-06 #2); keep the wording exact."""
 NO_REFERENCE = "No reference image for viewpoint"
 LOWE_RATIO = 0.75
+EPS = 1e-6
+"""Slack for `in_frame`: an outline flush with the border maps to e.g. -1.9e-17 or 1.0000000002."""
+WORK_LONG_EDGE = 1280
+"""References are downscaled to at most this long edge before ORB, and photos to at most the
+reference's working long edge. ORB's scale pyramid only spans about 3.6x, so a 4032 px phone
+photo would not match a 640 px reference otherwise; it also bounds runtime and memory on
+large uploads."""
 MIN_AREA, MAX_AREA = 0.1, 10.0
 """Allowed area of the mapped reference frame, as a fraction of the photo."""
 _FRAME = np.array([[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], dtype=np.float64).T
@@ -48,8 +55,15 @@ _FRAME = np.array([[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], dtype=np.float64
 
 @dataclass(frozen=True)
 class _Features:
+    """ORB features of one image at its working size (at most `WORK_LONG_EDGE`).
+
+    Everything downstream works in this pixel space: the homography maps reference working
+    pixels to photo working pixels, `ransac_px` is measured in it, and outlines go in and come
+    out as fractions of `width` x `height`, which equal fractions of the original image.
+    """
+
     points: np.ndarray
-    """(N, 2) float32 keypoint coordinates in pixels."""
+    """(N, 2) float32 keypoint coordinates in working-image pixels."""
     descriptors: np.ndarray | None
     width: int
     height: int
@@ -81,12 +95,15 @@ class OrbAligner:
 
     def align(self, image: bytes, viewpoint: Viewpoint) -> list[AlignedOutline]:
         ref = self._reference_features(viewpoint.reference_image_key)
-        photo = self._features(image, what="Photo")
+        photo = self._features(image, what="Photo", long_edge=max(ref.width, ref.height))
         h = self._homography(ref, photo, viewpoint)
 
         sids = list(viewpoint.outlines)
         if not sids:
             return []
+        for sid in sids:
+            if len(viewpoint.outlines[sid]) < 3:
+                raise AlignmentError(f"Outline for {sid} has fewer than 3 points")
         corners = np.array(
             [pt for sid in sids for pt in viewpoint.outlines[sid]], dtype=np.float64
         ).reshape(-1, 1, 2)
@@ -99,7 +116,7 @@ class OrbAligner:
             n = len(viewpoint.outlines[sid])
             polygon = [(float(x), float(y)) for x, y in mapped[i : i + n]]
             i += n
-            in_frame = all(0.0 <= x <= 1.0 and 0.0 <= y <= 1.0 for x, y in polygon)
+            in_frame = all(-EPS <= x <= 1 + EPS and -EPS <= y <= 1 + EPS for x, y in polygon)
             out.append(AlignedOutline(space_id=sid, polygon=polygon, in_frame=in_frame))
         return out
 
@@ -110,19 +127,27 @@ class OrbAligner:
         if cached is not None:
             self._cache.move_to_end(key)
             return cached
-        if not self._store.exists(key):
-            raise AlignmentError(NO_REFERENCE)
-        feats = self._features(self._store.get(key), what="Reference image")
+        try:
+            data = self._store.get(key)
+        except KeyError:
+            raise AlignmentError(NO_REFERENCE) from None
+        feats = self._features(data, what="Reference image")
         self._cache[key] = feats
         while len(self._cache) > self._cache_size:
             self._cache.popitem(last=False)
         return feats
 
-    def _features(self, data: bytes, *, what: str) -> _Features:
-        gray = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
-        if gray is None:
-            raise AlignmentError(f"{what} could not be decoded")
-        keypoints, descriptors = self._orb.detectAndCompute(gray, None)
+    def _features(self, data: bytes, *, what: str, long_edge: int = WORK_LONG_EDGE) -> _Features:
+        try:
+            gray = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+            if gray is None:
+                raise AlignmentError(f"{what} could not be decoded")
+            if max(gray.shape[:2]) > long_edge:
+                scale = long_edge / max(gray.shape[:2])
+                gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            keypoints, descriptors = self._orb.detectAndCompute(gray, None)
+        except cv2.error as exc:  # e.g. an image too small for ORB's border; never retryable
+            raise AlignmentError(f"{what} could not be processed") from exc
         points = np.array([kp.pt for kp in keypoints], dtype=np.float32).reshape(-1, 2)
         height, width = gray.shape[:2]
         return _Features(points=points, descriptors=descriptors, width=width, height=height)

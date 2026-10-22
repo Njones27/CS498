@@ -136,15 +136,48 @@ def test_outline_pushed_out_of_frame_is_flagged(store, reference):
     assert np.abs(np.array(aligned["A-01"].polygon) - expected).max() < TOLERANCE
 
 
-def test_photo_at_different_resolution(store, reference):
-    """A phone photo is usually larger than the reference; scale must not be rejected."""
+@pytest.mark.parametrize(
+    ("ref_size", "factor"),
+    [
+        pytest.param((W, H), 2.5, id="2.5x"),
+        pytest.param((320, 240), 6, id="6x-small-reference"),  # beyond ORB's ~3.6x pyramid
+        pytest.param((W, H), 0.5, id="photo-smaller"),
+    ],
+)
+def test_photo_at_different_resolution(store, ref_size, factor):
+    """A phone photo is usually much larger than the reference; scale must not be rejected."""
+    reference = textured_image(0, ref_size)
     vp = store_reference(store, reference)
-    h = np.diag([2.5, 2.5, 1.0])
-    out_size = (int(W * 2.5), int(H * 2.5))
+    h = translation(0.03 * ref_size[0], 0.02 * ref_size[1]) @ np.diag([factor, factor, 1.0])
+    out_size = (round(ref_size[0] * factor), round(ref_size[1] * factor))
     photo = cv2.warpPerspective(reference, h, out_size)
     aligned = OrbAligner(store).align(encode(photo, ".jpg"), vp)
     for outline in aligned:
+        pts = np.array(OUTLINES[outline.space_id], dtype=np.float64).reshape(-1, 1, 2)
+        expected = cv2.perspectiveTransform(pts * ref_size, h).reshape(-1, 2) / out_size
+        assert np.abs(np.array(outline.polygon) - expected).max() < TOLERANCE
+
+
+def test_large_images_are_downscaled_for_orb(store):
+    """References above WORK_LONG_EDGE are processed (and cached) at the working size."""
+    reference = textured_image(0, (2000, 1500))
+    vp = store_reference(store, reference)
+    aligner = OrbAligner(store)
+    aligned = aligner.align(encode(reference, ".jpg"), vp)
+    feats = aligner._cache[vp.reference_image_key]
+    assert (feats.width, feats.height) == (1280, 960)
+    assert feats.points[:, 0].max() < 1280 and feats.points[:, 1].max() < 960
+    for outline in aligned:
         assert np.abs(np.array(outline.polygon) - OUTLINES[outline.space_id]).max() < TOLERANCE
+
+
+def test_outline_flush_with_border_is_in_frame(store, reference):
+    full = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+    outside = [(-0.02, 0.0), (1.0, 0.0), (1.0, 1.0), (-0.02, 1.0)]
+    vp = store_reference(store, reference, outlines={"FULL": full, "OUT": outside})
+    aligned = {o.space_id: o for o in OrbAligner(store).align(encode(reference), vp)}
+    assert aligned["FULL"].in_frame
+    assert not aligned["OUT"].in_frame
 
 
 @pytest.mark.parametrize(
@@ -163,7 +196,15 @@ def test_unrelated_photo_is_too_few_matches(store, reference, photo):
     assert str(exc.value) == "Too few matches"
 
 
-@pytest.mark.parametrize("seed", range(10))
+@pytest.mark.parametrize(
+    "seed",
+    [
+        *range(10),
+        # These pass the match, inlier and ratio gates and are caught only by `_plausible`.
+        pytest.param(115, id="115-plausibility"),
+        pytest.param(277, id="277-plausibility"),
+    ],
+)
 def test_unrelated_scene_is_rejected(store, seed):
     """US-12 #1: a photo from the wrong spot is rejected, even when its texture is similar
     enough to the reference to produce coincidental ORB matches."""
@@ -246,6 +287,28 @@ def test_undecodable_photo(store, reference):
     assert str(exc.value) == "Photo could not be decoded"
 
 
+def test_photo_too_small_for_orb(store, reference):
+    """ORB raises cv2.error on a 1x1 image; that must be a permanent AlignmentError."""
+    vp = store_reference(store, reference)
+    with pytest.raises(AlignmentError) as exc:
+        OrbAligner(store).align(encode(np.zeros((1, 1), dtype=np.uint8)), vp)
+    assert str(exc.value) == "Photo could not be processed"
+
+
+def test_reference_too_small_for_orb(store, reference):
+    vp = store_reference(store, np.zeros((1, 1), dtype=np.uint8))
+    with pytest.raises(AlignmentError) as exc:
+        OrbAligner(store).align(encode(reference), vp)
+    assert str(exc.value) == "Reference image could not be processed"
+
+
+def test_outline_with_too_few_points(store, reference):
+    vp = store_reference(store, reference, outlines={"A": [(0.1, 0.1), (0.2, 0.2)]})
+    with pytest.raises(AlignmentError) as exc:
+        OrbAligner(store).align(encode(reference), vp)
+    assert str(exc.value) == "Outline for A has fewer than 3 points"
+
+
 def test_cache_is_keyed_by_reference(store):
     first_img, second_img = textured_image(0), textured_image(1)
     first = store_reference(store, first_img, "V1")
@@ -274,7 +337,6 @@ def test_cache_hit_skips_storage_and_evicts_oldest(store, monkeypatch):
 
     calls: list[str] = []
     monkeypatch.setattr(store, "get", calls.append)
-    monkeypatch.setattr(store, "exists", calls.append)
     aligner.align(encode(imgs[1]), vps[1])
     assert calls == []
     assert list(aligner._cache)[-1] == vps[1].reference_image_key
