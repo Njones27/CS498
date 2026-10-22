@@ -2,6 +2,8 @@ from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+from botocore.exceptions import ParamValidationError
+from botocore.stub import Stubber
 from parking_core.adapters import aws
 from parking_core.adapters.memory import (
     MemoryJobQueue,
@@ -242,3 +244,111 @@ def test_lot_item_keys():
     assert (item["PK"], item["SK"]) == ("LOT#L", "META")
     assert (item["GSI1PK"], item["GSI1SK"]) == ("LOTS", "L")
     assert aws.item_to_model(item, Lot) == lot
+
+
+# --- release_hash, head, publish_layout, SQS, cognito -------------------------
+
+
+def test_release_hash(repo):
+    assert repo.claim_hash("h", "a", claimed_at=NOW).claimed
+    conflict = repo.claim_hash("h", "b")
+    assert conflict.original_image_id == "a" and conflict.claimed_at == NOW
+    assert not repo.release_hash("h", "b")  # not the owner
+    assert repo.release_hash("h", "a")
+    assert not repo.release_hash("h", "a")  # already gone
+    assert repo.claim_hash("h", "b").claimed
+
+
+def test_memory_head():
+    store = MemoryObjectStore()
+    assert store.head("k") is None
+    store.put("k", b"12345", "image/png")
+    info = store.head("k")
+    assert info is not None and (info.size_bytes, info.content_type) == (5, "image/png")
+
+
+def _version(lot_id: str) -> LayoutVersion:
+    return LayoutVersion(
+        lot_id=lot_id, version=1, published_by="a", published_at=NOW, snapshot_key="x"
+    )
+
+
+def test_publish_layout_unknown_lot_memory(repo):
+    with pytest.raises(LookupError, match="unknown lot 'nope'"):
+        repo.publish_layout("nope", _version("nope"))
+
+
+AWS_SETTINGS = Settings(app_env="local", queue_url="http://sqs.local/q", _env_file=None)  # type: ignore[call-arg]
+
+
+@pytest.fixture
+def aws_creds(monkeypatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+
+
+def test_publish_layout_unknown_lot_dynamo(aws_creds):
+    repo = aws.DynamoRepository(AWS_SETTINGS)
+    with Stubber(repo._resource.meta.client) as stub:
+        stub.add_client_error(
+            "transact_write_items",
+            service_error_code="TransactionCanceledException",
+            modeled_fields={
+                "CancellationReasons": [{"Code": "None"}, {"Code": "ConditionalCheckFailed"}]
+            },
+        )
+        with pytest.raises(LookupError, match="unknown lot 'nope'"):
+            repo.publish_layout("nope", _version("nope"))
+
+
+def test_release_hash_dynamo(aws_creds):
+    repo = aws.DynamoRepository(AWS_SETTINGS)
+    with Stubber(repo._table.meta.client) as stub:
+        stub.add_response("delete_item", {})
+        stub.add_client_error("delete_item", service_error_code="ConditionalCheckFailedException")
+        assert repo.release_hash("h", "a")
+        assert not repo.release_hash("h", "a")
+
+
+def test_s3_head(aws_creds):
+    store = aws.S3ObjectStore(AWS_SETTINGS)
+    with Stubber(store._client) as stub:
+        stub.add_response("head_object", {"ContentLength": 42, "ContentType": "image/jpeg"})
+        stub.add_client_error("head_object", service_error_code="404", http_status_code=404)
+        info = store.head("raw/L/v/i.jpg")
+        assert info is not None and (info.size_bytes, info.content_type) == (42, "image/jpeg")
+        assert store.head("raw/L/v/missing.jpg") is None
+
+
+def test_receive_kwargs_clamp():
+    kw = aws.receive_kwargs("u", max_messages=50, wait_seconds=60)
+    assert kw["MaxNumberOfMessages"] == 10 and kw["WaitTimeSeconds"] == 20
+    assert kw["MessageSystemAttributeNames"] == ["ApproximateReceiveCount"]
+    assert "AttributeNames" not in kw
+    kw = aws.receive_kwargs("u", max_messages=0, wait_seconds=-1)
+    assert kw["MaxNumberOfMessages"] == 1 and kw["WaitTimeSeconds"] == 0
+
+
+def test_sqs_receive_falls_back_to_attribute_names(aws_creds):
+    calls: list[dict] = []
+
+    class OldClient:
+        def receive_message(self, **kwargs):
+            calls.append(dict(kwargs))
+            if "MessageSystemAttributeNames" in kwargs:
+                raise ParamValidationError(report="unknown parameter")
+            attrs = {"ApproximateReceiveCount": "2"}
+            return {"Messages": [{"Body": "b", "ReceiptHandle": "r", "Attributes": attrs}]}
+
+    q = aws.SqsJobQueue(AWS_SETTINGS)
+    q._client = OldClient()
+    [m] = q.receive(wait_seconds=30)
+    assert (m.body, m.receive_count) == ("b", 2)
+    assert calls[-1]["AttributeNames"] == ["ApproximateReceiveCount"]
+    assert calls[-1]["WaitTimeSeconds"] == 20
+
+
+def test_build_aws_adapters_rejects_cognito():
+    s = Settings(app_env="local", auth_mode="cognito", _env_file=None)  # type: ignore[call-arg]
+    with pytest.raises(NotImplementedError, match="Phase 2"):
+        aws.build_aws_adapters(s)

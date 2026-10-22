@@ -39,11 +39,16 @@ class HS256Verifier:
     def verify(self, token: str) -> Principal | None:
         expired = False
         try:
-            claims = jwt.decode(token, self._secret, algorithms=[ALGORITHM])
+            claims = jwt.decode(
+                token, self._secret, algorithms=[ALGORITHM], options={"require": ["exp"]}
+            )
         except jwt.ExpiredSignatureError:
             try:
                 claims = jwt.decode(
-                    token, self._secret, algorithms=[ALGORITHM], options={"verify_exp": False}
+                    token,
+                    self._secret,
+                    algorithms=[ALGORITHM],
+                    options={"verify_exp": False, "require": ["exp"]},
                 )
             except jwt.InvalidTokenError:
                 return None

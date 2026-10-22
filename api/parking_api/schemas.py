@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Literal
 
 from parking_core.models import CamelModel, ClosureReason, SpaceState, SpaceType
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 
 JobStatusOut = Literal["UPLOAD_PENDING", "QUEUED", "PROCESSING", "COMPLETE", "FAILED", "EXPIRED"]
 """JobStatus values plus the derived EXPIRED (UPLOAD_PENDING older than 15 minutes)."""
@@ -160,7 +160,7 @@ class UploadRequest(CamelModel):
 
     lot_id: str
     view_id: str
-    capture_time: datetime
+    capture_time: AwareDatetime
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     content_type: Literal["image/jpeg", "image/png"]
     size_bytes: int = Field(gt=0)

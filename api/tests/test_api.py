@@ -42,15 +42,21 @@ def sha(n: int) -> str:
     return hashlib.sha256(str(n).encode()).hexdigest()
 
 
-def upload(client, headers, data=b"jpegbytes", **kw):
+def upload(client, headers, data=b"jpegbytes", put_type="image/jpeg", **kw):
+    kw.setdefault("sizeBytes", len(data))
     r = client.post("/admin/uploads", json=body(**kw), headers=headers)
     assert r.status_code == 201, r.text
     slot = r.json()
     put = client.put(
-        slot["uploadUrl"].removeprefix("/api"), content=data, headers={"content-type": "image/jpeg"}
+        slot["uploadUrl"].removeprefix("/api"), content=data, headers={"content-type": put_type}
     )
     assert put.status_code == 204
     return slot["imageId"]
+
+
+class FailingQueue:
+    def send(self, body: str) -> None:
+        raise RuntimeError("queue down")
 
 
 # --- auth -------------------------------------------------------------------
@@ -240,6 +246,87 @@ def test_upload_unsupported_type(adapters, admin_headers, clock):
 def test_upload_unpublished_lot(client, admin_headers):
     r = client.post("/admin/uploads", json=body(lotId="draft"), headers=admin_headers)
     assert r.status_code == 404
+
+
+def test_naive_capture_time_is_rejected(client, admin_headers):
+    naive = (NOW - timedelta(minutes=5)).replace(tzinfo=None).isoformat()
+    r = client.post("/admin/uploads", json=body(captureTime=naive), headers=admin_headers)
+    assert r.status_code == 422 and r.json()["error"] == "validation_error"
+
+
+def test_capture_time_is_stored_in_utc(client, admin_headers, adapters):
+    r = client.post(
+        "/admin/uploads",
+        json=body(captureTime="2026-10-01T06:55:00-05:00"),
+        headers=admin_headers,
+    )
+    assert r.status_code == 201
+    snap = adapters.repository.get_snapshot(r.json()["imageId"])
+    assert snap.capture_time == NOW - timedelta(minutes=5)
+    assert snap.capture_time.utcoffset() == timedelta(0)
+
+
+@pytest.mark.parametrize("target", ["repository.put_snapshot", "object_store.presign_put"])
+def test_failed_upload_request_releases_hash(app, adapters, admin_headers, monkeypatch, target):
+    owner, attr = target.split(".")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("storage down")
+
+    monkeypatch.setattr(getattr(adapters, owner), attr, boom)
+    client = TestClient(app, raise_server_exceptions=False)
+    assert client.post("/admin/uploads", json=body(), headers=admin_headers).status_code == 500
+    monkeypatch.undo()
+    assert client.post("/admin/uploads", json=body(), headers=admin_headers).status_code == 201
+
+
+def test_orphaned_claim_is_taken_over_after_grace(client, admin_headers, adapters):
+    repo = adapters.repository
+    repo.claim_hash(sha(1), "ghost-old", claimed_at=NOW - timedelta(minutes=2))
+    r = client.post("/admin/uploads", json=body(sha=sha(1)), headers=admin_headers)
+    assert r.status_code == 201
+    # A snapshot-less claim inside the grace window is a concurrent request still in flight.
+    repo.claim_hash(sha(2), "ghost-new", claimed_at=NOW - timedelta(seconds=10))
+    r = client.post("/admin/uploads", json=body(sha=sha(2)), headers=admin_headers)
+    assert r.status_code == 409 and r.json()["originalImageId"] == "ghost-new"
+
+
+def test_complete_size_mismatch(client, admin_headers):
+    image_id = upload(client, admin_headers, data=b"abc", sizeBytes=10)
+    r = client.post(f"/admin/uploads/{image_id}/complete", headers=admin_headers)
+    assert r.status_code == 409 and r.json()["error"] == "size_mismatch"
+
+
+def test_complete_unsupported_stored_type(client, admin_headers, adapters):
+    image_id = upload(client, admin_headers, put_type="image/gif")
+    r = client.post(f"/admin/uploads/{image_id}/complete", headers=admin_headers)
+    assert r.status_code == 409 and r.json()["error"] == "unsupported_type"
+    assert adapters.repository.get_snapshot(image_id).job_status is JobStatus.UPLOAD_PENDING
+
+
+def test_complete_accepts_content_type_parameters(client, admin_headers):
+    image_id = upload(client, admin_headers, put_type="image/jpeg; charset=binary")
+    r = client.post(f"/admin/uploads/{image_id}/complete", headers=admin_headers)
+    assert r.status_code == 200
+
+
+def test_queue_send_failure_marks_job_failed(app, adapters, admin_headers):
+    client = TestClient(app, raise_server_exceptions=False)
+    image_id = upload(client, admin_headers)
+    real_queue, adapters.queue = adapters.queue, FailingQueue()
+    r = client.post(f"/admin/uploads/{image_id}/complete", headers=admin_headers)
+    assert r.status_code == 500
+    snap = adapters.repository.get_snapshot(image_id)
+    assert snap.job_status is JobStatus.FAILED and snap.finished
+    assert snap.error == "Could not queue job"
+    # Retry with the queue still down fails the same way, and stays retryable.
+    r = client.post(f"/admin/snapshots/{image_id}/retry", headers=admin_headers)
+    assert r.status_code == 500
+    assert adapters.repository.get_snapshot(image_id).job_status is JobStatus.FAILED
+    adapters.queue = real_queue
+    r = client.post(f"/admin/snapshots/{image_id}/retry", headers=admin_headers)
+    assert r.status_code == 200 and r.json()["jobStatus"] == "QUEUED"
+    assert len(real_queue) == 1
 
 
 # --- snapshots --------------------------------------------------------------

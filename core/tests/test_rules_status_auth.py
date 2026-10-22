@@ -232,6 +232,11 @@ def test_jwt_malformed(token):
     assert HS256Verifier(SECRET).verify(token) is None
 
 
+def test_jwt_without_exp_is_rejected():
+    token = jwt.encode({"email": "a@x.edu", "groups": ["admin"]}, SECRET, algorithm="HS256")
+    assert HS256Verifier(SECRET).verify(token) is None
+
+
 def test_dev_users():
     users = dev_users(Settings(app_env="test", _env_file=None))
     s = Settings(app_env="test", _env_file=None)

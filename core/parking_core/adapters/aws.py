@@ -21,7 +21,7 @@ from typing import Any
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ParamValidationError
 from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 
@@ -35,6 +35,7 @@ from ..models import (
     LayoutVersion,
     Lot,
     Message,
+    ObjectInfo,
     ParkingSpace,
     PublishedLayout,
     Snapshot,
@@ -179,13 +180,19 @@ class S3ObjectStore:
             raise
 
     def exists(self, key: str) -> bool:
+        return self.head(key) is not None
+
+    def head(self, key: str) -> ObjectInfo | None:
         try:
-            self._client.head_object(Bucket=self._bucket, Key=key)
-            return True
+            resp = self._client.head_object(Bucket=self._bucket, Key=key)
         except ClientError as exc:
             if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
-                return False
+                return None
             raise
+        return ObjectInfo(
+            size_bytes=int(resp["ContentLength"]),
+            content_type=resp.get("ContentType", "binary/octet-stream"),
+        )
 
     def presign_put(self, key: str, content_type: str, expires_seconds: int = 300) -> str:
         return self._signer.generate_presigned_url(
@@ -217,12 +224,13 @@ class SqsJobQueue:
         self._client.send_message(QueueUrl=self._url, MessageBody=body)
 
     def receive(self, max_messages: int = 1, wait_seconds: int = 10) -> list[Message]:
-        resp = self._client.receive_message(
-            QueueUrl=self._url,
-            MaxNumberOfMessages=max(1, min(max_messages, 10)),
-            WaitTimeSeconds=wait_seconds,
-            AttributeNames=["ApproximateReceiveCount"],
-        )
+        kwargs = receive_kwargs(self._url, max_messages, wait_seconds)
+        try:
+            resp = self._client.receive_message(**kwargs)
+        except ParamValidationError:
+            # Older botocore without MessageSystemAttributeNames: use the deprecated name.
+            kwargs["AttributeNames"] = kwargs.pop("MessageSystemAttributeNames")
+            resp = self._client.receive_message(**kwargs)
         return [
             Message(
                 body=m["Body"],
@@ -234,6 +242,20 @@ class SqsJobQueue:
 
     def delete(self, receipt: str) -> None:
         self._client.delete_message(QueueUrl=self._url, ReceiptHandle=receipt)
+
+
+SQS_MAX_WAIT_SECONDS = 20
+QUEUE_VISIBILITY_TIMEOUT_SECONDS = 120
+
+
+def receive_kwargs(queue_url: str, max_messages: int, wait_seconds: int) -> dict[str, Any]:
+    """ReceiveMessage kwargs with SQS limits applied (1-10 messages, 0-20 s long poll)."""
+    return {
+        "QueueUrl": queue_url,
+        "MaxNumberOfMessages": max(1, min(max_messages, 10)),
+        "WaitTimeSeconds": max(0, min(wait_seconds, SQS_MAX_WAIT_SECONDS)),
+        "MessageSystemAttributeNames": ["ApproximateReceiveCount"],
+    }
 
 
 # --- DynamoDB ----------------------------------------------------------------
@@ -319,20 +341,26 @@ class DynamoRepository:
 
     def publish_layout(self, lot_id: str, layout: LayoutVersion) -> None:
         client = self._resource.meta.client
-        client.transact_write_items(
-            TransactItems=[
-                {"Put": {"TableName": self._table_name, "Item": layout_item(layout)}},
-                {
-                    "Update": {
-                        "TableName": self._table_name,
-                        "Key": {k.PK: k.lot_pk(lot_id), k.SK: k.META},
-                        "UpdateExpression": "SET currentLayoutVersion = :v",
-                        "ConditionExpression": "attribute_exists(PK)",
-                        "ExpressionAttributeValues": {":v": layout.version},
-                    }
-                },
-            ]
-        )
+        try:
+            client.transact_write_items(
+                TransactItems=[
+                    {"Put": {"TableName": self._table_name, "Item": layout_item(layout)}},
+                    {
+                        "Update": {
+                            "TableName": self._table_name,
+                            "Key": {k.PK: k.lot_pk(lot_id), k.SK: k.META},
+                            "UpdateExpression": "SET currentLayoutVersion = :v",
+                            "ConditionExpression": "attribute_exists(PK)",
+                            "ExpressionAttributeValues": {":v": layout.version},
+                        }
+                    },
+                ]
+            )
+        except ClientError as exc:
+            # The only condition in the transaction is that the lot item exists.
+            if is_conditional_failure(exc):
+                raise LookupError(f"Cannot publish a layout for unknown lot {lot_id!r}") from exc
+            raise
 
     def get_published_layout(self, lot_id: str) -> PublishedLayout | None:
         lot = self.get_lot(lot_id)
@@ -393,7 +421,9 @@ class DynamoRepository:
             raise
 
     # Duplicate detection
-    def claim_hash(self, sha256: str, image_id: str) -> ClaimResult:
+    def claim_hash(
+        self, sha256: str, image_id: str, claimed_at: datetime | None = None
+    ) -> ClaimResult:
         try:
             self._table.put_item(
                 Item={
@@ -401,6 +431,7 @@ class DynamoRepository:
                     k.SK: k.META,
                     TYPE_ATTR: "HashClaim",
                     "imageId": image_id,
+                    "claimedAt": format_dt(claimed_at or datetime.now(UTC)),
                 },
                 ConditionExpression="attribute_not_exists(PK)",
             )
@@ -409,15 +440,43 @@ class DynamoRepository:
             if not is_conditional_failure(exc):
                 raise
         item = self._get(k.hash_pk(sha256), k.META) or {}
-        return ClaimResult(claimed=False, original_image_id=item.get("imageId"))
+        raw_at = item.get("claimedAt")
+        return ClaimResult(
+            claimed=False,
+            original_image_id=item.get("imageId"),
+            claimed_at=datetime.fromisoformat(raw_at) if raw_at else None,
+        )
 
-    def takeover_hash(self, sha256: str, old_image_id: str, new_image_id: str) -> bool:
+    def takeover_hash(
+        self,
+        sha256: str,
+        old_image_id: str,
+        new_image_id: str,
+        claimed_at: datetime | None = None,
+    ) -> bool:
         try:
             self._table.update_item(
                 Key={k.PK: k.hash_pk(sha256), k.SK: k.META},
-                UpdateExpression="SET imageId = :new",
+                UpdateExpression="SET imageId = :new, claimedAt = :at",
                 ConditionExpression="imageId = :old",
-                ExpressionAttributeValues={":new": new_image_id, ":old": old_image_id},
+                ExpressionAttributeValues={
+                    ":new": new_image_id,
+                    ":old": old_image_id,
+                    ":at": format_dt(claimed_at or datetime.now(UTC)),
+                },
+            )
+            return True
+        except ClientError as exc:
+            if is_conditional_failure(exc):
+                return False
+            raise
+
+    def release_hash(self, sha256: str, image_id: str) -> bool:
+        try:
+            self._table.delete_item(
+                Key={k.PK: k.hash_pk(sha256), k.SK: k.META},
+                ConditionExpression="imageId = :id",
+                ExpressionAttributeValues={":id": image_id},
             )
             return True
         except ClientError as exc:
@@ -482,6 +541,8 @@ def transition_update(
 
 
 def build_aws_adapters(settings: Settings) -> Adapters:
+    if settings.auth_mode == "cognito":
+        raise NotImplementedError("Cognito verifier arrives in Phase 2")
     store = S3ObjectStore(settings)
     return Adapters(
         object_store=store,
@@ -569,7 +630,10 @@ def _ensure_queues(settings: Settings) -> None:
     dlq_arn = client.get_queue_attributes(QueueUrl=dlq_url, AttributeNames=["QueueArn"])[
         "Attributes"
     ]["QueueArn"]
-    attrs = {"RedrivePolicy": json.dumps({"deadLetterTargetArn": dlq_arn, "maxReceiveCount": "3"})}
+    attrs = {
+        "RedrivePolicy": json.dumps({"deadLetterTargetArn": dlq_arn, "maxReceiveCount": "3"}),
+        "VisibilityTimeout": str(QUEUE_VISIBILITY_TIMEOUT_SECONDS),
+    }
     try:
         client.create_queue(QueueName=settings.queue_name, Attributes=attrs)
     except ClientError as exc:

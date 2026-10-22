@@ -12,6 +12,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import datetime
 
 from ..auth import HS256Verifier
 from ..errors import NotPublishedError
@@ -23,12 +24,14 @@ from ..models import (
     LayoutVersion,
     Lot,
     Message,
+    ObjectInfo,
     ParkingSpace,
     PublishedLayout,
     Snapshot,
     SpaceObservation,
     SpaceStatus,
     Viewpoint,
+    utcnow,
 )
 from ..settings import Adapters, Settings
 
@@ -66,6 +69,13 @@ class MemoryObjectStore:
     def exists(self, key: str) -> bool:
         with self._lock:
             return key in self._objects
+
+    def head(self, key: str) -> ObjectInfo | None:
+        with self._lock:
+            if key not in self._objects:
+                return None
+            data, content_type = self._objects[key]
+            return ObjectInfo(size_bytes=len(data), content_type=content_type)
 
     def presign_put(self, key: str, content_type: str, expires_seconds: int = 300) -> str:
         image_id = image_id_from_raw_key(key)
@@ -158,7 +168,7 @@ class MemoryRepository:
         self._viewpoints: dict[tuple[str, str], Viewpoint] = {}
         self._layouts: dict[tuple[str, int], LayoutVersion] = {}
         self._snapshots: dict[str, Snapshot] = {}
-        self._hashes: dict[str, str] = {}
+        self._hashes: dict[str, tuple[str, datetime]] = {}  # sha256 -> (imageId, claimedAt)
         self._observations: dict[tuple[str, str], SpaceObservation] = {}
         self._statuses: dict[tuple[str, str], SpaceStatus] = {}
         self._closures: dict[tuple[str, str], Closure] = {}
@@ -217,7 +227,7 @@ class MemoryRepository:
         with self._lock:
             lot = self._lots.get(lot_id)
             if lot is None:
-                raise KeyError(f"unknown lot {lot_id}")
+                raise LookupError(f"Cannot publish a layout for unknown lot {lot_id!r}")
             self._layouts[(lot_id, layout.version)] = layout.model_copy(deep=True)
             self._lots[lot_id] = lot.model_copy(update={"current_layout_version": layout.version})
 
@@ -273,19 +283,39 @@ class MemoryRepository:
             return True
 
     # Duplicate detection
-    def claim_hash(self, sha256: str, image_id: str) -> ClaimResult:
+    def claim_hash(
+        self, sha256: str, image_id: str, claimed_at: datetime | None = None
+    ) -> ClaimResult:
         with self._lock:
             existing = self._hashes.get(sha256)
             if existing is not None:
-                return ClaimResult(claimed=False, original_image_id=existing)
-            self._hashes[sha256] = image_id
+                original_id, original_at = existing
+                return ClaimResult(
+                    claimed=False, original_image_id=original_id, claimed_at=original_at
+                )
+            self._hashes[sha256] = (image_id, claimed_at or utcnow())
             return ClaimResult(claimed=True)
 
-    def takeover_hash(self, sha256: str, old_image_id: str, new_image_id: str) -> bool:
+    def takeover_hash(
+        self,
+        sha256: str,
+        old_image_id: str,
+        new_image_id: str,
+        claimed_at: datetime | None = None,
+    ) -> bool:
         with self._lock:
-            if self._hashes.get(sha256) != old_image_id:
+            existing = self._hashes.get(sha256)
+            if existing is None or existing[0] != old_image_id:
                 return False
-            self._hashes[sha256] = new_image_id
+            self._hashes[sha256] = (new_image_id, claimed_at or utcnow())
+            return True
+
+    def release_hash(self, sha256: str, image_id: str) -> bool:
+        with self._lock:
+            existing = self._hashes.get(sha256)
+            if existing is None or existing[0] != image_id:
+                return False
+            del self._hashes[sha256]
             return True
 
     # Observations and status

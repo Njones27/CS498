@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import logging
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 from parking_core import keys
 from parking_core.interfaces import Repository
-from parking_core.models import EXPIRED, JobMessage, JobStatus, Snapshot, effective_status
+from parking_core.models import EXPIRED, JobStatus, Snapshot, effective_status
 
 from ..deps import AdaptersDep, AdminDep, NowDep, SettingsDep, error
+from ..jobs import enqueue_job
 from ..schemas import ErrorResponse, UploadCompleteResponse, UploadRequest, UploadSlot
 from .public import require_published
 
 router = APIRouter(prefix="/admin/uploads", tags=["admin"])
+log = logging.getLogger(__name__)
 
 _EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png"}
+
+ORPHAN_CLAIM_GRACE = timedelta(seconds=60)
+"""A hash claim with no snapshot behind it is treated as an in-flight concurrent request
+for this long (claim -> put_snapshot takes milliseconds); after that it is an orphan left
+by a crashed request and may be taken over."""
 
 
 def _duplicate(original_image_id: str, uploaded_at: datetime) -> HTTPException:
@@ -31,17 +39,24 @@ def _duplicate(original_image_id: str, uploaded_at: datetime) -> HTTPException:
 
 
 def _claim(repo: Repository, sha256: str, image_id: str, now: datetime) -> None:
-    """Claim the photo hash for `image_id`, taking over a claim whose upload expired."""
-    result = repo.claim_hash(sha256, image_id)
+    """Claim the photo hash for `image_id`, taking over an expired or orphaned claim."""
+    result = repo.claim_hash(sha256, image_id, claimed_at=now)
+    if not result.claimed and result.original_image_id is None:
+        # The conflicting claim was released between our put and our read; try once more.
+        result = repo.claim_hash(sha256, image_id, claimed_at=now)
     if result.claimed:
         return
     original_id = result.original_image_id or ""
     original = repo.get_snapshot(original_id)
     if original is None:
+        claimed_at = result.claimed_at
+        in_flight = claimed_at is not None and now - claimed_at < ORPHAN_CLAIM_GRACE
+        if not in_flight and repo.takeover_hash(sha256, original_id, image_id, claimed_at=now):
+            return
         # The winner of a concurrent claim has not written its snapshot yet.
-        raise _duplicate(original_id, now)
+        raise _duplicate(original_id, claimed_at or now)
     if effective_status(original, now) == EXPIRED and repo.takeover_hash(
-        sha256, original_id, image_id
+        sha256, original_id, image_id, claimed_at=now
     ):
         return
     raise _duplicate(original_id, original.created_at)
@@ -73,7 +88,8 @@ def request_upload(
     lot, layout = require_published(repo, body.lot_id)
     if layout.viewpoint(body.view_id) is None:
         raise error(422, "unknown_viewpoint", "That viewpoint does not belong to this lot")
-    if body.capture_time > now:
+    capture_time = body.capture_time.astimezone(UTC)
+    if capture_time > now:
         raise error(422, "future_capture_time", "Capture time cannot be in the future")
     if body.size_bytes > settings.max_upload_bytes:
         raise error(422, "too_large", "Photos must be 15 MB or smaller")
@@ -83,22 +99,31 @@ def request_upload(
     image_id = uuid4().hex
     key = keys.raw_photo_key(lot.lot_id, body.view_id, image_id, _EXTENSIONS[body.content_type])
     _claim(repo, body.sha256, image_id, now)
-    repo.put_snapshot(
-        Snapshot(
-            image_id=image_id,
-            lot_id=lot.lot_id,
-            view_id=body.view_id,
-            capture_time=body.capture_time,
-            sha256=body.sha256,
-            s3_key=key,
-            content_type=body.content_type,
-            size_bytes=body.size_bytes,
-            uploaded_by=admin.email,
-            created_at=now,
+    try:
+        repo.put_snapshot(
+            Snapshot(
+                image_id=image_id,
+                lot_id=lot.lot_id,
+                view_id=body.view_id,
+                capture_time=capture_time,
+                sha256=body.sha256,
+                s3_key=key,
+                content_type=body.content_type,
+                size_bytes=body.size_bytes,
+                uploaded_by=admin.email,
+                created_at=now,
+            )
         )
-    )
-    ttl = settings.upload_url_ttl_seconds
-    url = adapters.object_store.presign_put(key, body.content_type, expires_seconds=ttl)
+        ttl = settings.upload_url_ttl_seconds
+        url = adapters.object_store.presign_put(key, body.content_type, expires_seconds=ttl)
+    except Exception:
+        # Free the hash so the same photo can be uploaded again. If this fails too, the
+        # orphaned claim is taken over once ORPHAN_CLAIM_GRACE has passed.
+        try:
+            repo.release_hash(body.sha256, image_id)
+        except Exception:
+            log.exception("could not release hash claim", extra={"image_id": image_id})
+        raise
     return UploadSlot(image_id=image_id, upload_url=url, expires_at=now + timedelta(seconds=ttl))
 
 
@@ -111,14 +136,18 @@ def request_upload(
         404: {"model": ErrorResponse},
         409: {
             "model": ErrorResponse,
-            "description": "not_pending | missing_object: the file was never uploaded",
+            "description": (
+                "not_pending | missing_object: the file was never uploaded | "
+                "size_mismatch: the stored file size differs from sizeBytes | "
+                "unsupported_type: the stored file is not JPEG or PNG"
+            ),
         },
         410: {"model": ErrorResponse, "description": "expired"},
     },
     summary="Confirm the file arrived and queue the job",
 )
 def complete_upload(
-    image_id: str, admin: AdminDep, adapters: AdaptersDep, now: NowDep
+    image_id: str, admin: AdminDep, adapters: AdaptersDep, settings: SettingsDep, now: NowDep
 ) -> UploadCompleteResponse:
     repo = adapters.repository
     snap = repo.get_snapshot(image_id)
@@ -129,8 +158,14 @@ def complete_upload(
         raise error(410, "expired", "This upload expired. Please upload the photo again")
     if snap.job_status is not JobStatus.UPLOAD_PENDING:
         raise error(409, "not_pending", "This upload was already completed")
-    if not adapters.object_store.exists(snap.s3_key):
+    info = adapters.object_store.head(snap.s3_key)
+    if info is None:
         raise error(409, "missing_object", "The photo has not finished uploading")
+    if info.size_bytes != snap.size_bytes:
+        raise error(409, "size_mismatch", "The uploaded file is not the size that was declared")
+    media_type = info.content_type.split(";", 1)[0].strip().lower()
+    if media_type not in settings.allowed_upload_types:
+        raise error(409, "unsupported_type", "Photos must be JPEG or PNG")
     lot = repo.get_lot(snap.lot_id)
     moved = repo.transition_job(
         image_id,
@@ -141,5 +176,5 @@ def complete_upload(
     )
     if not moved:
         raise error(409, "not_pending", "This upload was already completed")
-    adapters.queue.send(JobMessage(image_id=image_id).model_dump_json())
+    enqueue_job(adapters, image_id)
     return UploadCompleteResponse(image_id=image_id, job_status=JobStatus.QUEUED.value)

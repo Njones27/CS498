@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Query
-from parking_core.models import JobMessage, JobStatus, Snapshot, effective_status
+from parking_core.models import JobStatus, Snapshot, effective_status
 
 from ..deps import AdaptersDep, AdminDep, NowDep, error
+from ..jobs import enqueue_job
 from ..schemas import ErrorResponse, ObservationOut, SnapshotDetail, SnapshotOut
 
 router = APIRouter(prefix="/admin/snapshots", tags=["admin"])
@@ -113,7 +114,7 @@ def retry_snapshot(
     )
     if not moved:
         raise not_retryable
-    adapters.queue.send(JobMessage(image_id=image_id).model_dump_json())
+    enqueue_job(adapters, image_id)
     updated = repo.get_snapshot(image_id)
     assert updated is not None
     return SnapshotOut(**snapshot_out(updated, now))
