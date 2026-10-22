@@ -63,6 +63,11 @@ def _wait_for(client: httpx.Client, headers: dict[str, str], image_id: str) -> d
     pytest.fail(f"job did not finish within 120 s: {last}")
 
 
+def _dt(value: str) -> datetime:
+    """The API emits `...Z`; Python's isoformat emits `+00:00`. Compare as datetimes."""
+    return datetime.fromisoformat(value)
+
+
 def _slot_body(lot_id: str, view_id: str, capture_time: datetime, sha: str, size: int) -> dict:
     return {
         "lotId": lot_id,
@@ -83,10 +88,14 @@ def test_upload_to_status() -> None:
 
     with httpx.Client(timeout=30) as client:
         assert client.get(f"{API}/health").json() == {"status": "ok"}
-        lots = client.get(f"{API}/lots").json()
+        lots_r = client.get(f"{API}/lots")
+        assert lots_r.status_code == 200, lots_r.text
+        lots = lots_r.json()
         assert lots, "seed script must publish at least one lot"
         lot_id = lots[0]["lotId"]
-        detail = client.get(f"{API}/lots/{lot_id}").json()
+        detail_r = client.get(f"{API}/lots/{lot_id}")
+        assert detail_r.status_code == 200, detail_r.text
+        detail = detail_r.json()
         view_id = detail["viewpoints"][0]["viewId"]
         headers = _login(client)
 
@@ -109,13 +118,17 @@ def test_upload_to_status() -> None:
         assert snap["modelVersion"], snap
         assert snap["layoutVersion"] == detail["layout"]["version"]
 
-        status = client.get(f"{API}/lots/{lot_id}/status").json()
+        status_r = client.get(f"{API}/lots/{lot_id}/status")
+        assert status_r.status_code == 200, status_r.text
+        status = status_r.json()
         assert status["noObservations"] is False
-        updated = [s for s in status["spaces"] if s["observedAt"] == capture_time.isoformat()]
+        updated = [
+            s for s in status["spaces"] if s["observedAt"] and _dt(s["observedAt"]) == capture_time
+        ]
         assert updated, "no space carries this photo's capture time"
         # The stub scorer never lands in the UNKNOWN band, so every scored space is decided.
         assert all(s["state"] in ("FREE", "OCCUPIED", "CLOSED") for s in updated), updated
-        assert status["lastObservedAt"] == capture_time.isoformat()
+        assert _dt(status["lastObservedAt"]) == capture_time
 
         # Same bytes again are a duplicate (US-05).
         dup = client.post(f"{API}/admin/uploads", headers=headers, json=body)

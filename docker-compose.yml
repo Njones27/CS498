@@ -44,6 +44,9 @@ services:
       context: .
       dockerfile: worker/Dockerfile
     env_file: .env
+    # The table, bucket and queue are created by the seed script after `up`; if a startup
+    # step ever touches them before that, come back instead of staying dead.
+    restart: on-failure
     depends_on:
       minio:
         condition: service_healthy
