@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     cors_allowed_origins: tuple[str, ...] = Field(default=("http://localhost:5173",))
     """Browser origins allowed to PUT to presigned URLs; written to the bucket's CORS rules."""
 
+    aligner: Literal["identity", "orb"] = "identity"
+    """identity: photo assumed to match the reference. orb: ORB + RANSAC homography (HDD §4.4)."""
+    orb_features: int = 2000
+    orb_min_matches: int = 30
+    orb_min_inliers: int = 25
+    orb_min_inlier_ratio: float = 0.4
+    """RANSAC inliers / good matches below this reject the photo (wrong spot, US-12 #1)."""
+    orb_ransac_px: float = 5.0
+
     @model_validator(mode="after")
     def _guard_production(self) -> Settings:
         if self.app_env == "aws":

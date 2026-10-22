@@ -69,8 +69,15 @@ def raw_photo_key(lot_id: str, view_id: str, image_id: str, ext: str = "jpg") ->
     return f"raw/{lot_id}/{view_id}/{image_id}.{ext}"
 
 
-def reference_image_key(lot_id: str, view_id: str) -> str:
-    return f"reference/{lot_id}/{view_id}.jpg"
+def reference_image_key(lot_id: str, view_id: str, sha256: str) -> str:
+    """Content-addressed: the key embeds the first 12 hex chars of the image's SHA-256.
+
+    A re-uploaded reference photo gets a new key, so it never changes what an already
+    published layout points at (each `PublishedLayout` snapshot stores its viewpoints'
+    `reference_image_key`), and the worker's aligner can cache features by key without
+    them ever going stale.
+    """
+    return f"reference/{lot_id}/{view_id}/{sha256[:12]}.jpg"
 
 
 def layout_snapshot_key(lot_id: str, version: int) -> str:

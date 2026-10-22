@@ -5,6 +5,12 @@ description = "CS 498 Parking Availability Web App (monorepo root)"
 requires-python = ">=3.12"
 dependencies = ["parking-core", "parking-api", "parking-worker", "parking-seed"]
 
+[tool.uv]
+# The worker uses opencv-python-headless. ultralytics (next PR) requires opencv-python, which
+# would install a second, GUI-linked cv2 over the headless build in the same site-packages.
+# This override drops that requirement everywhere so only the headless wheel is installed.
+override-dependencies = ["opencv-python ; sys_platform == 'never'"]
+
 [tool.uv.workspace]
 members = ["core", "api", "worker", "seed"]
 

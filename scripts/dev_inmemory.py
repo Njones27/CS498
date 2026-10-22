@@ -27,7 +27,7 @@ for pkg in ("core", "api", "worker", "seed"):
 from parking_api.main import create_app  # noqa: E402
 from parking_core.settings import Settings, build_adapters  # noqa: E402
 from parking_seed.loader import DEFAULT_LOT, FIXTURES_DIR, load_lot_file, seed_lot  # noqa: E402
-from parking_worker.aligners.identity import IdentityAligner  # noqa: E402
+from parking_worker.aligners import build_aligner  # noqa: E402
 from parking_worker.poller import run_forever  # noqa: E402
 from parking_worker.scorers import build_scorer  # noqa: E402
 
@@ -46,7 +46,13 @@ def main(port: int = 8000) -> None:
     stop = threading.Event()
     worker = threading.Thread(
         target=run_forever,
-        args=(adapters, IdentityAligner(), build_scorer(settings), settings.cutoffs, stop),
+        args=(
+            adapters,
+            build_aligner(settings, adapters),
+            build_scorer(settings),
+            settings.cutoffs,
+            stop,
+        ),
         daemon=True,
         name="worker",
     )
