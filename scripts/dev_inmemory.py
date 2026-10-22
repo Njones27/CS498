@@ -19,7 +19,10 @@ from pathlib import Path
 import uvicorn
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "seed"))
+# Put the workspace packages on the path directly instead of relying on uv's editable
+# .pth files, which Python skips when macOS marks them hidden.
+for pkg in ("core", "api", "worker", "seed"):
+    sys.path.insert(0, str(ROOT / pkg))
 
 from parking_api.main import create_app  # noqa: E402
 from parking_core.settings import Settings, build_adapters  # noqa: E402
