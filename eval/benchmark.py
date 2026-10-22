@@ -3,7 +3,8 @@
     uv run python eval/fetch_pklot_sample.py --count 30          # once: PKLot sample cache
     uv run python eval/benchmark.py eval/data/pklot \\
         --setup acpds --setup acpds_yolo --setup yolo \\
-        [--overlap-mode box|box_lower_half|seg] [--outline-shift] [--json out.json] [--limit N]
+        [--overlap-mode box|box_lower_half|seg] [--yolo-imgsz PX] [--outline-shift]
+        [--json out.json] [--limit N]
 
 Input: a directory of `<name>.jpg` + `<name>.xml` pairs in PKLot format (one `<space>` per
 stall with `occupied="0|1"` and a `<contour>` in photo pixels). Pilot drone photos use the same
@@ -254,6 +255,7 @@ def run(args: argparse.Namespace) -> dict:
         detector="acpds_yolo",
         models_dir=str(ROOT / "models"),
         yolo_overlap_mode=args.overlap_mode,
+        **({"yolo_imgsz": args.yolo_imgsz} if args.yolo_imgsz else {}),
     )
     cutoffs = settings.cutoffs
     t0 = time.perf_counter()
@@ -333,6 +335,8 @@ def run(args: argparse.Namespace) -> dict:
     return {
         "data_dir": str(args.data_dir),
         "overlap_mode": args.overlap_mode,
+        "yolo_imgsz": settings.yolo_imgsz,
+        "yolo_conf": settings.yolo_conf,
         "sample": {
             "photos": len(pairs),
             "spaces": len(spaces),
@@ -376,7 +380,8 @@ def markdown(r: dict) -> str:
         f"{hw['os']}",
         f"- Software: Python {hw['python']}, torch {hw['torch']} ({hw['torch_threads']} threads), "
         f"ultralytics {hw['ultralytics']}, OpenCV {hw['opencv']}",
-        f"- Models: {r['models']['acpds']}; {r['models']['yolo']}",
+        f"- Models: {r['models']['acpds']}; {r['models']['yolo']} "
+        f"(imgsz {r['yolo_imgsz']}, conf {r['yolo_conf']})",
         f"- Cutoffs: low {c['low']}, high {c['high']}, overlap {c['overlap']}, "
         f"margin {c['margin']}",
         f"- Model load {r['model_load_ms']:.0f} ms; first-photo warm-up {r['warmup_ms']:.0f} ms "
@@ -442,6 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("data_dir", type=Path)
     p.add_argument("--setup", action="append", choices=SETUPS, help="repeatable; default all three")
     p.add_argument("--overlap-mode", choices=("box", "box_lower_half", "seg"), default="box")
+    p.add_argument("--yolo-imgsz", type=int, help="override YOLO_IMGSZ (default 1280)")
     p.add_argument("--outline-shift", action="store_true")
     p.add_argument("--json", type=Path, help="also write the full results as JSON")
     p.add_argument("--limit", type=int, help="score only the first N photos")

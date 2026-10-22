@@ -64,12 +64,25 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.23"
+          enable-cache: true
+      - name: Install the workspace with the vision extra (CPU torch)
+        run: uv sync --frozen --all-packages --extra vision
+      - name: Scorer tests on the torch path (fake models, no weights)
+        run: uv run pytest -q worker/tests/test_acpds_yolo.py
       - name: Build (torch CPU wheels, torchvision, ultralytics)
         run: docker build --build-arg WORKER_EXTRAS=vision -f worker/Dockerfile -t parking-worker:vision .
       - name: Imports work in the image
         run: >
           docker run --rm parking-worker:vision python -c
           "import torch, ultralytics, cv2; print(torch.__version__, ultralytics.__version__, cv2.__version__)"
+      - name: Only the headless OpenCV is installed in the image
+        run: |
+          docker run --rm parking-worker:vision uv pip list | grep -i opencv | tee /tmp/opencv.txt
+          test "$(wc -l < /tmp/opencv.txt)" -eq 1
+          grep -q '^opencv-python-headless ' /tmp/opencv.txt
       - name: Vendored ACPDS model builds without downloading anything
         run: >
           docker run --rm --network none parking-worker:vision python -c

@@ -49,7 +49,7 @@ uv run python scripts/download_weights.py --check     # verify only; exit 1 if m
 ```
 
 The worker refuses to start with `DETECTOR=acpds_yolo` if a file is missing or its SHA-256
-differs from the manifest. Settings (`.env`): `MODELS_DIR`, `YOLO_CONF` (0.25),
+differs from the manifest. Settings (`.env`): `MODELS_DIR`, `YOLO_CONF` (0.25), `YOLO_IMGSZ` (1280),
 `YOLO_OVERLAP_MODE` = `box` (default), `box_lower_half` or `seg` (loads `yolo26m-seg.pt`).
 
 With Docker, build the worker with the extra; `./models` is mounted read-only into it:

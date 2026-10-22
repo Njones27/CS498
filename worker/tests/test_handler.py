@@ -244,7 +244,8 @@ def test_build_scorer(tmp_path):
     settings = Settings(
         app_env="test", detector="acpds_yolo", models_dir=str(tmp_path), _env_file=None
     )
-    with pytest.raises(RuntimeError, match="download_weights.py"):
+    # Without torch (CI) it names the vision extra; with it, the missing weights.
+    with pytest.raises(RuntimeError, match="vision extra|download_weights.py"):
         build_scorer(settings)
 
 

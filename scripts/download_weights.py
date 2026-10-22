@@ -52,19 +52,34 @@ def ssl_context() -> ssl.SSLContext:
     return ssl.create_default_context(cafile=certifi.where())
 
 
-def fetch_url(url: str, dest: Path) -> None:
-    """Stream `url` into dest (via a .part file so a failed download never looks complete)."""
+def fetch_url(url: str, dest: Path, entry: dict) -> None:
+    """Stream `url` into dest.part, hashing as it goes; move it into place only if it matches.
+
+    Never reads more than the pinned size (+1 byte to notice an oversized file), and a failed
+    or mismatched download leaves nothing behind.
+    """
     if not url.startswith("https://"):
         raise ValueError(f"refusing non-HTTPS URL {url}")
     part = dest.with_name(dest.name + ".part")
     req = urllib.request.Request(url, headers={"User-Agent": "cs498-parking-weights/1"})
-    with (
-        urllib.request.urlopen(req, timeout=60, context=ssl_context()) as resp,
-        part.open("wb") as out,
-    ):
-        while block := resp.read(CHUNK):
-            out.write(block)
-    os.replace(part, dest)
+    digest, received = hashlib.sha256(), 0
+    try:
+        with (
+            urllib.request.urlopen(req, timeout=60, context=ssl_context()) as resp,
+            part.open("wb") as out,
+        ):
+            while received <= entry["size"]:
+                block = resp.read(min(CHUNK, entry["size"] + 1 - received))
+                if not block:
+                    break
+                digest.update(block)
+                out.write(block)
+                received += len(block)
+        if received != entry["size"] or digest.hexdigest() != entry["sha256"]:
+            raise ValueError(f"SHA-256 or size mismatch ({received:,} bytes)")
+        os.replace(part, dest)
+    finally:
+        part.unlink(missing_ok=True)
 
 
 def fetch_ultralytics(name: str, entry: dict, dest: Path) -> None:
@@ -93,7 +108,7 @@ def download(name: str, entry: dict, dest: Path) -> str | None:
             if source == "ultralytics":
                 fetch_ultralytics(name, entry, dest)
             else:
-                fetch_url(source, dest)
+                fetch_url(source, dest, entry)
         except Exception as exc:  # network, HTTP, missing package: try the next source
             reasons.append(f"{source}: {exc}")
             continue
@@ -102,6 +117,23 @@ def download(name: str, entry: dict, dest: Path) -> str | None:
         reasons.append(f"{source}: SHA-256 or size mismatch")
     dest.unlink(missing_ok=True)
     return "; ".join(reasons) or "no download source in the manifest"
+
+
+def check_manifest(manifest: object) -> dict:
+    """Entries must be relative paths inside models/ with a sha256 and a size."""
+    if not isinstance(manifest, dict):
+        raise SystemExit("models/manifest.json must be an object keyed by relative path")
+    for name, entry in manifest.items():
+        path = Path(name)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise SystemExit(f"manifest key {name!r} must be a relative path inside models/")
+        if not (
+            isinstance(entry, dict)
+            and isinstance(entry.get("sha256"), str)
+            and isinstance(entry.get("size"), int)
+        ):
+            raise SystemExit(f"manifest entry {name!r} needs a sha256 string and an integer size")
+    return manifest
 
 
 def select(manifest: dict, only: list[str]) -> dict:
@@ -129,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--models-dir", type=Path, default=DEFAULT_MODELS_DIR)
     args = p.parse_args(argv)
 
-    manifest = json.loads((args.models_dir / "manifest.json").read_text())
+    manifest = check_manifest(json.loads((args.models_dir / "manifest.json").read_text()))
     rows, failures = [], []
     for name, entry in select(manifest, args.only).items():
         dest = args.models_dir / name

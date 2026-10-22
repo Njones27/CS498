@@ -1,6 +1,7 @@
 """Download a small, mixed PKLot sample as image + XML pairs for the benchmark.
 
     uv run python eval/fetch_pklot_sample.py --count 30 [--out eval/data/pklot] [--prefer ufpr04]
+        [--revision main]
 
 Source: the Hugging Face mirror Voxel51/PKLot (CC BY 4.0, no login), a FiftyOne export whose
 `samples.json` (~267 MB, `{"samples": [{...}, ...]}`) holds every photo's labels. That file is
@@ -32,8 +33,8 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE = "https://huggingface.co/datasets/Voxel51/PKLot/resolve/main/"
-SAMPLES_URL = BASE + "samples.json"
+REPO_URL = "https://huggingface.co/datasets/Voxel51/PKLot/resolve/"
+SAFE_REVISION = re.compile(r"^[A-Za-z0-9._-]{1,64}$")  # branch, tag or commit SHA
 CHUNK = 2 * 1024 * 1024
 WINDOWS = 24
 SAMPLE_START = re.compile(r'\{"_id": \{"\$oid": "[0-9a-f]{24}"\}, "filepath": ')
@@ -202,13 +203,13 @@ def pklot_xml(sample: dict, width: int, height: int) -> str:
     return '<?xml version="1.0"?>\n' + ET.tostring(root, encoding="unicode") + "\n"
 
 
-def collect_windows(count: int) -> list[list[dict]]:
-    size = total_size(SAMPLES_URL)
+def collect_windows(samples_url: str, count: int) -> list[list[dict]]:
+    size = total_size(samples_url)
     windows = max(WINDOWS, count)
     candidates: list[list[dict]] = []
     for i in range(windows):
         start = min(size - 1, i * size // windows)
-        data, _ = http_get(SAMPLES_URL, (start, min(size - 1, start + CHUNK - 1)))
+        data, _ = http_get(samples_url, (start, min(size - 1, start + CHUNK - 1)))
         found = parse_window(data.decode("utf-8", errors="replace"))
         candidates.append(found)
         print(f"  window {i + 1}/{windows} @ {start / 1e6:6.1f} MB: {len(found)} samples")
@@ -220,32 +221,43 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--count", type=int, default=30)
     p.add_argument("--out", type=Path, default=ROOT / "eval" / "data" / "pklot")
     p.add_argument("--prefer", default="ufpr04", help="source listed first (fixture candidate)")
+    p.add_argument("--revision", default="main", help="dataset branch, tag or commit SHA")
     args = p.parse_args(argv)
     if args.count < 1:
         p.error("--count must be positive")
+    if not SAFE_REVISION.fullmatch(args.revision):
+        p.error("--revision must be a branch, tag or commit SHA")
+    base = f"{REPO_URL}{args.revision}/"
+    samples_url = base + "samples.json"
 
-    print(f"Reading {SAMPLES_URL} in {CHUNK // (1024 * 1024)} MB windows")
-    picked = pick_round_robin(collect_windows(args.count), args.count, args.prefer)
+    print(f"Reading {samples_url} in {CHUNK // (1024 * 1024)} MB windows")
+    picked = pick_round_robin(collect_windows(samples_url, args.count), args.count, args.prefer)
     args.out.mkdir(parents=True, exist_ok=True)
     mix: dict[tuple[str, str], int] = defaultdict(int)
+    written = 0
     for sample in picked:
         stem = stem_of(sample)
         jpg, xml = args.out / f"{stem}.jpg", args.out / f"{stem}.xml"
         if not (jpg.is_file() and xml.is_file()):
-            data, _ = http_get(BASE + sample["filepath"])
-            width, height = jpeg_size(data)
-            xml_text = pklot_xml(sample, width, height)
+            try:
+                data, _ = http_get(base + sample["filepath"])
+                width, height = jpeg_size(data)
+                xml_text = pklot_xml(sample, width, height)
+            except (ValueError, TypeError, AttributeError, KeyError, IndexError) as exc:
+                print(f"  warning: skipping malformed sample {stem}: {exc}", file=sys.stderr)
+                continue
             jpg.write_bytes(data)
             xml.write_text(xml_text)
             print(f"  {stem}: {width}x{height}, {xml_text.count('<space ')} spaces")
         mix[sample_key(sample)] += 1
+        written += 1
 
-    print(f"\n{len(picked)} pairs in {args.out}")
+    print(f"\n{written} pairs in {args.out}")
     for (source, weather), n in sorted(mix.items()):
         print(f"  {source:7s} {weather:7s} {n}")
     if picked:
         print(f"Fixture candidate: {stem_of(picked[0])}")
-    return 0 if len(picked) == args.count else 1
+    return 0 if written == args.count else 1
 
 
 if __name__ == "__main__":

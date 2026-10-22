@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     yolo_weights: str = "yolo/yolo26m.pt"
     yolo_seg_weights: str = "yolo/yolo26m-seg.pt"
     yolo_conf: float = 0.25
+    yolo_imgsz: int = 1280
+    """YOLO inference size in px (multiple of 32). 640 misses most small, distant cars."""
     yolo_overlap_mode: Literal["box", "box_lower_half", "seg"] = "box"
     """Car region tested against each space: whole box, its lower half, or the seg mask."""
     acpds_input_res: int | None = None
@@ -74,6 +76,8 @@ class Settings(BaseSettings):
             raise ValueError("CUTOFF_LOW must be below CUTOFF_HIGH")
         if not 0 < self.yolo_conf <= 1:
             raise ValueError("YOLO_CONF must be in (0, 1]")
+        if self.yolo_imgsz < 320 or self.yolo_imgsz % 32:
+            raise ValueError("YOLO_IMGSZ must be a multiple of 32 and at least 320")
         return self
 
     @property

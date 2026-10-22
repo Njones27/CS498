@@ -17,8 +17,9 @@ import cv2
 import numpy as np
 import pytest
 from parking_core.errors import PermanentJobError
-from parking_core.models import AlignedOutline, Cutoffs
+from parking_core.models import AlignedOutline, Cutoffs, SpaceState
 from parking_core.settings import Settings
+from parking_core.state_rules import decide_state
 from parking_worker.scorers import StubScorer, build_scorer
 from parking_worker.scorers.acpds_yolo import (
     AcpdsYoloScorer,
@@ -27,6 +28,7 @@ from parking_worker.scorers.acpds_yolo import (
     bgr_to_rgb_chw,
     car_overlaps,
     decode_photo,
+    header_size,
     quad,
     rasterize,
     verify_weights,
@@ -115,12 +117,14 @@ def test_acpds_gets_rgb_chw_normalized_image():
 def test_acpds_rois_use_width_minus_one():
     pytest.importorskip("torch")
     fake = FakeAcpds()
-    corners = [(0.5, 0.5), (1.0, 0.5), (1.0, 1.0), (0.5, 1.0)]
+    last = (100 / 101, 50 / 51)  # the last pixel: x = 100 of 101, y = 50 of 51
+    corners = [(0.5, 0.5), (last[0], 0.5), last, (0.5, 1.0)]
     scorer(acpds=fake).score(png(blank(51, 101)), [outline(polygon=corners)])
     rois = fake.calls[0][1].numpy()[0]
-    assert rois[2].tolist() == [1.0, 1.0]  # a corner at fraction 1.0 stays exactly 1.0
+    assert rois[2].tolist() == pytest.approx([1.0, 1.0])  # pixel 100 / (101 - 1)
     assert rois[0, 0] == pytest.approx(0.5 * 101 / 100)  # pixel 50.5 / (101 - 1)
     assert rois[0, 1] == pytest.approx(0.5 * 51 / 50)
+    assert rois[3, 1] == pytest.approx(51 / 50)  # fraction 1.0 is past the last pixel centre
 
 
 def test_logit_index_one_is_occupied():
@@ -169,13 +173,42 @@ def test_score_combines_acpds_and_overlap_in_input_order():
     detector = FakeDetector([car((20, 20, 60, 60))])
     other = [(0.7, 0.7), (0.9, 0.7), (0.9, 0.9), (0.7, 0.9)]
     out = scorer(acpds=fake, detector=detector).score(
-        png(blank()), [outline("B-02", SPACE), outline("A-01", other, in_frame=False)]
+        png(blank()), [outline("B-02", SPACE), outline("A-01", other)]
     )
     assert [s.space_id for s in out] == ["B-02", "A-01"]
     assert out[0].car_overlap == 1.0 and out[1].car_overlap == 0.0
     assert out[0].acpds_score > 0.99 and out[1].acpds_score < 0.01
-    assert [s.in_frame for s in out] == [True, False]
     assert detector.calls == 1
+
+
+def test_out_of_frame_space_gets_no_acpds_score_and_is_never_free():
+    torch = pytest.importorskip("torch")
+    fake = FakeAcpds(logits=torch.tensor([[5.0, 0.0]]))  # the visible space looks empty
+    hanging = [(0.8, 0.2), (1.2, 0.2), (1.2, 0.6), (0.8, 0.6)]  # half outside the photo
+    spaces = [outline("IN", SPACE), outline("OUT", hanging, in_frame=False)]
+    out = scorer(acpds=fake).score(png(blank()), spaces)
+
+    rois = fake.calls[0][1]
+    assert len(fake.calls) == 1 and tuple(rois.shape) == (1, 4, 2)  # only the in-frame ROI
+    assert rois[0, 1, 0].item() == pytest.approx(0.6 * 100 / 99)
+    assert [s.in_frame for s in out] == [True, False]
+    assert out[0].acpds_score < 0.01 and out[1].acpds_score is None
+    assert out[1].car_overlap == 0.0
+    cutoffs = Cutoffs()
+    assert decide_state(out[1].acpds_score, out[1].car_overlap, False, cutoffs) != SpaceState.FREE
+    lenient = cutoffs.model_copy(update={"require_car_check": False})
+    assert decide_state(None, 0.0, False, lenient) == SpaceState.UNKNOWN
+    # A visible car still marks it OCCUPIED.
+    parked = scorer(acpds=FakeAcpds(), detector=FakeDetector([car((80, 20, 100, 60))]))
+    seen = parked.score(png(blank()), [outline("OUT", hanging, in_frame=False)])[0]
+    assert seen.acpds_score is None and seen.car_overlap == 1.0
+    assert decide_state(None, seen.car_overlap, False, cutoffs) == SpaceState.OCCUPIED
+
+
+def test_all_out_of_frame_skips_acpds():
+    fake = FakeAcpds()
+    out = scorer(acpds=fake).score(png(blank()), [outline(in_frame=False)])
+    assert fake.calls == [] and out[0].acpds_score is None
 
 
 def test_zero_area_space_still_gets_acpds_score():
@@ -199,10 +232,11 @@ def test_bgr_to_rgb_chw_swaps_channels():
     assert rgb[:, 0, 1].tolist() == [0, 10, 255]
 
 
-def test_acpds_rois_convention_and_clamp():
+def test_acpds_rois_convention_without_clamping():
     rois = acpds_rois([outline(polygon=[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.5, 0.5)])], 101, 51)
     assert rois.dtype == np.float32 and rois.shape == (1, 4, 2)
-    assert rois[0, 2].tolist() == [1.0, 1.0]  # clamped, not 101/100
+    assert rois[0, 0].tolist() == [0.0, 0.0]
+    assert rois[0, 2].tolist() == pytest.approx([1.01, 1.02])  # 101/100, 51/50: not clamped
     assert rois[0, 3].tolist() == pytest.approx([0.505, 0.51])
     assert acpds_rois([], 10, 10).shape == (0, 4, 2)
 
@@ -220,6 +254,9 @@ def test_rasterize_counts_pixel_centres():
     assert (x0, y0, mask.shape, int(mask.sum())) == (20, 20, (40, 40), 1600)
     assert rasterize(np.array([[0, 0], [1, 1]]), W, H)[0].size == 0  # < 3 points
     assert rasterize(np.array([[200, 0], [300, 0], [300, 50]]), W, H)[0].size == 0  # off-photo
+    huge = np.array([[-1e12, -1e12], [1e12, -1e12], [1e12, 1e12], [-1e12, 1e12]])
+    mask, x0, y0 = rasterize(huge, W, H)  # clipped before the int32 cast: covers the photo
+    assert (x0, y0, int(mask.sum())) == (0, 0, W * H)
 
 
 def test_undecodable_photo_is_permanent():
@@ -228,6 +265,47 @@ def test_undecodable_photo_is_permanent():
             decode_photo(bad)
     with pytest.raises(PermanentJobError):
         scorer().score(b"garbage", [outline()])
+
+
+def png_header(width: int, height: int) -> bytes:
+    ihdr = width.to_bytes(4, "big") + height.to_bytes(4, "big") + bytes([8, 2, 0, 0, 0])
+    return b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR" + ihdr + b"\0" * 4
+
+
+def jpeg_header(width: int, height: int) -> bytes:
+    app0 = b"\xff\xe0" + (16).to_bytes(2, "big") + b"JFIF\0" + b"\0" * 9
+    sof = b"\xff\xc0" + (17).to_bytes(2, "big") + b"\x08"
+    sof += height.to_bytes(2, "big") + width.to_bytes(2, "big") + b"\x03" + b"\0" * 9
+    return b"\xff\xd8" + app0 + sof
+
+
+def test_header_size_reads_png_and_jpeg_without_decoding():
+    assert header_size(png(blank(7, 9))) == (9, 7)
+    ok, buf = cv2.imencode(".jpg", blank(7, 9))
+    assert header_size(buf.tobytes()) == (9, 7)
+    assert header_size(jpeg_header(12_000, 9_000)) == (12_000, 9_000)
+    assert header_size(b"GIF89a") is None
+
+
+def test_oversized_photo_is_refused_before_decoding():
+    # 20000 x 20000 = 400 MP: refused from the header alone (the bytes are not a real image).
+    for bomb in (png_header(20_000, 20_000), jpeg_header(12_000, 9_000)):
+        with pytest.raises(PermanentJobError, match="Photo is too large"):
+            decode_photo(bomb)
+
+
+def test_oversized_photo_is_refused_after_decoding(monkeypatch):
+    monkeypatch.setattr("parking_worker.scorers.acpds_yolo.header_size", lambda image: None)
+    monkeypatch.setattr("parking_worker.scorers.acpds_yolo.MAX_PIXELS", 99)
+    with pytest.raises(PermanentJobError, match="Photo is too large"):
+        decode_photo(png(blank(10, 10)))
+    assert decode_photo(png(blank(9, 11))).shape == (9, 11, 3)
+
+
+def test_worker_caps_opencv_decode_size():
+    import parking_worker  # noqa: F401  (sets the variable before cv2 is imported)
+
+    assert int(os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"]) <= 2**27
 
 
 def test_empty_outlines_return_nothing_without_running_models():
@@ -312,7 +390,14 @@ def test_model_version_names_weights_mode_and_cutoffs():
     )
     assert s.model_version == (
         "acpds_yolo|acpds=96901e9003a3|yolo=401cea9ab23a|overlap=box_lower_half"
-        "|low=0.25|high=0.75|overlap_cut=0.3|margin=0.05"
+        "|low=0.25|high=0.75|overlap_cut=0.3|margin=0.05|require_car_check=True"
+        "|yolo_conf=0.25|imgsz=1280|input_res=native"
+    )
+    other = scorer(
+        yolo_conf=0.4, yolo_imgsz=640, input_res=720, cutoffs=Cutoffs(require_car_check=False)
+    )
+    assert other.model_version.endswith(
+        "|require_car_check=False|yolo_conf=0.4|imgsz=640|input_res=720"
     )
 
 
@@ -326,6 +411,11 @@ def test_constructor_rejects_bad_mode_and_conf():
 def test_settings_reject_yolo_conf_out_of_range():
     with pytest.raises(ValueError, match="YOLO_CONF"):
         Settings(_env_file=None, yolo_conf=1.5)
+    for bad in (256, 1000):
+        with pytest.raises(ValueError, match="YOLO_IMGSZ"):
+            Settings(_env_file=None, yolo_imgsz=bad)
+    assert Settings(_env_file=None, yolo_imgsz=640).yolo_imgsz == 640
+    assert Settings(_env_file=None).yolo_imgsz == 1280
     assert Settings(_env_file=None).yolo_overlap_mode == "box"
 
 
@@ -349,6 +439,13 @@ def vision_settings(models_dir: Path, **kw) -> Settings:
     return Settings(_env_file=None, detector="acpds_yolo", models_dir=str(models_dir), **kw)
 
 
+@pytest.fixture
+def vision_installed(monkeypatch):
+    """Weight checks run after the package check; pretend torch is there (CI has none)."""
+    monkeypatch.setattr("parking_worker.scorers.acpds_yolo.missing_vision_packages", lambda: [])
+
+
+@pytest.mark.usefixtures("vision_installed")
 def test_from_settings_fails_clearly_when_weights_are_missing(tmp_path):
     models = write_models_dir(tmp_path, {}, {"acpds/RCNN_128_square_gopro.pt": b"x"})
     with pytest.raises(RuntimeError, match="scripts/download_weights.py") as exc:
@@ -356,6 +453,7 @@ def test_from_settings_fails_clearly_when_weights_are_missing(tmp_path):
     assert "Model weights missing" in str(exc.value)
 
 
+@pytest.mark.usefixtures("vision_installed")
 def test_from_settings_rejects_weights_that_do_not_match_the_pin(tmp_path):
     rel = "acpds/RCNN_128_square_gopro.pt"
     models = write_models_dir(tmp_path, {rel: b"tampered"}, {rel: b"original"})
@@ -366,6 +464,7 @@ def test_from_settings_rejects_weights_that_do_not_match_the_pin(tmp_path):
         AcpdsYoloScorer.from_settings(vision_settings(models))
 
 
+@pytest.mark.usefixtures("vision_installed")
 def test_from_settings_checks_the_yolo_file_for_the_chosen_mode(tmp_path):
     acpds, yolo = "acpds/RCNN_128_square_gopro.pt", "yolo/yolo26m.pt"
     files = {acpds: b"a", yolo: b"y"}
@@ -374,13 +473,26 @@ def test_from_settings_checks_the_yolo_file_for_the_chosen_mode(tmp_path):
         AcpdsYoloScorer.from_settings(vision_settings(models, yolo_overlap_mode="seg"))
 
 
-def test_from_settings_names_the_vision_extra_when_torch_is_missing(tmp_path, monkeypatch):
-    acpds, yolo = "acpds/RCNN_128_square_gopro.pt", "yolo/yolo26m.pt"
-    files = {acpds: b"a", yolo: b"y"}
-    models = write_models_dir(tmp_path, files, files)
-    monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
-    with pytest.raises(RuntimeError, match="vision extra"):
-        AcpdsYoloScorer.from_settings(vision_settings(models))
+def test_from_settings_checks_the_vision_extra_before_hashing(tmp_path, monkeypatch):
+    def no_hashing(path):
+        raise AssertionError("hashed weights before checking the packages")
+
+    monkeypatch.setattr("parking_worker.scorers.acpds_yolo.sha256_file", no_hashing)
+    monkeypatch.setattr(
+        "importlib.util.find_spec", lambda name: None if name == "torchvision" else object()
+    )
+    with pytest.raises(RuntimeError, match="needs torchvision: install the worker's vision extra"):
+        AcpdsYoloScorer.from_settings(vision_settings(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    ["{not json", "[]", '{"acpds/RCNN_128_square_gopro.pt": {"sha256": "ab"}}'],
+)
+def test_malformed_manifest_is_a_clear_error(tmp_path, manifest):
+    (tmp_path / "manifest.json").write_text(manifest)
+    with pytest.raises(RuntimeError, match="scripts/download_weights.py"):
+        verify_weights(tmp_path, "acpds/RCNN_128_square_gopro.pt")
 
 
 def test_verify_weights_needs_a_manifest(tmp_path):

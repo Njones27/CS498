@@ -44,6 +44,10 @@ memory grows with the batch (measured on CPU: about +1.4 GB for 100 spaces in on
 in passes of 32, at the same speed). Chunking keeps big lots inside the worker's memory cap."""
 MANIFEST_NAME = "manifest.json"
 DOWNLOAD_HINT = "Run `uv run python scripts/download_weights.py` (see models/README.md)."
+VISION_PACKAGES = ("torch", "torchvision", "ultralytics")
+MAX_PIXELS = 100_000_000
+"""Photos above 100 MP are refused (a drone frame is ~12-50 MP); checked from the header."""
+_MAX_COORD = 1e6  # px; keeps absurd outline coordinates inside int32 for cv2.fillPoly
 _SUBPIXEL_SHIFT = 4  # cv2.fillPoly fixed-point bits: vertices at 1/16 pixel
 
 
@@ -71,8 +75,40 @@ CarDetector = Callable[[np.ndarray], list[Detection]]
 # --- photo and geometry helpers (numpy + OpenCV only) ---------------------------------------
 
 
+def header_size(image: bytes) -> tuple[int, int] | None:
+    """(width, height) from a PNG IHDR or JPEG SOF header without decoding, else None."""
+    if image[:8] == b"\x89PNG\r\n\x1a\n" and image[12:16] == b"IHDR":
+        return int.from_bytes(image[16:20], "big"), int.from_bytes(image[20:24], "big")
+    if image[:2] != b"\xff\xd8":
+        return None
+    i = 2
+    while i + 9 <= len(image):
+        if image[i] != 0xFF:
+            return None
+        marker = image[i + 1]
+        if marker == 0xFF:  # fill byte
+            i += 1
+            continue
+        if marker in (0x01, 0xD8) or 0xD0 <= marker <= 0xD7:
+            i += 2
+            continue
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height = int.from_bytes(image[i + 5 : i + 7], "big")
+            width = int.from_bytes(image[i + 7 : i + 9], "big")
+            return width, height
+        i += 2 + int.from_bytes(image[i + 2 : i + 4], "big")
+    return None
+
+
 def decode_photo(image: bytes) -> np.ndarray:
-    """JPEG/PNG bytes -> BGR uint8 ``H x W x 3``. Undecodable bytes are a permanent failure."""
+    """JPEG/PNG bytes -> BGR uint8 ``H x W x 3``. Undecodable bytes are a permanent failure.
+
+    The pixel count is checked from the header before decoding and again after, so an
+    oversized photo (or a decompression bomb) fails with "Photo is too large".
+    """
+    size = header_size(image) if image else None
+    if size is not None and size[0] * size[1] > MAX_PIXELS:
+        raise PermanentJobError("Photo is too large")
     bgr = None
     if image:
         try:
@@ -81,6 +117,8 @@ def decode_photo(image: bytes) -> np.ndarray:
             bgr = None
     if bgr is None or bgr.ndim != 3 or bgr.shape[0] < 2 or bgr.shape[1] < 2:
         raise PermanentJobError("Photo could not be decoded")
+    if bgr.shape[0] * bgr.shape[1] > MAX_PIXELS:
+        raise PermanentJobError("Photo is too large")
     return bgr
 
 
@@ -100,27 +138,31 @@ def quad(polygon: Sequence[Point]) -> np.ndarray:
 
 
 def acpds_rois(outlines: Sequence[AlignedOutline], width: int, height: int) -> np.ndarray:
-    """``[N, 4, 2]`` float32 corners in ACPDS' convention: pixel x / (width - 1), clamped 0..1.
+    """``[N, 4, 2]`` float32 corners in ACPDS' convention: pixel x / (width - 1).
 
     Outline points are fractions of the photo size (pixel x = fx * width), so the ACPDS value
     is fx * width / (width - 1). ACPDS samples with ``align_corners=True``, where 1.0 is the
-    centre of the last pixel; passing the raw fraction would shift every crop slightly.
+    centre of the last pixel; passing the raw fraction would shift every crop slightly. Values
+    are not clamped: only in-frame outlines are scored, and ACPDS' square pooling zero-pads
+    the rare corner that rounds a hair past the edge instead of distorting the crop.
     """
     if not outlines:
         return np.zeros((0, 4, 2), dtype=np.float32)
     rois = np.stack([quad(o.polygon) for o in outlines]).astype(np.float64)
     rois[..., 0] *= width / max(width - 1, 1)
     rois[..., 1] *= height / max(height - 1, 1)
-    return np.clip(rois, 0.0, 1.0).astype(np.float32)
+    return rois.astype(np.float32)
 
 
 def rasterize(points_px: np.ndarray, width: int, height: int) -> tuple[np.ndarray, int, int]:
     """Fill a polygon given in continuous pixel coordinates (pixel i spans [i, i + 1)).
 
     Returns ``(mask, x0, y0)``: a boolean mask over the polygon's bounding box, clipped to the
-    photo, and the box's top-left pixel. Pixels whose centres fall inside are set.
+    photo, and the box's top-left pixel. Pixels whose centres fall inside are set, and so are
+    the pixels ``cv2.fillPoly`` draws along the edges (it includes the boundary), so a slanted
+    edge can add up to one pixel. Coordinates are clipped to +-1e6 px before the int32 cast.
     """
-    pts = np.asarray(points_px, dtype=np.float64).reshape(-1, 2)
+    pts = np.clip(np.asarray(points_px, dtype=np.float64).reshape(-1, 2), -_MAX_COORD, _MAX_COORD)
     if len(pts) < 3:
         return np.zeros((0, 0), dtype=bool), 0, 0
     x0 = max(0, math.floor(pts[:, 0].min()))
@@ -217,18 +259,36 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def missing_vision_packages() -> list[str]:
+    return [m for m in VISION_PACKAGES if importlib.util.find_spec(m) is None]
+
+
 def verify_weights(models_dir: Path, rel_path: str) -> tuple[Path, str]:
     """Check ``models_dir/rel_path`` against ``models_dir/manifest.json``; return (path, sha256).
 
-    Raises RuntimeError (the worker must not start) when the manifest has no entry, the file
-    is missing, or its size or SHA-256 differs from the pin.
+    Raises RuntimeError (the worker must not start) when the manifest is missing or
+    malformed, has no entry, the file is missing, or its size or SHA-256 differs from the pin.
     """
     manifest_path = models_dir / MANIFEST_NAME
     if not manifest_path.is_file():
         raise RuntimeError(f"Model manifest not found at {manifest_path}. {DOWNLOAD_HINT}")
-    entry = json.loads(manifest_path.read_text()).get(rel_path)
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"Model manifest {manifest_path} is unreadable. {DOWNLOAD_HINT}"
+        ) from exc
+    entry = manifest.get(rel_path) if isinstance(manifest, dict) else None
     if entry is None:
-        raise RuntimeError(f"{rel_path} is not pinned in {manifest_path}")
+        raise RuntimeError(f"{rel_path} is not pinned in {manifest_path}. {DOWNLOAD_HINT}")
+    if not (
+        isinstance(entry, dict)
+        and isinstance(entry.get("sha256"), str)
+        and isinstance(entry.get("size"), int)
+    ):
+        raise RuntimeError(
+            f"{rel_path} in {manifest_path} needs a sha256 string and a size. {DOWNLOAD_HINT}"
+        )
     path = models_dir / rel_path
     if not path.is_file():
         raise RuntimeError(f"Model weights missing: {path}. {DOWNLOAD_HINT}")
@@ -254,18 +314,26 @@ def load_acpds(path: Path) -> AcpdsModel:  # pragma: no cover - needs torch and 
 class YoloCarDetector:  # pragma: no cover - needs ultralytics and the weights
     """``ultralytics.YOLO`` as a ``CarDetector``: car/truck/bus boxes (and masks when seg)."""
 
-    def __init__(self, path: Path, conf: float, seg: bool, classes=CAR_CLASSES) -> None:
+    def __init__(
+        self, path: Path, conf: float, seg: bool, imgsz: int = 1280, classes=CAR_CLASSES
+    ) -> None:
         from ultralytics import YOLO
 
         self.model = YOLO(str(path))
         self.conf = conf
         self.seg = seg
+        self.imgsz = imgsz
         self.class_ids = [i for i, name in self.model.names.items() if name in classes]
 
     def __call__(self, bgr: np.ndarray) -> list[Detection]:
         height, width = bgr.shape[:2]
         result = self.model.predict(
-            bgr, conf=self.conf, classes=self.class_ids, device="cpu", verbose=False
+            bgr,
+            conf=self.conf,
+            imgsz=self.imgsz,
+            classes=self.class_ids,
+            device="cpu",
+            verbose=False,
         )[0]
         boxes = result.boxes
         xyxy = boxes.xyxy.cpu().numpy()
@@ -306,6 +374,7 @@ class AcpdsYoloScorer:
         yolo_conf: float = 0.25,
         overlap_mode: OverlapMode = "box",
         input_res: int | None = None,
+        yolo_imgsz: int = 1280,
     ) -> None:
         if overlap_mode not in OVERLAP_MODES:
             raise ValueError(f"overlap_mode must be one of {OVERLAP_MODES}")
@@ -318,29 +387,31 @@ class AcpdsYoloScorer:
         self.yolo_conf = yolo_conf
         self.overlap_mode: OverlapMode = overlap_mode
         self.input_res = input_res
+        self.yolo_imgsz = yolo_imgsz
 
     @classmethod
     def from_settings(cls, settings: Settings) -> AcpdsYoloScorer:
-        """Verify the pinned weights, then load both models on CPU."""
-        models_dir = Path(settings.models_dir)
-        seg = settings.yolo_overlap_mode == "seg"
-        acpds_path, acpds_sha = verify_weights(models_dir, settings.acpds_weights)
-        yolo_rel = settings.yolo_seg_weights if seg else settings.yolo_weights
-        yolo_path, yolo_sha = verify_weights(models_dir, yolo_rel)
-        missing = [m for m in ("torch", "ultralytics") if importlib.util.find_spec(m) is None]
+        """Check the vision packages and the pinned weights, then load both models on CPU."""
+        missing = missing_vision_packages()
         if missing:
             raise RuntimeError(
                 f"DETECTOR=acpds_yolo needs {', '.join(missing)}: install the worker's vision "
                 "extra (`uv sync --all-packages --extra vision`, or WORKER_EXTRAS=vision in Docker)"
             )
+        models_dir = Path(settings.models_dir)
+        seg = settings.yolo_overlap_mode == "seg"
+        acpds_path, acpds_sha = verify_weights(models_dir, settings.acpds_weights)
+        yolo_rel = settings.yolo_seg_weights if seg else settings.yolo_weights
+        yolo_path, yolo_sha = verify_weights(models_dir, yolo_rel)
         return cls(  # pragma: no cover - needs torch, ultralytics and the weights
             load_acpds(acpds_path),
-            YoloCarDetector(yolo_path, conf=settings.yolo_conf, seg=seg),
+            YoloCarDetector(yolo_path, conf=settings.yolo_conf, seg=seg, imgsz=settings.yolo_imgsz),
             settings.cutoffs,
             {"acpds": acpds_sha[:12], "yolo": yolo_sha[:12]},
             yolo_conf=settings.yolo_conf,
             overlap_mode=settings.yolo_overlap_mode,
             input_res=settings.acpds_input_res,
+            yolo_imgsz=settings.yolo_imgsz,
         )
 
     @property
@@ -350,6 +421,8 @@ class AcpdsYoloScorer:
             f"acpds_yolo|acpds={self.weight_hashes.get('acpds', '?')}"
             f"|yolo={self.weight_hashes.get('yolo', '?')}|overlap={self.overlap_mode}"
             f"|low={c.low}|high={c.high}|overlap_cut={c.overlap}|margin={c.margin}"
+            f"|require_car_check={c.require_car_check}|yolo_conf={self.yolo_conf}"
+            f"|imgsz={self.yolo_imgsz}|input_res={self.input_res or 'native'}"
         )
 
     def score(self, image: bytes, outlines: list[AlignedOutline]) -> list[SpaceScore]:
@@ -357,14 +430,19 @@ class AcpdsYoloScorer:
         if not outlines:
             return []
         height, width = bgr.shape[:2]
-        acpds = self.acpds_scores(bgr, outlines)
+        # ACPDS only sees spaces wholly in the photo: a crop of a half-visible stall would give
+        # a confident but meaningless score. Out-of-frame spaces keep their car overlap, so a
+        # visible car can still mark them OCCUPIED; without an ACPDS score they are never FREE.
+        visible = [o for o in outlines if o.in_frame]
+        scores = iter(self.acpds_scores(bgr, visible)) if visible else iter(())
+        acpds = [float(next(scores)) if o.in_frame else None for o in outlines]
         overlaps = car_overlaps(
             outlines, self.car_detector(bgr), width, height, self.overlap_mode, self.yolo_conf
         )
         return [
             SpaceScore(
                 space_id=o.space_id,
-                acpds_score=float(a),
+                acpds_score=a,
                 car_overlap=float(v),
                 in_frame=o.in_frame,
             )
