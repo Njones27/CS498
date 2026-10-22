@@ -6,6 +6,7 @@ import { AdminHomePage } from './pages/AdminHomePage'
 import { LotListPage } from './pages/LotListPage'
 import { LotMapPage } from './pages/LotMapPage'
 import { SignInPage } from './pages/SignInPage'
+import { SnapshotsPlaceholderPage } from './pages/SnapshotsPlaceholderPage'
 import { UploadPage } from './pages/UploadPage'
 
 /** Route table; split out so tests can mount it inside a MemoryRouter. */
@@ -19,6 +20,7 @@ export function AppRoutes() {
           <Route path="/signin" element={<SignInPage />} />
           <Route path="/admin" element={<RequireAdmin><AdminHomePage /></RequireAdmin>} />
           <Route path="/admin/upload" element={<RequireAdmin><UploadPage /></RequireAdmin>} />
+          <Route path="/admin/snapshots" element={<RequireAdmin><SnapshotsPlaceholderPage /></RequireAdmin>} />
           <Route path="*" element={<main className="page"><h1>Page not found</h1></main>} />
         </Route>
       </Routes>

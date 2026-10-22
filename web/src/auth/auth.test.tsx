@@ -1,8 +1,9 @@
-import { screen } from '@testing-library/react'
+import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { loadSession } from './session'
-import { ADMIN, mockFetch, renderApp } from '../test/helpers'
+import { useNavigate } from 'react-router-dom'
+import { loadSession, peekFlash, saveSession } from './session'
+import { ADMIN, deferred, mockFetch, renderApp } from '../test/helpers'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -69,5 +70,35 @@ describe('RequireAdmin', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'Sign out' }))
     expect(loadSession()).toBeNull()
     await vi.waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/))
+  })
+
+  it('ignores a late session_expired once the user has signed in again', async () => {
+    const reply = deferred<{ status: number; body: unknown }>()
+    mockFetch({ 'GET /lots': () => reply.promise })
+    renderApp('/admin/upload', ADMIN)
+    // The user re-authenticates (e.g. in another flow) while the old request is still in flight.
+    saveSession({ ...ADMIN, token: 'tok-new' })
+    await act(async () => reply.resolve({ status: 401, body: { error: 'session_expired', message: 'x' } }))
+
+    expect(loadSession()?.token).toBe('tok-new')
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/admin\/upload$/)
+    expect(screen.queryByText('Your session expired. Please sign in again')).toBeNull()
+  })
+
+  it('does not redirect /signin to itself on a late session_expired', async () => {
+    function GoToSignIn() {
+      const navigate = useNavigate()
+      return <button onClick={() => navigate('/signin')}>go sign in</button>
+    }
+    const reply = deferred<{ status: number; body: unknown }>()
+    mockFetch({ 'GET /lots': () => reply.promise })
+    renderApp('/', ADMIN, <GoToSignIn />)
+    await userEvent.setup().click(screen.getByRole('button', { name: 'go sign in' }))
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/signin$/)
+    await act(async () => reply.resolve({ status: 401, body: { error: 'session_expired', message: 'x' } }))
+
+    expect(loadSession()).toBeNull()
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/signin$/)
+    expect(peekFlash()).toBeNull()
   })
 })

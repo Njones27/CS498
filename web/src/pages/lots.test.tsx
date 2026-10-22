@@ -118,4 +118,12 @@ describe('lot list', () => {
     expect(rows[0]).toHaveAttribute('href', '/lots/lot-a')
     expect(screen.queryByText(/sign in/i)).toBeNull()
   })
+
+  it('classifies the same whole percent it displays', async () => {
+    mockFetch({ 'GET /lots': { body: [lot({ openPercent: 29.6 })] } })
+    renderApp('/')
+    const [row] = await screen.findAllByTestId('lot-row')
+    expect(within(row).getByText('30% open')).toBeInTheDocument()
+    expect(within(row).getByText('Plenty')).toBeInTheDocument()
+  })
 })

@@ -27,13 +27,25 @@ export class ApiError extends Error {
 type TokenGetter = () => string | null
 type ExpiredHandler = () => void
 
+const NOOP: ExpiredHandler = () => {}
 let getToken: TokenGetter = () => null
-let onSessionExpired: ExpiredHandler = () => {}
+let onSessionExpired: ExpiredHandler = NOOP
 
-/** Wired by AuthProvider so the client can attach the token and report expiry. */
-export function configureClient(opts: { getToken: TokenGetter; onSessionExpired: ExpiredHandler }) {
-  getToken = opts.getToken
-  onSessionExpired = opts.onSessionExpired
+/** Where the client reads the bearer token from. Wired once, at module load, by the auth module. */
+export function setTokenGetter(fn: TokenGetter): void {
+  getToken = fn
+}
+
+/**
+ * Called when a request fails with 401 `session_expired`, but only while the token that request
+ * was sent with is still the current one (a late 401 must not clobber a newer session).
+ * Returns an unsubscribe that restores the no-op handler if `fn` is still installed.
+ */
+export function setSessionExpiredHandler(fn: ExpiredHandler): () => void {
+  onSessionExpired = fn
+  return () => {
+    if (onSessionExpired === fn) onSessionExpired = NOOP
+  }
 }
 
 async function parseError(res: Response): Promise<ApiError> {
@@ -65,7 +77,7 @@ export async function apiRequest<T>(
 
   if (!res.ok) {
     const err = await parseError(res)
-    if (err.status === 401 && err.code === 'session_expired') onSessionExpired()
+    if (err.status === 401 && err.code === 'session_expired' && token && getToken() === token) onSessionExpired()
     throw err
   }
   if (res.status === 204) return undefined as T

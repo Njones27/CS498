@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react'
+import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { ApiError, api, errorMessage } from '../api/client'
 import type {
@@ -53,9 +53,11 @@ export function UploadPage() {
   const [progress, setProgress] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [outcome, setOutcome] = useState<Outcome | null>(null)
+  // Bumped on every file change so a slow EXIF read for an earlier file is discarded.
+  const fileSeq = useRef(0)
 
-  // Ignore a remembered lot that is no longer published; default to a lot's only viewpoint.
-  const viewpoints = detail.data?.viewpoints ?? []
+  // Default to a lot's only viewpoint, but only from the detail of the lot actually selected.
+  const viewpoints = detail.data && detail.data.lot.lotId === lotId ? detail.data.viewpoints : []
   const viewId =
     viewpoints.length === 1
       ? viewpoints[0].viewId
@@ -75,6 +77,7 @@ export function UploadPage() {
 
   async function onFileChange(e: ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] ?? null
+    const seq = ++fileSeq.current
     setOutcome(null)
     setProgress(null)
     setTimeError(null)
@@ -89,12 +92,13 @@ export function UploadPage() {
     setFile(err ? null : f)
     if (err) return
     const taken = await readCaptureTime(f)
+    if (seq !== fileSeq.current) return
     setCaptureTime(taken ? toDateTimeLocal(taken) : '')
   }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!file || !lotId || !viewId) return
+    if (busy || !file || !lotId || !viewId) return
     const when = parseLocalDateTime(captureTime)
     if (!when) return
     if (when.getTime() > Date.now()) {
@@ -145,63 +149,66 @@ export function UploadPage() {
         </p>
       )}
       <form className="form" onSubmit={onSubmit} noValidate>
-        <label>
-          Lot
-          <select value={lotId} onChange={onLotChange} required>
-            <option value="">Choose a lot</option>
-            {lots.data?.map((l) => (
-              <option key={l.lotId} value={l.lotId}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Viewpoint
-          <select value={viewId} onChange={(e) => setViewId(e.target.value)} disabled={!lotId} required>
-            <option value="">Choose a viewpoint</option>
-            {viewpoints.map((v) => (
-              <option key={v.viewId} value={v.viewId}>
-                {v.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Photo
-          <input type="file" accept="image/jpeg,image/png" onChange={onFileChange} />
-        </label>
-        {fileError && (
-          <p className="notice notice--error" role="alert">
-            {fileError}
-          </p>
-        )}
-        <label>
-          Capture time
-          <input
-            type="datetime-local"
-            step="1"
-            value={captureTime}
-            onChange={(e) => {
-              setCaptureTime(e.target.value)
-              setTimeError(null)
-            }}
-          />
-        </label>
-        {file && !captureTime && <p className="hint">This photo has no capture time. Enter when it was taken.</p>}
-        {timeError && (
-          <p className="notice notice--error" role="alert">
-            {timeError}
-          </p>
-        )}
-        {progress !== null && (
-          <progress className="progress" value={Math.round(progress * 100)} max={100} aria-label="Upload progress">
-            {Math.round(progress * 100)}%
-          </progress>
-        )}
-        <button type="submit" className="button button--primary" disabled={!canUpload}>
-          {busy ? 'Uploading…' : 'Upload'}
-        </button>
+        {/* Locked while uploading so the in-flight result cannot land against changed inputs. */}
+        <fieldset className="form__fields" disabled={busy}>
+          <label>
+            Lot
+            <select value={lotId} onChange={onLotChange} required>
+              <option value="">Choose a lot</option>
+              {lots.data?.map((l) => (
+                <option key={l.lotId} value={l.lotId}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Viewpoint
+            <select value={viewId} onChange={(e) => setViewId(e.target.value)} disabled={!lotId} required>
+              <option value="">Choose a viewpoint</option>
+              {viewpoints.map((v) => (
+                <option key={v.viewId} value={v.viewId}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Photo
+            <input type="file" accept="image/jpeg,image/png" onChange={onFileChange} />
+          </label>
+          {fileError && (
+            <p className="notice notice--error" role="alert">
+              {fileError}
+            </p>
+          )}
+          <label>
+            Capture time
+            <input
+              type="datetime-local"
+              step="1"
+              value={captureTime}
+              onChange={(e) => {
+                setCaptureTime(e.target.value)
+                setTimeError(null)
+              }}
+            />
+          </label>
+          {file && !captureTime && <p className="hint">This photo has no capture time. Enter when it was taken.</p>}
+          {timeError && (
+            <p className="notice notice--error" role="alert">
+              {timeError}
+            </p>
+          )}
+          {progress !== null && (
+            <progress className="progress" value={Math.round(progress * 100)} max={100} aria-label="Upload progress">
+              {Math.round(progress * 100)}%
+            </progress>
+          )}
+          <button type="submit" className="button button--primary" disabled={!canUpload}>
+            {busy ? 'Uploading…' : 'Upload'}
+          </button>
+        </fieldset>
       </form>
       {outcome?.kind === 'success' && (
         <p className="notice notice--ok" role="status">

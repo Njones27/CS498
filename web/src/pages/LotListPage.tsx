@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { LotListItem } from '../api/schemas'
-import { summaryFullness } from '../lib/fullness'
+import { displayOpenPercent, fullnessFor } from '../lib/fullness'
 import { useFetch } from '../lib/useFetch'
 
 /** US-15: every lot with how full it is. Public; never asks to sign in. */
@@ -32,9 +32,10 @@ export function LotListPage() {
 
 function LotRow({ lot }: { lot: LotListItem }) {
   const { summary } = lot
-  const fullness = summaryFullness(summary)
-  const hasData = fullness.level !== 'no-data' && summary.openPercent !== null
-  const pct = hasData ? Math.round(summary.openPercent as number) : 0
+  const openPercent = displayOpenPercent(summary)
+  const fullness = fullnessFor(openPercent)
+  const hasData = openPercent !== null
+  const pct = openPercent ?? 0
 
   return (
     <li>

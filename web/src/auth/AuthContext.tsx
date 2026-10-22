@@ -1,6 +1,15 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import {
+  createContext,
+  startTransition,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { api, configureClient } from '../api/client'
+import { api, setSessionExpiredHandler, setTokenGetter } from '../api/client'
 import type { LoginRequest, LoginResponse } from '../api/schemas'
 import { clearSession, loadSession, saveSession, setFlash, type Session } from './session'
 
@@ -15,23 +24,29 @@ interface AuthValue {
 
 const AuthContext = createContext<AuthValue | null>(null)
 
+// The token lives in sessionStorage, so the getter needs no React state: wire it once, before any
+// component renders, so the very first request already carries it.
+setTokenGetter(() => loadSession()?.token ?? null)
+
 /** Holds the signed-in principal and wires the API client. Must render inside a router. */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const location = useLocation()
   const [session, setSession] = useState<Session | null>(() => loadSession())
 
-  // Configured during render so the very first request already sees the token.
-  configureClient({
-    getToken: () => loadSession()?.token ?? null,
-    onSessionExpired: () => {
-      clearSession()
-      setFlash(SESSION_EXPIRED_MESSAGE)
-      setSession(null)
-      const next = location.pathname + location.search
-      navigate(`/signin?next=${encodeURIComponent(next)}`, { replace: true })
-    },
-  })
+  const { pathname, search } = location
+  useEffect(
+    () =>
+      setSessionExpiredHandler(() => {
+        clearSession()
+        setSession(null)
+        // Already signing in: no redirect, and no flash that would linger to a later visit.
+        if (pathname === '/signin') return
+        setFlash(SESSION_EXPIRED_MESSAGE)
+        navigate(`/signin?next=${encodeURIComponent(pathname + search)}`, { replace: true })
+      }),
+    [navigate, pathname, search],
+  )
 
   const signIn = useCallback(async (email: string, password: string) => {
     const body: LoginRequest = { email, password }
@@ -49,8 +64,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(() => {
     clearSession()
-    // Leave the guarded page before dropping the principal, or RequireAdmin redirects to /signin.
-    void Promise.resolve(navigate('/', { replace: true })).then(() => setSession(null))
+    // The router applies location changes in a transition; drop the principal in the same one so
+    // both land in a single render (otherwise RequireAdmin sees no session and redirects to /signin).
+    startTransition(() => {
+      setSession(null)
+      navigate('/', { replace: true })
+    })
   }, [navigate])
 
   const value = useMemo<AuthValue>(

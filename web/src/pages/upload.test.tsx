@@ -1,8 +1,8 @@
-import { screen } from '@testing-library/react'
+import { act, fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LotDetail, LotListItem } from '../api/schemas'
-import { ADMIN, mockFetch, renderApp } from '../test/helpers'
+import { ADMIN, deferred, mockFetch, renderApp } from '../test/helpers'
 import { readCaptureTime } from '../lib/exif'
 import { putFile } from '../lib/putFile'
 
@@ -130,5 +130,89 @@ describe('upload flow', () => {
     await vi.waitFor(() => expect(uploadButton()).toBeEnabled())
     await user.click(uploadButton())
     expect(await screen.findByText('Unknown viewpoint')).toBeInTheDocument()
+  })
+})
+
+describe('upload form integrity', () => {
+  const twoViewDetail: LotDetail = {
+    lot: { lotId: 'lot-b', name: 'Lot B', location: 'y', staleAfterMinutes: 15 },
+    viewpoints: [{ viewId: 'w1', name: 'North' }, { viewId: 'w2', name: 'South' }],
+    layout: { version: 1, schematic: { width: 10, height: 10 }, spaces: [] },
+  }
+
+  it("does not carry the previous lot's only viewpoint over to a newly chosen lot", async () => {
+    const lotB = deferred<{ body: unknown }>()
+    const { user } = await setup({
+      'GET /lots': { body: [...lots, { ...lots[0], lotId: 'lot-b', name: 'Lot B' }] },
+      'GET /lots/lot-b': () => lotB.promise,
+    })
+    expect(screen.getByLabelText('Viewpoint')).toHaveValue('v1')
+
+    await user.selectOptions(screen.getByLabelText('Lot'), 'lot-b')
+    expect(screen.getByLabelText('Viewpoint')).toHaveValue('')
+    expect(screen.queryByRole('option', { name: 'East pole' })).toBeNull()
+
+    await act(async () => lotB.resolve({ body: twoViewDetail }))
+    expect(screen.getByRole('option', { name: 'North' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Viewpoint')).toHaveValue('')
+  })
+
+  it('locks the form while uploading and ignores a second submit', async () => {
+    const put = deferred<void>()
+    vi.mocked(putFile).mockReturnValue(put.promise)
+    let slotRequests = 0
+    const { user } = await setup({
+      'POST /admin/uploads': () => {
+        slotRequests += 1
+        return { body: { imageId: 'img-1', uploadUrl: 'http://s3/put', expiresAt: '2099-01-01T00:00:00Z' } }
+      },
+      'POST /admin/uploads/img-1/complete': { body: { imageId: 'img-1', jobStatus: 'QUEUED' } },
+    })
+    await user.upload(fileInput(), jpeg())
+    await vi.waitFor(() => expect(uploadButton()).toBeEnabled())
+    await user.click(uploadButton())
+    await vi.waitFor(() => expect(putFile).toHaveBeenCalled())
+
+    expect(fileInput()).toBeDisabled()
+    expect(screen.getByLabelText('Lot')).toBeDisabled()
+    expect(screen.getByLabelText('Capture time')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Uploading…' })).toBeDisabled()
+    fireEvent.submit(fileInput().closest('form') as HTMLFormElement)
+
+    await act(async () => put.resolve())
+    expect(await screen.findByText('Photo queued for processing')).toBeInTheDocument()
+    expect(slotRequests).toBe(1)
+    expect(fileInput()).toBeEnabled()
+  })
+
+  it("applies only the latest file's EXIF time when an earlier read finishes last", async () => {
+    const slowRead = deferred<Date | null>()
+    vi.mocked(readCaptureTime)
+      .mockReturnValueOnce(slowRead.promise)
+      .mockResolvedValueOnce(new Date('2026-10-21T11:15:00'))
+    const { user } = await setup()
+    await user.upload(fileInput(), jpeg())
+    await user.upload(fileInput(), new File(['y'], 'b.jpg', { type: 'image/jpeg' }))
+    const time = screen.getByLabelText('Capture time') as HTMLInputElement
+    await vi.waitFor(() => expect(time.value).toMatch(/^2026-10-21T11:15/))
+
+    await act(async () => slowRead.resolve(new Date('2026-10-21T08:00:00')))
+    expect(time.value).toMatch(/^2026-10-21T11:15/)
+  })
+})
+
+describe('snapshots placeholder', () => {
+  it('resolves the duplicate link target and shows the snapshot id', () => {
+    mockFetch({})
+    renderApp('/admin/snapshots#img-0', ADMIN)
+    expect(screen.getByRole('heading', { name: 'Snapshots' })).toBeInTheDocument()
+    expect(screen.getByText('The Snapshots page is coming soon.')).toBeInTheDocument()
+    expect(screen.getByText('img-0')).toBeInTheDocument()
+  })
+
+  it('stays behind the admin guard', () => {
+    mockFetch({})
+    renderApp('/admin/snapshots#img-0')
+    expect(screen.getByTestId('location')).toHaveTextContent('/signin?next=%2Fadmin%2Fsnapshots%23img-0')
   })
 })
