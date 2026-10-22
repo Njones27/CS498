@@ -20,9 +20,9 @@ One photo goes upload -> queue -> worker -> status -> driver map, fully local, s
 - [x] Tests listed in the plan ("Tests that gate wave 1": core, api, seed)
 
 ## Worker (PR 3)
-- [ ] `handler.process_message` (viewpoint-scoped, permanent vs retryable, receive_count attempts)
-- [ ] `poller.py`, `aligners/identity.py`, `scorers/stub.py`, `scorers/fake.py`, Dockerfile
-- [ ] Worker tests listed in the plan
+- [x] `handler.process_message` (viewpoint-scoped, permanent vs retryable, receive_count attempts)
+- [x] `poller.py`, `aligners/identity.py`, `scorers/stub.py`, `scorers/fake.py`, Dockerfile
+- [x] Worker tests listed in the plan
 
 ## Web (PR 4)
 - [ ] Auth (sign-in, guard, expired/non-admin messages, sign out)
