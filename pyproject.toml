@@ -32,6 +32,6 @@ extend-exclude = ["web", "eval"]
 select = ["E", "F", "I", "B", "UP", "W"]
 
 [tool.pytest.ini_options]
-testpaths = ["core/tests", "api/tests", "worker/tests", "seed/tests"]
+testpaths = ["core/tests", "api/tests", "worker/tests", "seed/tests", "tests"]
 markers = ["compose: needs the Docker Compose stack (RUN_COMPOSE_TESTS=1)"]
 addopts = "-m 'not compose'"

@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test:
+    name: Lint, unit tests, contract, web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.23"
+          enable-cache: true
+      - name: Install Python workspace
+        run: uv sync --frozen
+      - name: Ruff
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Pytest (unit, coverage >= 70% on core/api/worker)
+        run: >
+          uv run pytest -q
+          --cov=core/parking_core --cov=api/parking_api --cov=worker/parking_worker
+          --cov-report=term-missing --cov-fail-under=70
+      - name: OpenAPI contract is up to date
+        run: |
+          uv run python -m parking_api.export_openapi > /tmp/openapi.json
+          diff -u contract/openapi.json /tmp/openapi.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Web install
+        working-directory: web
+        run: npm ci
+      - name: Generated TS types are up to date
+        working-directory: web
+        run: |
+          npm run gen:types
+          git diff --exit-code -- src/api/types.gen.ts
+      - name: Web typecheck, tests, build
+        working-directory: web
+        run: |
+          npm run typecheck
+          npm test
+          npm run build
+
+  compose:
+    name: Compose stack end to end
+    runs-on: ubuntu-latest
+    needs: lint-test
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.23"
+          enable-cache: true
+      - name: Install Python workspace
+        run: uv sync --frozen
+      - name: Start the stack
+        run: |
+          cp .env.example .env
+          docker compose up --build -d api worker minio elasticmq dynamodb-local
+      - name: Wait for the API
+        run: |
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:8000/health && exit 0
+            sleep 2
+          done
+          docker compose logs api
+          exit 1
+      - name: Seed
+        run: set -a && . ./.env.ci-host && set +a && uv run python seed/seed.py
+      - name: End-to-end test
+        run: set -a && . ./.env.ci-host && set +a && RUN_COMPOSE_TESTS=1 uv run pytest -q -m compose tests/compose
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop
+        if: always()
+        run: docker compose down -v

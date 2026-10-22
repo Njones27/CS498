@@ -1,0 +1,90 @@
+# Phase 1 local stack (HDD §7.1). Every service maps one to one to an AWS service in Phase 2.
+#   cp .env.example .env && docker compose up --build
+#   uv run python seed/seed.py            # creates table, bucket, queue and loads the test lot
+
+services:
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
+    environment:
+      API_PROXY_TARGET: http://api:8000
+    volumes:
+      - ./web:/app
+      - ./contract:/contract:ro
+      - web_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    env_file: .env
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      minio:
+        condition: service_healthy
+      elasticmq:
+        condition: service_started
+      dynamodb-local:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    env_file: .env
+    depends_on:
+      minio:
+        condition: service_healthy
+      elasticmq:
+        condition: service_started
+      dynamodb-local:
+        condition: service_started
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      # Browser PUTs to presigned URLs come from the Vite origin.
+      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:5173
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  elasticmq:
+    image: softwaremill/elasticmq-native:1.6.12
+    volumes:
+      - ./infra/local/elasticmq.conf:/opt/elasticmq.conf:ro
+    ports:
+      - "9324:9324"
+      - "9325:9325"
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:2.6.1
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    ports:
+      - "8001:8000"
+
+volumes:
+  minio_data:
+  web_node_modules:
