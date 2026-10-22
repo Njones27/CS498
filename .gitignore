@@ -225,3 +225,6 @@ web/dist/
 .venv/
 *.tsbuildinfo
 .claude/worktrees/
+
+# Claude Code personal settings
+.claude/settings.local.json
