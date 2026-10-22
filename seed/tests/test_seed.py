@@ -60,3 +60,30 @@ def test_import_pklot_fixture():
     rects = [s["rect"] for s in lot["spaces"]]
     assert all(r["x"] + r["w"] <= 1000 and r["y"] + r["h"] <= 600 for r in rects)
     json.dumps(lot)  # serializable
+
+
+def test_every_lot_file_loads_and_publishes():
+    """Each seed lot has a well-formed layout: unique ids, 4-corner outlines in [0, 1]."""
+    lots_dir = Path(__file__).resolve().parents[1] / "lots"
+    for lot_file in sorted(lots_dir.glob("*.json")):
+        data = load_lot_file(lot_file.stem)
+        ids = [s["spaceId"] for s in data["spaces"]]
+        assert len(ids) == len(set(ids)), lot_file.name
+        for vp in data["viewpoints"]:
+            for sid, poly in vp["outlines"].items():
+                assert sid in ids, (lot_file.name, sid)
+                assert len(poly) == 4, (lot_file.name, sid)
+                inside = all(0.0 <= x <= 1.0 and 0.0 <= y <= 1.0 for x, y in poly)
+                assert inside, (lot_file.name, sid)
+        adapters = build_adapters(Settings(app_env="test", _env_file=None))  # type: ignore[call-arg]
+        result = seed_lot(adapters, data, b"ref")
+        assert result.spaces == len(ids) and result.published_version == 1
+
+
+def test_drone_lot_fixture_matches_layout():
+    data = load_lot_file("drone-lot")
+    assert len(data["spaces"]) == 124
+    vp = data["viewpoints"][0]
+    assert (vp["imageWidth"], vp["imageHeight"]) == (1982, 2000)
+    fixture = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "drone-lot.jpg"
+    assert fixture.exists()

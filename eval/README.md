@@ -11,6 +11,19 @@ of `test-lot`. Regenerate after editing the lot JSON:
 
 It is not a realistic photo; it only exercises the upload -> worker -> status pipeline.
 
+## `fixtures/drone-lot.jpg` (overhead test photo)
+
+A straight-down 1982x2000 photo of a real lot (team test photo, Oct 22 2026) with
+`seed/lots/drone-lot.json`: 124 stalls in six rows (B to G) outlined from the painted
+lines (86 px pitch; the two rows cut off at the top and bottom edges are left out). With
+the real models it processes in about 17 s and every stall matches the photo except one
+empty stall marked UNKNOWN by a neighbour's car box spilling over the line. Seed it with:
+
+    uv run python seed/seed.py --lot drone-lot
+
+The dev runner seeds only `test-lot`; upload this photo to `drone-lot` / `V1` to see the
+real pipeline on it (`DETECTOR=acpds_yolo ALIGNER=orb`, weights downloaded).
+
 ## PKLot (real photos)
 
 Source: [PKLot](https://web.inf.ufpr.br/vri/databases/parking-lot-database/) (Almeida et al.,
