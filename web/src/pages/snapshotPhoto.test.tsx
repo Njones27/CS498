@@ -34,15 +34,15 @@ const complete: SnapshotDetail = {
   observations: [
     {
       spaceId: 'B-17', state: 'OCCUPIED', acpdsScore: 0.97, carOverlap: 0.81, inFrame: true,
-      polygon: [[0.1, 0.1], [0.2, 0.1], [0.2, 0.3], [0.1, 0.3]], carBoxes: [box(0.1, 0.1, 0.2, 0.3)],
+      polygon: [[0.1, 0.1], [0.2, 0.1], [0.2, 0.3], [0.1, 0.3]],
     },
     {
       spaceId: 'B-18', state: 'UNKNOWN', acpdsScore: 0, carOverlap: 0.07, inFrame: true,
-      polygon: [[0.3, 0.1], [0.4, 0.1], [0.4, 0.3], [0.3, 0.3]], carBoxes: [],
+      polygon: [[0.3, 0.1], [0.4, 0.1], [0.4, 0.3], [0.3, 0.3]],
     },
     {
       spaceId: 'B-19', state: 'FREE', acpdsScore: 0.02, carOverlap: 0, inFrame: false,
-      polygon: [[0.5, 0.1], [0.6, 0.1], [0.6, 0.3], [0.5, 0.3]], carBoxes: [],
+      polygon: [[0.5, 0.1], [0.6, 0.1], [0.6, 0.3], [0.5, 0.3]],
     },
   ],
 }
@@ -104,6 +104,20 @@ describe('snapshot photo page', () => {
     expect(screen.getByRole('link', { name: '← Admin' })).toHaveAttribute('href', '/admin')
   })
 
+  it('lists every observation in a collapsible spaces table', async () => {
+    mockFetch({ [API]: { body: complete } })
+    renderApp(URL, ADMIN)
+    const summary = await screen.findByText('Spaces (3)')
+    expect(summary.closest('details')).not.toHaveAttribute('open')
+    await userEvent.setup().click(summary)
+    const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1)
+    expect(rows.map((r) => Array.from(r.querySelectorAll('th, td'), (c) => c.textContent))).toEqual([
+      ['B-17', 'Occupied', '0.97', '0.81', 'Yes'],
+      ['B-18', 'Unknown', '0.00', '0.07', 'Yes'],
+      ['B-19', 'Free', '0.02', '0.00', 'No'],
+    ])
+  })
+
   it('hides car boxes and outlines with their toggles', async () => {
     mockFetch({ [API]: { body: complete } })
     renderApp(URL, ADMIN)
@@ -131,6 +145,7 @@ describe('snapshot photo page', () => {
     renderApp(URL, ADMIN)
     expect(await screen.findByText('Processing…')).toBeInTheDocument()
     expect(screen.queryByTestId('photo-overlay')).not.toBeInTheDocument()
+    expect(screen.queryByText('Photo not available')).not.toBeInTheDocument()
     loadPhoto()
     expect(screen.queryByTestId('photo-overlay')).not.toBeInTheDocument() // no overlays yet
 
@@ -168,6 +183,14 @@ describe('snapshot photo page', () => {
     expect(screen.queryByRole('img', { name: /Uploaded photo/ })).not.toBeInTheDocument()
     expect(screen.queryByText('Processing…')).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not report a missing photo while the job is still queued', async () => {
+    const queued = { ...complete, jobStatus: 'QUEUED' as const, finished: false, photoUrl: null, observations: [], detections: [] }
+    mockFetch({ [API]: { body: queued } })
+    renderApp(URL, ADMIN)
+    expect(await screen.findByText('Processing…')).toBeInTheDocument()
+    expect(screen.queryByText('Photo not available')).not.toBeInTheDocument()
   })
 
   it('says the photo is not available when the image fails to load', async () => {

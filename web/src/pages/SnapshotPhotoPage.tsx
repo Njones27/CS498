@@ -48,6 +48,9 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
 
   const complete = data?.jobStatus === 'COMPLETE'
   const available = !!photoUrl && data?.jobStatus !== 'EXPIRED' && !photoFailed
+  // While a job is still running the photo may simply not be there yet; only a finished (or
+  // expired) job without a usable photo is reported as missing.
+  const settled = !!data && (data.finished || data.jobStatus === 'EXPIRED')
 
   return (
     <main className="page">
@@ -86,7 +89,7 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
           </label>
         </div>
       )}
-      {data && !available && (
+      {settled && !available && (
         <p className="notice notice--warn" role="status">
           Photo not available
         </p>
@@ -110,6 +113,7 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
         </div>
       )}
       {data && complete && <Legend />}
+      {data && complete && <SpacesTable observations={data.observations} />}
       {data?.modelVersion && <p className="hint photo-model">Model: {data.modelVersion}</p>}
     </main>
   )
@@ -184,8 +188,42 @@ function Overlay({ size, observations, boxes }: { size: Size; observations: Obse
   )
 }
 
+const num = (v: number | null) => (v === null ? 'n/a' : v.toFixed(2))
+
+/** The per-space numbers as text, so they are not hover-only (keyboard and screen readers). */
+function SpacesTable({ observations }: { observations: ObservationOut[] }) {
+  return (
+    <details className="photo-spaces">
+      <summary>Spaces ({observations.length})</summary>
+      <div className="photo-spaces__wrap">
+        <table className="photo-spaces__table">
+          <thead>
+            <tr>
+              <th scope="col">Space</th>
+              <th scope="col">State</th>
+              <th scope="col">ACPDS score</th>
+              <th scope="col">Car overlap</th>
+              <th scope="col">In frame</th>
+            </tr>
+          </thead>
+          <tbody>
+            {observations.map((o) => (
+              <tr key={o.spaceId}>
+                <th scope="row">{o.spaceId}</th>
+                <td>{visualFor(o.state).label}</td>
+                <td>{num(o.acpdsScore)}</td>
+                <td>{num(o.carOverlap)}</td>
+                <td>{o.inFrame ? 'Yes' : 'No'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  )
+}
+
 function describe(o: ObservationOut): string {
-  const num = (v: number | null) => (v === null ? 'n/a' : v.toFixed(2))
   return [
     `${o.spaceId}: ${visualFor(o.state).label}`,
     `ACPDS ${num(o.acpdsScore)}`,

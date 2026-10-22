@@ -222,3 +222,8 @@ a { color: var(--accent); }
 .box-swatch.photo-box--car .photo-box__rect { stroke-dasharray: 4 2; }
 .box-swatch.photo-box--other .photo-box__rect { stroke: #8a94a3; stroke-dasharray: 2 2; }
 .photo-model { margin-top: 0.75rem; overflow-wrap: anywhere; }
+.photo-spaces { margin-top: 0.75rem; }
+.photo-spaces summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+.photo-spaces__wrap { overflow-x: auto; max-height: 60vh; }
+.photo-spaces__table { width: 100%; border-collapse: collapse; background: var(--surface); font-variant-numeric: tabular-nums; }
+.photo-spaces__table th, .photo-spaces__table td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); }

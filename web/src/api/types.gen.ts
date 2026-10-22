@@ -491,11 +491,6 @@ export interface components {
         ObservationOut: {
             /** Acpdsscore */
             acpdsScore: number | null;
-            /**
-             * Carboxes
-             * @description Car/truck/bus detections that touch this space
-             */
-            carBoxes: components["schemas"]["CarBoxOut"][];
             /** Caroverlap */
             carOverlap: number | null;
             /** Inframe */

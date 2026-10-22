@@ -1,4 +1,4 @@
-"""Admin photo overlay: snapshot detail with outlines, car boxes, detections and a photo URL,
+"""Admin photo overlay: snapshot detail with outlines, detections and a photo URL,
 plus the test-only object route that serves the photo locally."""
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ def complete(adapters, image_id: str) -> None:
                 car_overlap=0.8,
                 capture_time=NOW,
                 polygon=POLYGON,
-                car_boxes=[BOX],
             ),
             SpaceObservation(
                 image_id=image_id,
@@ -44,17 +43,13 @@ def complete(adapters, image_id: str) -> None:
             ),
         ]
     )
+    repo.put_detections(image_id, [BOX, STRAY])
     assert repo.transition_job(
-        image_id,
-        {JobStatus.PROCESSING},
-        JobStatus.COMPLETE,
-        finished=True,
-        model_version="fake",
-        detections=[BOX, STRAY],
+        image_id, {JobStatus.PROCESSING}, JobStatus.COMPLETE, finished=True, model_version="fake"
     )
 
 
-def test_detail_has_outlines_car_boxes_detections_and_photo(client, admin_headers, adapters):
+def test_detail_has_outlines_detections_and_photo(client, admin_headers, adapters):
     data = b"\xff\xd8\xff\xe0 a jpeg"
     image_id = upload(client, admin_headers, data=data)
     assert client.post(f"/admin/uploads/{image_id}/complete", headers=admin_headers).is_success
@@ -70,8 +65,8 @@ def test_detail_has_outlines_car_boxes_detections_and_photo(client, admin_header
     ]
     obs = {o["spaceId"]: o for o in detail["observations"]}
     assert obs["A-01"]["polygon"] == [list(p) for p in POLYGON]
-    assert obs["A-01"]["carBoxes"] == [detail["detections"][0]]
-    assert obs["A-02"]["polygon"] is None and obs["A-02"]["carBoxes"] == []
+    assert "carBoxes" not in obs["A-01"]
+    assert obs["A-02"]["polygon"] is None
 
     photo_url = detail["photoUrl"]
     assert photo_url.startswith("/api/_test/objects/raw/test-lot/V1/")
@@ -79,6 +74,7 @@ def test_detail_has_outlines_car_boxes_detections_and_photo(client, admin_header
     assert photo.status_code == 200
     assert photo.content == data
     assert photo.headers["content-type"] == "image/jpeg"
+    assert photo.headers["x-content-type-options"] == "nosniff"
 
 
 def test_detail_without_a_stored_photo_has_no_url(client, admin_headers):
@@ -114,3 +110,25 @@ def test_test_object_route_absent_outside_test(adapters):
     s = Settings(app_env="local", _env_file=None)  # type: ignore[call-arg]
     r = TestClient(create_app(s, adapters)).get("/_test/objects/raw/x/V1/img.png")
     assert r.status_code == 404
+
+
+class BrokenStore:
+    """An object store whose S3 calls fail (a storage hiccup)."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def exists(self, key: str) -> bool:
+        raise RuntimeError("S3 unavailable")
+
+
+def test_detail_survives_a_storage_failure(client, admin_headers, adapters, caplog):
+    image_id = upload(client, admin_headers)
+    adapters.object_store = BrokenStore(adapters.object_store)
+    r = client.get(f"/admin/snapshots/{image_id}", headers=admin_headers)
+    assert r.status_code == 200
+    assert r.json()["photoUrl"] is None
+    assert "Photo URL unavailable" in caplog.text

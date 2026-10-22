@@ -567,14 +567,6 @@
             ],
             "title": "Acpdsscore"
           },
-          "carBoxes": {
-            "description": "Car/truck/bus detections that touch this space",
-            "items": {
-              "$ref": "#/components/schemas/CarBoxOut"
-            },
-            "title": "Carboxes",
-            "type": "array"
-          },
           "carOverlap": {
             "anyOf": [
               {
@@ -629,8 +621,7 @@
           "acpdsScore",
           "carOverlap",
           "inFrame",
-          "polygon",
-          "carBoxes"
+          "polygon"
         ],
         "title": "ObservationOut",
         "type": "object"

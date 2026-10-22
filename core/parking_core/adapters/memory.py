@@ -19,6 +19,7 @@ from ..auth import HS256Verifier
 from ..errors import NotPublishedError
 from ..keys import layout_snapshot_key
 from ..models import (
+    CarBox,
     ClaimResult,
     Closure,
     JobStatus,
@@ -173,6 +174,7 @@ class MemoryRepository:
         self._snapshots: dict[str, Snapshot] = {}
         self._hashes: dict[str, tuple[str, datetime]] = {}  # sha256 -> (imageId, claimedAt)
         self._observations: dict[tuple[str, str], SpaceObservation] = {}
+        self._detections: dict[str, list[CarBox]] = {}
         self._statuses: dict[tuple[str, str], SpaceStatus] = {}
         self._closures: dict[tuple[str, str], Closure] = {}
 
@@ -334,6 +336,14 @@ class MemoryRepository:
                 for (iid, _), o in sorted(self._observations.items())
                 if iid == image_id
             ]
+
+    def put_detections(self, image_id: str, detections: list[CarBox]) -> None:
+        with self._lock:
+            self._detections[image_id] = [d.model_copy(deep=True) for d in detections]
+
+    def get_detections(self, image_id: str) -> list[CarBox]:
+        with self._lock:
+            return [d.model_copy(deep=True) for d in self._detections.get(image_id, [])]
 
     def update_status_if_newer(self, status: SpaceStatus) -> bool:
         key = (status.lot_id, status.space_id)

@@ -46,6 +46,9 @@ in passes of 32, at the same speed). Chunking keeps big lots inside the worker's
 MANIFEST_NAME = "manifest.json"
 DOWNLOAD_HINT = "Run `uv run python scripts/download_weights.py` (see models/README.md)."
 VISION_PACKAGES = ("torch", "torchvision", "ultralytics")
+YOLO_MAX_DET = 600
+"""Per-photo detection cap (ultralytics defaults to 300). Every class is kept for the overlay,
+so a busy lot's misread non-car boxes must not push real cars out of the cap."""
 MAX_PIXELS = 100_000_000
 """Photos above 100 MP are refused (a drone frame is ~12-50 MP); checked from the header."""
 _MAX_COORD = 1e6  # px; keeps absurd outline coordinates inside int32 for cv2.fillPoly
@@ -221,36 +224,6 @@ def car_pixels(poly: np.ndarray, px0: int, py0: int, det: Detection, mode: Overl
     return _covered(poly, px0, py0, x0, y0, x1, y1)
 
 
-def car_detections(
-    detections: Sequence[Detection], min_conf: float = 0.25, classes: frozenset[str] = CAR_CLASSES
-) -> list[Detection]:
-    """The detections that count as cars: ``classes`` at ``conf >= min_conf``."""
-    return [d for d in detections if d.cls_name in classes and d.conf >= min_conf]
-
-
-def car_coverage(
-    outlines: Sequence[AlignedOutline],
-    cars: Sequence[Detection],
-    width: int,
-    height: int,
-    mode: OverlapMode = "box",
-) -> list[tuple[float, list[int]]]:
-    """Per outline: (max over ``cars`` of |car region ∩ space| / |space|, indices of the cars
-    covering at least one of its pixels). A space with no pixels in the photo gets (0.0, [])."""
-    out: list[tuple[float, list[int]]] = []
-    for outline in outlines:
-        pts = np.asarray(outline.polygon, dtype=np.float64).reshape(-1, 2) * [width, height]
-        poly, px0, py0 = rasterize(pts, width, height)
-        area = int(np.count_nonzero(poly))
-        if area == 0 or not cars:
-            out.append((0.0, []))
-            continue
-        pixels = [car_pixels(poly, px0, py0, d, mode) for d in cars]
-        touching = [i for i, n in enumerate(pixels) if n > 0]
-        out.append((min(1.0, max(pixels) / area), touching))
-    return out
-
-
 def car_overlaps(
     outlines: Sequence[AlignedOutline],
     detections: Sequence[Detection],
@@ -265,8 +238,18 @@ def car_overlaps(
     Only ``classes`` at ``conf >= min_conf`` count. Seg mode falls back to the box for a
     detection without a mask. A space with no pixels in the photo gets 0.0.
     """
-    cars = car_detections(detections, min_conf, classes)
-    return [best for best, _ in car_coverage(outlines, cars, width, height, mode)]
+    cars = [d for d in detections if d.cls_name in classes and d.conf >= min_conf]
+    out: list[float] = []
+    for outline in outlines:
+        pts = np.asarray(outline.polygon, dtype=np.float64).reshape(-1, 2) * [width, height]
+        poly, px0, py0 = rasterize(pts, width, height)
+        area = int(np.count_nonzero(poly))
+        if area == 0 or not cars:
+            out.append(0.0)
+            continue
+        best = max(car_pixels(poly, px0, py0, d, mode) for d in cars)
+        out.append(min(1.0, best / area))
+    return out
 
 
 def detection_box(det: Detection, width: int, height: int) -> CarBox:
@@ -371,6 +354,7 @@ class YoloCarDetector:  # pragma: no cover - needs ultralytics and the weights
             conf=self.conf,
             imgsz=self.imgsz,
             classes=self.class_ids,
+            max_det=YOLO_MAX_DET,
             device="cpu",
             verbose=False,
         )[0]
@@ -382,14 +366,16 @@ class YoloCarDetector:  # pragma: no cover - needs ultralytics and the weights
         detections = []
         for i in range(len(xyxy)):
             mask, xy0 = None, (0, 0)
-            if polygons is not None:
+            cls_name = self.model.names[int(cls_ids[i])]
+            if polygons is not None and cls_name in CAR_CLASSES:
                 # Masks come back as polygons in photo pixels (masks.data is at the letterboxed
-                # inference size); rasterize each one cropped to its own bounding box.
+                # inference size); rasterize each one cropped to its own bounding box. Only car
+                # classes use masks (overlap), so other classes keep mask=None.
                 mask, mx0, my0 = rasterize(polygons[i], width, height)
                 xy0 = (mx0, my0)
             detections.append(
                 Detection(
-                    cls_name=self.model.names[int(cls_ids[i])],
+                    cls_name=cls_name,
                     conf=float(confs[i]),
                     box_xyxy=tuple(float(v) for v in xyxy[i]),
                     mask=mask,
@@ -480,20 +466,16 @@ class AcpdsYoloScorer:
         scores = iter(self.acpds_scores(bgr, visible)) if visible else iter(())
         acpds = [float(next(scores)) if o.in_frame else None for o in outlines]
         found = [d for d in self.car_detector(bgr) if d.conf >= self.yolo_conf]
-        boxes = [detection_box(d, width, height) for d in found]
-        car_idx = [i for i, d in enumerate(found) if d.cls_name in CAR_CLASSES]
-        cars = [found[i] for i in car_idx]
-        coverage = car_coverage(outlines, cars, width, height, self.overlap_mode)
-        self.last_detections = boxes
+        overlaps = car_overlaps(outlines, found, width, height, self.overlap_mode, self.yolo_conf)
+        self.last_detections = [detection_box(d, width, height) for d in found]
         return [
             SpaceScore(
                 space_id=o.space_id,
                 acpds_score=a,
-                car_overlap=float(best),
+                car_overlap=float(v),
                 in_frame=o.in_frame,
-                car_boxes=[boxes[car_idx[j]] for j in touching],
             )
-            for o, a, (best, touching) in zip(outlines, acpds, coverage, strict=True)
+            for o, a, v in zip(outlines, acpds, overlaps, strict=True)
         ]
 
     def acpds_scores(self, bgr: np.ndarray, outlines: Sequence[AlignedOutline]) -> np.ndarray:

@@ -29,6 +29,7 @@ from .. import keys as k
 from ..auth import HS256Verifier
 from ..errors import NotPublishedError
 from ..models import (
+    CarBox,
     ClaimResult,
     Closure,
     JobStatus,
@@ -127,6 +128,25 @@ def snapshot_item(snap: Snapshot) -> dict[str, Any]:
 
 def observation_item(obs: SpaceObservation) -> dict[str, Any]:
     return model_to_item(obs, k.image_pk(obs.image_id), k.obs_sk(obs.space_id))
+
+
+DETECTIONS_TYPE = "Detections"
+
+
+def detections_item(image_id: str, detections: list[CarBox]) -> dict[str, Any]:
+    return {
+        k.PK: k.image_pk(image_id),
+        k.SK: k.detections_sk(),
+        TYPE_ATTR: DETECTIONS_TYPE,
+        "imageId": image_id,
+        "detections": to_dynamo(detections),
+    }
+
+
+def item_to_detections(item: dict[str, Any] | None) -> list[CarBox]:
+    if not item:
+        return []
+    return [CarBox.model_validate(d) for d in from_dynamo(item.get("detections", []))]
 
 
 def status_item(status: SpaceStatus) -> dict[str, Any]:
@@ -491,6 +511,12 @@ class DynamoRepository:
     def list_observations(self, image_id: str) -> list[SpaceObservation]:
         items = self._query_prefix(k.image_pk(image_id), "OBS#")
         return [item_to_model(i, SpaceObservation) for i in items]
+
+    def put_detections(self, image_id: str, detections: list[CarBox]) -> None:
+        self._table.put_item(Item=detections_item(image_id, detections))
+
+    def get_detections(self, image_id: str) -> list[CarBox]:
+        return item_to_detections(self._get(k.image_pk(image_id), k.detections_sk()))
 
     def update_status_if_newer(self, status: SpaceStatus) -> bool:
         try:

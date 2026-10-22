@@ -232,47 +232,71 @@ def overlay_observation() -> SpaceObservation:
         car_overlap=0.71,
         capture_time=NOW,
         polygon=[(0.1, 0.2), (0.3, 0.2), (0.3, 0.45), (0.1, 0.45)],
-        car_boxes=[BOX],
     )
 
 
 def test_overlay_fields_round_trip_memory(repo):
-    repo.put_snapshot(snap(status=JobStatus.PROCESSING))
-    assert repo.get_snapshot("i1").detections == []  # default for older records
-    assert repo.transition_job(
-        "i1", {JobStatus.PROCESSING}, JobStatus.COMPLETE, detections=[BOX, TRUCK]
-    )
-    assert repo.get_snapshot("i1").detections == [BOX, TRUCK]
+    assert repo.get_detections("i1") == []  # nothing stored yet
+    repo.put_detections("i1", [BOX, TRUCK])
+    assert repo.get_detections("i1") == [BOX, TRUCK]
+    repo.put_detections("i1", [TRUCK])  # a re-run overwrites
+    assert repo.get_detections("i1") == [TRUCK]
     obs = overlay_observation()
     repo.put_observations([obs])
-    assert repo.list_observations("i1") == [obs]
+    assert repo.list_observations("i1") == [obs]  # the DET# data is not an observation
 
 
 def test_overlay_fields_round_trip_dynamo_items():
-    s = snap().model_copy(update={"detections": [BOX, TRUCK]})
-    item = aws.snapshot_item(s)
+    item = aws.detections_item("i1", [BOX, TRUCK])
+    assert (item["PK"], item["SK"], item["entityType"]) == ("IMG#i1", "DET#", "Detections")
     assert item["detections"][0] == {
         "clsName": "car",
         "conf": Decimal("0.87"),
         "box": [Decimal("0.1"), Decimal("0.2"), Decimal("0.35"), Decimal("0.5")],
     }
-    assert aws.item_to_model(item, Snapshot) == s
+    assert aws.item_to_detections(item) == [BOX, TRUCK]
+    assert aws.item_to_detections(None) == []
+    assert "detections" not in aws.snapshot_item(snap())  # never on the snapshot item
 
     obs = overlay_observation()
     item = aws.observation_item(obs)
     assert item["polygon"][1] == [Decimal("0.3"), Decimal("0.2")]
-    assert item["carBoxes"][0]["box"][2] == Decimal("0.35")
     assert aws.item_to_model(item, SpaceObservation) == obs
-
     # Items written before the overlay existed still load.
-    old = {k: v for k, v in item.items() if k not in {"polygon", "carBoxes"}}
-    loaded = aws.item_to_model(old, SpaceObservation)
-    assert loaded.polygon is None and loaded.car_boxes == []
+    old = {k: v for k, v in item.items() if k != "polygon"}
+    assert aws.item_to_model(old, SpaceObservation).polygon is None
 
-    upd = aws.transition_update({JobStatus.PROCESSING}, JobStatus.COMPLETE, {"detections": [BOX]})
-    assert upd["ExpressionAttributeNames"]["#f0"] == "detections"
-    assert upd["ExpressionAttributeValues"][":f0"] == [aws.to_dynamo(BOX)]
-    assert upd["ExpressionAttributeValues"][":f0"][0]["conf"] == Decimal("0.87")
+
+def test_detections_dynamo_get_and_put(aws_creds):
+    repo = aws.DynamoRepository(AWS_SETTINGS)
+    key = {"PK": "IMG#i1", "SK": "DET#"}
+    with Stubber(repo._table.meta.client) as stub:
+        stub.add_response(
+            "get_item",
+            {},
+            {"TableName": AWS_SETTINGS.table_name, "Key": key, "ConsistentRead": True},
+        )
+        assert repo.get_detections("i1") == []  # missing item
+        stored = {
+            "PK": {"S": "IMG#i1"},
+            "SK": {"S": "DET#"},
+            "detections": {
+                "L": [
+                    {
+                        "M": {
+                            "clsName": {"S": "car"},
+                            "conf": {"N": "0.87"},
+                            "box": {"L": [{"N": v} for v in ("0.1", "0.2", "0.35", "0.5")]},
+                        }
+                    }
+                ]
+            },
+        }
+        stub.add_response("get_item", {"Item": stored})
+        assert repo.get_detections("i1") == [BOX]
+        stub.add_response("put_item", {})
+        repo.put_detections("i1", [BOX])
+        stub.assert_no_pending_responses()
 
 
 def test_memory_presign_get_points_at_test_route():

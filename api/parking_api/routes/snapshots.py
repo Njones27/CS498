@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Query
 from parking_core.models import CarBox, JobStatus, Snapshot, effective_status
+from parking_core.settings import Adapters
 
 from ..deps import AdaptersDep, AdminDep, NowDep, error
 from ..jobs import enqueue_job
 from ..schemas import CarBoxOut, ErrorResponse, ObservationOut, SnapshotDetail, SnapshotOut
 
 router = APIRouter(prefix="/admin/snapshots", tags=["admin"])
+log = logging.getLogger(__name__)
 
 
 def snapshot_out(s: Snapshot, now: datetime) -> dict[str, object]:
@@ -74,18 +77,26 @@ def get_snapshot(
             car_overlap=o.car_overlap,
             in_frame=o.in_frame,
             polygon=o.polygon,
-            car_boxes=[car_box_out(b) for b in o.car_boxes],
         )
         for o in repo.list_observations(image_id)
     ]
-    store = adapters.object_store
-    photo_url = store.presign_get(snap.s3_key) if store.exists(snap.s3_key) else None
     return SnapshotDetail(
         **snapshot_out(snap, now),
         observations=observations,
-        detections=[car_box_out(b) for b in snap.detections],
-        photo_url=photo_url,
+        detections=[car_box_out(b) for b in repo.get_detections(image_id)],
+        photo_url=photo_url(adapters, snap),
     )
+
+
+def photo_url(adapters: Adapters, snap: Snapshot) -> str | None:
+    """Presigned GET for the photo, or None when it is missing or storage fails: the photo is
+    optional on the detail page, so a storage hiccup must not fail the whole request."""
+    store = adapters.object_store
+    try:
+        return store.presign_get(snap.s3_key) if store.exists(snap.s3_key) else None
+    except Exception:
+        log.warning("Photo URL unavailable for snapshot %s", snap.image_id, exc_info=True)
+        return None
 
 
 def car_box_out(box: CarBox) -> CarBoxOut:

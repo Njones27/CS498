@@ -33,7 +33,11 @@ async def test_upload(image_id: str, request: Request, adapters: AdaptersDep) ->
 )
 def test_object(key: str, adapters: AdaptersDep) -> Response:
     store = adapters.object_store
-    info = store.head(key)
-    if info is None:
-        raise error(404, "not_found", "Object not found")
-    return Response(content=store.get(key), media_type=info.content_type)
+    try:
+        data = store.get(key)
+        content_type = store.content_type(key)  # type: ignore[attr-defined]
+    except KeyError:
+        raise error(404, "not_found", "Object not found") from None
+    return Response(
+        content=data, media_type=content_type, headers={"X-Content-Type-Options": "nosniff"}
+    )

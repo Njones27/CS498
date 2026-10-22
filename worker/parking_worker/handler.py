@@ -122,6 +122,7 @@ def process_message(
         )
         return ProcessResult(image_id, "failed_retryable", str(exc))
 
+    repo.put_detections(image_id, detections)  # overlay debug data; an overwrite, so idempotent
     moved = repo.transition_job(
         image_id,
         {JobStatus.PROCESSING},
@@ -133,7 +134,6 @@ def process_message(
         processing_ms=int((time.monotonic() - started) * 1000),
         model_version=scorer.model_version,
         layout_version=layout_version,
-        detections=detections,
     )
     if not moved:
         # Another worker changed the job while we ran (visibility timeout expired). Our
@@ -218,7 +218,6 @@ def _run(
                 in_frame=score.in_frame,
                 capture_time=snapshot.capture_time,
                 polygon=outline.polygon if outline else None,
-                car_boxes=score.car_boxes,
             )
         )
         statuses.append(

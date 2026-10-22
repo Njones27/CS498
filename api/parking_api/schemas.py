@@ -214,7 +214,6 @@ class ObservationOut(CamelModel):
     polygon: list[tuple[float, float]] | None = Field(
         description="Aligned outline on this photo as [x, y] fractions; null on older observations"
     )
-    car_boxes: list[CarBoxOut] = Field(description="Car/truck/bus detections that touch this space")
 
 
 class SnapshotDetail(SnapshotOut):
