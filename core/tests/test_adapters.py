@@ -1,0 +1,242 @@
+from datetime import UTC, datetime, timedelta, timezone
+from decimal import Decimal
+
+import pytest
+from parking_core.adapters import aws
+from parking_core.adapters.memory import (
+    MemoryJobQueue,
+    MemoryObjectStore,
+    MemoryRepository,
+    build_memory_adapters,
+    image_id_from_raw_key,
+)
+from parking_core.errors import NotPublishedError
+from parking_core.keys import layout_snapshot_key, raw_photo_key
+from parking_core.models import (
+    JobStatus,
+    LayoutVersion,
+    Lot,
+    ParkingSpace,
+    PublishedLayout,
+    Rect,
+    Snapshot,
+    SpaceObservation,
+    SpaceState,
+    SpaceStatus,
+    Viewpoint,
+)
+from parking_core.settings import Settings
+
+NOW = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
+
+
+def snap(image_id="i1", minutes=0, status=JobStatus.UPLOAD_PENDING):
+    return Snapshot(
+        image_id=image_id,
+        lot_id="L",
+        view_id="v",
+        capture_time=NOW + timedelta(minutes=minutes),
+        sha256="a" * 64,
+        s3_key=raw_photo_key("L", "v", image_id),
+        content_type="image/jpeg",
+        size_bytes=10,
+        uploaded_by="admin@x.edu",
+        job_status=status,
+        created_at=NOW,
+    )
+
+
+def status(observed_at, state=SpaceState.FREE):
+    return SpaceStatus(
+        lot_id="L",
+        space_id="s1",
+        state=state,
+        confidence=0.2,
+        observed_at=observed_at,
+        source_image_id="x",
+    )
+
+
+@pytest.fixture
+def repo():
+    return MemoryRepository(MemoryObjectStore())
+
+
+def test_update_status_if_newer(repo):
+    assert repo.update_status_if_newer(status(NOW))
+    assert not repo.update_status_if_newer(status(NOW, SpaceState.OCCUPIED))  # equal
+    assert not repo.update_status_if_newer(status(NOW - timedelta(seconds=1)))  # older
+    assert repo.get_statuses("L")[0].state is SpaceState.FREE
+    assert repo.update_status_if_newer(status(NOW + timedelta(seconds=1), SpaceState.OCCUPIED))
+    assert repo.get_statuses("L")[0].state is SpaceState.OCCUPIED
+
+
+def test_claim_and_takeover(repo):
+    assert repo.claim_hash("h", "a").claimed
+    conflict = repo.claim_hash("h", "b")
+    assert not conflict.claimed and conflict.original_image_id == "a"
+    assert not repo.takeover_hash("h", "zzz", "b")
+    assert repo.takeover_hash("h", "a", "b")
+    assert not repo.takeover_hash("h", "a", "c")  # no longer points at a
+    assert repo.claim_hash("h", "d").original_image_id == "b"
+
+
+def test_transition_job(repo):
+    repo.put_snapshot(snap())
+    assert not repo.transition_job("missing", {JobStatus.UPLOAD_PENDING}, JobStatus.QUEUED)
+    assert not repo.transition_job("i1", {JobStatus.QUEUED}, JobStatus.PROCESSING)
+    assert repo.transition_job(
+        "i1", {JobStatus.UPLOAD_PENDING}, JobStatus.QUEUED, queued_at=NOW, attempts=0
+    )
+    assert repo.transition_job(
+        "i1",
+        {JobStatus.QUEUED, JobStatus.PROCESSING},
+        JobStatus.FAILED,
+        error="Too few matches",
+        finished=True,
+        attempts=1,
+    )
+    s = repo.get_snapshot("i1")
+    assert s.job_status is JobStatus.FAILED and s.finished and s.error == "Too few matches"
+    assert s.queued_at == NOW and s.attempts == 1
+    with pytest.raises(ValueError):
+        repo.transition_job("i1", {JobStatus.FAILED}, JobStatus.QUEUED, bogus=1)
+
+
+def test_snapshots_order(repo):
+    repo.put_snapshot(snap("old", -10))
+    repo.put_snapshot(snap("new", 5))
+    repo.put_snapshot(snap("mid", 0))
+    assert [s.image_id for s in repo.list_snapshots("L")] == ["new", "mid", "old"]
+    assert repo.list_snapshots("L", limit=1)[0].image_id == "new"
+    assert repo.get_latest_snapshot("L").image_id == "new"
+    assert repo.get_latest_snapshot("other") is None
+
+
+def test_published_layout():
+    store = MemoryObjectStore()
+    repo = MemoryRepository(store)
+    repo.put_lot(Lot(lot_id="L", name="Lot", created_at=NOW))
+    assert repo.get_published_layout("L") is None
+    assert repo.get_published_layout("nope") is None
+    layout = PublishedLayout(
+        lot_id="L",
+        version=1,
+        spaces=[ParkingSpace(lot_id="L", space_id="s1", label="1", rect=Rect(x=0, y=0, w=1, h=1))],
+        viewpoints=[],
+        published_at=NOW,
+        published_by="a",
+    )
+    key = layout_snapshot_key("L", 1)
+    version = LayoutVersion(
+        lot_id="L", version=1, published_by="a", published_at=NOW, snapshot_key=key
+    )
+    repo.publish_layout("L", version)
+    assert repo.get_lot("L").current_layout_version == 1
+    with pytest.raises(NotPublishedError):
+        repo.get_published_layout("L")
+    store.put(key, layout.model_dump_json().encode(), "application/json")
+    assert repo.get_published_layout("L") == layout
+    assert [v.version for v in repo.list_layout_versions("L")] == [1]
+
+
+def test_queue_receive_count_and_visibility():
+    q = MemoryJobQueue(visibility_timeout=30)
+    q.send("a")
+    q.send("b")
+    first = q.receive(max_messages=1)
+    assert [(m.body, m.receive_count) for m in first] == [("a", 1)]
+    second = q.receive(max_messages=5)
+    assert [m.body for m in second] == ["b"]
+    assert q.receive() == []  # both in flight
+    q.advance(31)
+    again = q.receive(max_messages=5)
+    assert [(m.body, m.receive_count) for m in again] == [("a", 2), ("b", 2)]
+    q.delete(first[0].receipt)  # stale receipt does nothing
+    assert len(q) == 2
+    q.delete(again[0].receipt)
+    q.requeue_inflight()
+    assert [(m.body, m.receive_count) for m in q.receive(5)] == [("b", 3)]
+
+
+def test_object_store_test_upload():
+    adapters = build_memory_adapters(Settings(app_env="test"))
+    store = adapters.object_store
+    key = raw_photo_key("L", "v", "img-1", "png")
+    assert image_id_from_raw_key(key) == "img-1"
+    assert store.presign_put(key, "image/png") == "/api/_test/uploads/img-1"
+    assert not store.put_for_image("unknown", b"x", "image/png")
+    assert store.put_for_image("img-1", b"data", "image/png")
+    assert store.exists(key) and store.get(key) == b"data"
+    with pytest.raises(ValueError):
+        image_id_from_raw_key("layouts/L/v1.json")
+
+
+# --- aws item (de)serialization ----------------------------------------------
+
+
+def test_snapshot_item_round_trip():
+    s = snap().model_copy(update={"processing_ms": 12, "completed_at": NOW})
+    item = aws.snapshot_item(s)
+    assert item["PK"] == "IMG#i1" and item["SK"] == "META"
+    assert item["GSI1PK"] == "LOT#L"
+    assert item["GSI1SK"] == "2026-10-21T12:00:00.000000Z" == item["captureTime"]
+    assert item["jobStatus"] == "UPLOAD_PENDING"
+    assert aws.item_to_model(item, Snapshot) == s
+
+
+def test_float_fields_become_decimal_and_back():
+    v = Viewpoint(
+        lot_id="L",
+        view_id="v",
+        name="North",
+        outlines={"s1": [(0.1, 0.2), (0.3, 0.4), (0.5, 0.25)]},
+        camera_height_m=4.5,
+    )
+    item = aws.viewpoint_item(v)
+    assert item["SK"] == "VIEW#v"
+    assert item["outlines"]["s1"][0] == [Decimal("0.1"), Decimal("0.2")]
+    assert item["cameraHeightM"] == Decimal("4.5")
+    assert aws.item_to_model(item, Viewpoint) == v
+
+    obs = SpaceObservation(
+        image_id="i",
+        lot_id="L",
+        space_id="s1",
+        state=SpaceState.FREE,
+        acpds_score=0.12,
+        car_overlap=None,
+        capture_time=NOW,
+    )
+    assert aws.item_to_model(aws.observation_item(obs), SpaceObservation) == obs
+    st = status(NOW)
+    assert aws.status_item(st)["SK"] == "STATUS#s1"
+    assert aws.item_to_model(aws.status_item(st), SpaceStatus) == st
+
+
+def test_format_dt_is_sortable():
+    a = aws.format_dt(NOW)
+    b = aws.format_dt(NOW + timedelta(microseconds=500))
+    c = aws.format_dt(NOW + timedelta(seconds=1))
+    assert a < b < c
+    assert aws.format_dt(NOW.astimezone(timezone(timedelta(hours=-5)))) == a
+    assert aws.format_dt(datetime(2026, 1, 1)) == "2026-01-01T00:00:00.000000Z"
+
+
+def test_transition_update_expression():
+    upd = aws.transition_update(
+        {JobStatus.QUEUED, JobStatus.PROCESSING}, JobStatus.FAILED, {"error": "x", "attempts": 3}
+    )
+    assert upd["ConditionExpression"] == "attribute_exists(PK) AND #js IN (:s0, :s1)"
+    assert upd["ExpressionAttributeValues"][":s0"] == "PROCESSING"
+    assert upd["ExpressionAttributeValues"][":to"] == "FAILED"
+    assert upd["ExpressionAttributeNames"]["#f0"] == "attempts"
+    assert upd["ExpressionAttributeNames"]["#f1"] == "error"
+    assert upd["UpdateExpression"] == "SET #js = :to, #f0 = :f0, #f1 = :f1"
+
+
+def test_lot_item_keys():
+    lot = Lot(lot_id="L", name="Lot", created_at=NOW, current_layout_version=2)
+    item = aws.lot_item(lot)
+    assert (item["PK"], item["SK"]) == ("LOT#L", "META")
+    assert aws.item_to_model(item, Lot) == lot

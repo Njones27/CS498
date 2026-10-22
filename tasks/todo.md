@@ -11,10 +11,10 @@ One photo goes upload -> queue -> worker -> status -> driver map, fully local, s
 - [x] README quickstart, this file
 
 ## Backend (PR 2: core/API/seed)
-- [ ] `adapters/memory.py` with conditional semantics (claim/takeover hash, transition_job, update_status_if_newer, queue receive_count)
-- [ ] `adapters/aws.py` (boto3; public endpoint for signing; `ensure_resources`)
-- [ ] `state_rules.decide_state` (+ `require_car_check`), `status.build_status` / `lot_summary`
-- [ ] `auth.py` dev signer + HS256 verifier
+- [x] `adapters/memory.py` with conditional semantics (claim/takeover hash, transition_job, update_status_if_newer, queue receive_count)
+- [x] `adapters/aws.py` (boto3; public endpoint for signing; `ensure_resources`)
+- [x] `state_rules.decide_state` (+ `require_car_check`), `status.build_status` / `lot_summary`
+- [x] `auth.py` dev signer + HS256 verifier
 - [ ] API route bodies incl. `/_test/uploads` and 15-min expiry takeover
 - [ ] `seed/seed.py` idempotent, `seed/import_pklot.py`, lot JSON, `eval/fixtures`
 - [ ] Tests listed in the plan ("Tests that gate wave 1": core, api, seed)
