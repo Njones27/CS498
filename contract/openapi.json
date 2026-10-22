@@ -130,6 +130,16 @@
             "format": "date-time",
             "title": "Startsat",
             "type": "string"
+          },
+          "status": {
+            "description": "ENDED if ended early or past endsAt; ACTIVE once startsAt has passed",
+            "enum": [
+              "SCHEDULED",
+              "ACTIVE",
+              "ENDED"
+            ],
+            "title": "Status",
+            "type": "string"
           }
         },
         "required": [
@@ -142,7 +152,8 @@
           "createdBy",
           "createdAt",
           "endedAt",
-          "active"
+          "active",
+          "status"
         ],
         "title": "ClosureOut",
         "type": "object"

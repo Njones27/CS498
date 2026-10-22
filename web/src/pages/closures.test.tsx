@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ClosureOut } from '../api/closures'
 import type { LotDetail, LotListItem, LotStatusOut } from '../api/schemas'
-import { closureStatus, closureWindow, compactLabels } from '../lib/closures'
+import { closureWindow, compactLabels } from '../lib/closures'
 import { ADMIN, mockFetch, renderApp } from '../test/helpers'
 
 const LABELS = [...['A-01', 'A-02', 'A-03'], ...Array.from({ length: 7 }, (_, i) => `B-0${i + 1}`)]
@@ -51,6 +51,7 @@ const scheduled: ClosureOut = {
   createdAt: local(2026, 10, 20, 9, 30),
   endedAt: null,
   active: false,
+  status: 'SCHEDULED',
 }
 const ended: ClosureOut = {
   ...scheduled,
@@ -60,6 +61,7 @@ const ended: ClosureOut = {
   startsAt: local(2026, 10, 1, 8),
   endsAt: null,
   endedAt: local(2026, 10, 2, 15, 12),
+  status: 'ENDED',
 }
 
 beforeEach(() => {
@@ -102,14 +104,24 @@ describe('closures list', () => {
     expect(row.getByText('Nov 7, 6:00 AM to 10:00 PM')).toBeInTheDocument()
     expect(row.getByText('admin@example.edu')).toBeInTheDocument()
     expect(row.getByText('Scheduled')).toBeInTheDocument()
-    expect(row.getByRole('button', { name: 'End now' })).toBeInTheDocument()
+    expect(row.getByRole('button', { name: 'End closure for B-01 to B-07' })).toHaveTextContent('End now')
 
     const old = within(screen.getByTestId('closure-cl_0'))
     expect(old.getByText('A-02')).toBeInTheDocument()
     expect(old.getByText('Maintenance')).toBeInTheDocument()
     expect(old.getByText('from Oct 1, 8:00 AM, open-ended; ended Oct 2, 3:12 PM')).toBeInTheDocument()
     expect(old.getByText('Ended')).toBeInTheDocument()
-    expect(old.queryByRole('button', { name: 'End now' })).toBeNull()
+    expect(old.queryByRole('button', { name: /End closure/ })).toBeNull()
+  })
+
+  it('trusts the server status, not the browser clock', async () => {
+    const started: ClosureOut = {
+      ...scheduled, closureId: 'cl_3', startsAt: local(2020, 1, 1, 8), endsAt: null, active: false, status: 'ACTIVE',
+    }
+    await setup({}, [started])
+    const row = within(await screen.findByTestId('closure-cl_3'))
+    expect(row.getByText('Active')).toBeInTheDocument()
+    expect(row.getByRole('button', { name: 'End closure for B-01 to B-07' })).toBeEnabled()
   })
 
   it('"End now" sends DELETE for that closure and reloads', async () => {
@@ -117,8 +129,18 @@ describe('closures list', () => {
       [`DELETE ${URL}/cl_1`]: { body: { ...scheduled, endedAt: new Date().toISOString() } },
     })
     const row = within(await screen.findByTestId('closure-cl_1'))
-    await user.click(row.getByRole('button', { name: 'End now' }))
+    await user.click(row.getByRole('button', { name: /End closure/ }))
     await waitFor(() => expect(calls(fetchMock, 'DELETE', `${URL}/cl_1`)).toHaveLength(1))
+    await waitFor(() => expect(calls(fetchMock, 'GET', URL)).toHaveLength(2))
+  })
+
+  it('reloads the list even when ending fails (409 already_ended)', async () => {
+    const { fetchMock, user } = await setup({
+      [`DELETE ${URL}/cl_1`]: { status: 409, body: { error: 'already_ended', message: 'This closure has already ended' } },
+    })
+    const row = within(await screen.findByTestId('closure-cl_1'))
+    await user.click(row.getByRole('button', { name: /End closure/ }))
+    expect(await screen.findByText('This closure has already ended')).toBeInTheDocument()
     await waitFor(() => expect(calls(fetchMock, 'GET', URL)).toHaveLength(2))
   })
 
@@ -192,6 +214,14 @@ describe('closing spaces', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
+  it('returns focus to "Close spaces…" when the dialog is cancelled', async () => {
+    const { user } = await setup()
+    const dialog = within(await openDialogForRowB(user))
+    await user.click(dialog.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Close spaces…' })).toHaveFocus()
+  })
+
   it('toggles single spaces by click and keyboard, and clears the selection', async () => {
     const { user } = await setup()
     const a1 = screen.getByTestId('space-A-01')
@@ -218,12 +248,7 @@ describe('closure helpers', () => {
     expect(compactLabels(['North'])).toBe('North')
   })
 
-  it('derives status and window text', () => {
-    const now = new Date(2099, 10, 7, 12)
-    expect(closureStatus({ ...scheduled, active: true }, now)).toBe('Active')
-    expect(closureStatus(scheduled, new Date(2099, 10, 1))).toBe('Scheduled')
-    expect(closureStatus(scheduled, new Date(2099, 10, 8))).toBe('Ended')
-    expect(closureStatus(ended, now)).toBe('Ended')
+  it('formats a multi-day window', () => {
     expect(closureWindow({ ...scheduled, endsAt: local(2099, 11, 8, 6) })).toBe('Nov 7, 6:00 AM to Nov 8, 6:00 AM')
   })
 })

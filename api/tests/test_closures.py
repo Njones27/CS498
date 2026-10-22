@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from parking_core.keys import layout_snapshot_key
@@ -86,9 +86,11 @@ def test_scheduled_closure_starts_on_its_own(client, admin_headers, adapters, cl
     starts = NOW + timedelta(days=1)
     r = create(client, admin_headers, ["A-02"], starts=starts, ends=starts + timedelta(hours=4))
     assert r.status_code == 201 and r.json()["active"] is False
+    assert r.json()["status"] == "SCHEDULED"
     assert spaces(client)["A-02"]["state"] == "OCCUPIED"
     clock.now = starts + timedelta(minutes=1)
     assert spaces(client)["A-02"]["state"] == "CLOSED"
+    assert client.get(URL, headers=admin_headers).json()[0]["status"] == "ACTIVE"
 
 
 def test_closure_ends_on_its_own(client, admin_headers, adapters, clock):
@@ -100,6 +102,7 @@ def test_closure_ends_on_its_own(client, admin_headers, adapters, clock):
     assert spaces(client)["A-03"]["state"] == "FREE"
     listed = client.get(URL, headers=admin_headers).json()
     assert listed[0]["active"] is False and listed[0]["endedAt"] is None
+    assert listed[0]["status"] == "ENDED"
 
 
 def test_end_a_closure_early(client, admin_headers, adapters, clock):
@@ -111,7 +114,7 @@ def test_end_a_closure_early(client, admin_headers, adapters, clock):
     assert r.status_code == 200, r.text
     out = r.json()
     assert out["endedAt"] == (NOW + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
-    assert out["active"] is False
+    assert out["active"] is False and out["status"] == "ENDED"
     assert spaces(client)["A-04"]["state"] == "OCCUPIED"
     # The record is kept.
     listed = client.get(URL, headers=admin_headers).json()
@@ -225,6 +228,26 @@ def test_delete_scheduled_closure(client, admin_headers, clock):
     assert r.status_code == 200
     clock.now = starts + timedelta(hours=1)
     assert spaces(client)["A-06"]["state"] != "CLOSED"
+
+
+def test_delete_closure_from_other_lot_404(client, admin_headers):
+    created = create(client, admin_headers, ["A-01"]).json()
+    r = client.delete(f"/admin/lots/draft/closures/{created['closureId']}", headers=admin_headers)
+    assert r.status_code == 404
+    assert r.json() == {"error": "not_found", "message": "Closure not found"}
+    assert client.get(URL, headers=admin_headers).json() == [created]
+
+
+def test_non_utc_offset_round_trips(client, admin_headers, clock):
+    starts = datetime.fromisoformat("2026-10-01T18:00:00+05:30")  # 12:30 UTC
+    r = create(client, admin_headers, ["A-01"], starts=starts)
+    assert r.status_code == 201, r.text
+    assert datetime.fromisoformat(r.json()["startsAt"]) == starts
+    assert r.json()["status"] == "SCHEDULED"
+    assert spaces(client)["A-01"]["state"] != "CLOSED"
+    clock.now = NOW + timedelta(minutes=31)
+    assert spaces(client)["A-01"]["state"] == "CLOSED"
+    assert client.get(URL, headers=admin_headers).json()[0]["status"] == "ACTIVE"
 
 
 def test_delete_unknown_closure_404(client, admin_headers):

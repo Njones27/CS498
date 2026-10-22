@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from parking_core.models import CamelModel, ClosureReason
 from pydantic import AwareDatetime, Field, field_validator
@@ -33,3 +34,6 @@ class ClosureOut(CamelModel):
     created_at: datetime
     ended_at: datetime | None = Field(description="Set when an admin ended the closure early")
     active: bool = Field(description="In effect right now")
+    status: Literal["SCHEDULED", "ACTIVE", "ENDED"] = Field(
+        description="ENDED if ended early or past endsAt; ACTIVE once startsAt has passed"
+    )

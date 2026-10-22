@@ -18,6 +18,12 @@ router = APIRouter(prefix="/admin/lots/{lot_id}/closures", tags=["admin"])
 _AUTH = {401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}}
 
 
+def closure_status(c: Closure, now: datetime) -> str:
+    if c.ended_at is not None or (c.ends_at is not None and c.ends_at <= now):
+        return "ENDED"
+    return "ACTIVE" if c.starts_at <= now else "SCHEDULED"
+
+
 def closure_out(c: Closure, now: datetime) -> ClosureOut:
     return ClosureOut(
         closure_id=c.closure_id,
@@ -30,6 +36,7 @@ def closure_out(c: Closure, now: datetime) -> ClosureOut:
         created_at=c.created_at,
         ended_at=c.ended_at,
         active=c.is_active(now),
+        status=closure_status(c, now),
     )
 
 
@@ -45,7 +52,8 @@ def list_closures(
     repo = adapters.repository
     if repo.get_lot(lot_id) is None:
         raise error(404, "not_found", "Lot not found")
-    closures = sorted(repo.list_closures(lot_id), key=lambda c: c.starts_at, reverse=True)
+    closures = sorted(repo.list_closures(lot_id), key=lambda c: c.closure_id)
+    closures.sort(key=lambda c: c.starts_at, reverse=True)  # stable: ties stay by closure_id
     return [closure_out(c, now) for c in closures]
 
 

@@ -288,6 +288,12 @@ export interface components {
              * Format: date-time
              */
             startsAt: string;
+            /**
+             * Status
+             * @description ENDED if ended early or past endsAt; ACTIVE once startsAt has passed
+             * @enum {string}
+             */
+            status: "SCHEDULED" | "ACTIVE" | "ENDED";
         };
         /**
          * ClosureReason

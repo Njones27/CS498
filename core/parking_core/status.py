@@ -23,6 +23,12 @@ from .models import (
 _IN_FLIGHT = {JobStatus.QUEUED, JobStatus.PROCESSING}
 
 
+def _closure_precedence(c: Closure) -> tuple[bool, float, str]:
+    """Which of several overlapping closures a space shows: open-ended first, then the
+    latest endsAt, then closure_id, so the choice never depends on storage order."""
+    return (c.ends_at is not None, -c.ends_at.timestamp() if c.ends_at else 0.0, c.closure_id)
+
+
 def _space_rows(
     lot: Lot,
     layout: PublishedLayout,
@@ -31,11 +37,11 @@ def _space_rows(
     now: datetime,
 ) -> list[dict[str, Any]]:
     by_space = {s.space_id: s for s in statuses}
+    active = sorted((c for c in closures if c.is_active(now)), key=_closure_precedence)
     closed: dict[str, Closure] = {}
-    for c in closures:
-        if c.is_active(now):
-            for sid in c.space_ids:
-                closed.setdefault(sid, c)
+    for c in active:
+        for sid in c.space_ids:
+            closed.setdefault(sid, c)
     max_age = timedelta(minutes=lot.stale_after_minutes)
     rows = []
     for space in layout.active_spaces():

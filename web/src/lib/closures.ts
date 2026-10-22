@@ -46,12 +46,11 @@ export function compactLabels(labels: string[]): string {
   return parts.join(', ')
 }
 
-export type ClosureStatus = 'Active' | 'Scheduled' | 'Ended'
-
-export function closureStatus(c: ClosureOut, now: Date = new Date()): ClosureStatus {
-  if (c.active) return 'Active'
-  if (!c.endedAt && new Date(c.startsAt) > now) return 'Scheduled'
-  return 'Ended'
+/** Display text for the server-computed status (never derived from the browser clock). */
+export const STATUS_LABEL: Record<ClosureOut['status'], string> = {
+  SCHEDULED: 'Scheduled',
+  ACTIVE: 'Active',
+  ENDED: 'Ended',
 }
 
 function sameDay(a: Date, b: Date): boolean {

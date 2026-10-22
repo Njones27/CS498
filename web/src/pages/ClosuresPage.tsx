@@ -5,7 +5,7 @@ import type { ClosureCreate, ClosureOut, ClosureReason } from '../api/closures'
 import type { LotDetail, LotListItem, LotStatusOut, SpaceStatusOut } from '../api/schemas'
 import { LotMapSvg } from '../components/LotMapSvg'
 import { StateIconSvg } from '../components/StateIcon'
-import { REASONS, closureStatus, closureWindow, compactLabels, reasonLabel, rowOf } from '../lib/closures'
+import { REASONS, STATUS_LABEL, closureWindow, compactLabels, reasonLabel, rowOf } from '../lib/closures'
 import { dateTime, toDateTimeLocal } from '../lib/relativeTime'
 import { STATE_ORDER, visualFor } from '../lib/status'
 import { parseLocalDateTime } from '../lib/uploadValidation'
@@ -47,6 +47,7 @@ export function ClosuresPage() {
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [dialogOpen, setDialogOpen] = useState(false)
+  const openButton = useRef<HTMLButtonElement>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [ending, setEnding] = useState<string | null>(null)
 
@@ -80,7 +81,7 @@ export function ClosuresPage() {
   function describe(spaceId: string): string {
     const label = labelById.get(spaceId) ?? spaceId
     const state = statusById.get(spaceId)?.state ?? 'UNKNOWN'
-    return `${label}: ${visualFor(state).label}${selected.has(spaceId) ? ', selected' : ''}`
+    return `${label}: ${visualFor(state).label}` // selection is announced via aria-pressed
   }
 
   function toggle(spaceId: string) {
@@ -100,8 +101,13 @@ export function ClosuresPage() {
     })
   }
 
-  function onCreated() {
+  function closeDialog() {
     setDialogOpen(false)
+    openButton.current?.focus()
+  }
+
+  function onCreated() {
+    closeDialog()
     setSelected(new Set())
     closures.reload()
     status.reload()
@@ -112,12 +118,13 @@ export function ClosuresPage() {
     setEnding(c.closureId)
     try {
       await api.delete<ClosureOut>(`${adminBase}/${encodeURIComponent(c.closureId)}`)
-      closures.reload()
-      status.reload()
     } catch (err) {
       setActionError(errorMessage(err))
     } finally {
+      // Also after a 409 already_ended, so a stale row refreshes.
       setEnding(null)
+      closures.reload()
+      status.reload()
     }
   }
 
@@ -151,6 +158,7 @@ export function ClosuresPage() {
               {selectedIds.length} selected
             </span>
             <button
+              ref={openButton}
               type="button"
               className="button button--primary"
               onClick={() => setDialogOpen(true)}
@@ -176,7 +184,7 @@ export function ClosuresPage() {
       {dialogOpen && (
         <CloseSpacesDialog
           spacesText={`${labelsFor(selectedIds)} (${selectedIds.length} selected)`}
-          onCancel={() => setDialogOpen(false)}
+          onCancel={closeDialog}
           onSubmit={(body) => api.post<ClosureOut>(adminBase, { ...body, spaceIds: selectedIds })}
           onCreated={onCreated}
         />
@@ -204,10 +212,10 @@ export function ClosuresPage() {
               </thead>
               <tbody>
                 {closures.data.map((c) => {
-                  const st = closureStatus(c)
+                  const labels = labelsFor(c.spaceIds)
                   return (
                     <tr key={c.closureId} data-testid={`closure-${c.closureId}`}>
-                      <td>{labelsFor(c.spaceIds)}</td>
+                      <td>{labels}</td>
                       <td>{reasonLabel(c.reason)}</td>
                       <td>{closureWindow(c)}</td>
                       <td>
@@ -216,12 +224,15 @@ export function ClosuresPage() {
                         <span className="muted">{dateTime(c.createdAt)}</span>
                       </td>
                       <td>
-                        <span className={`closure-status closure-status--${st.toLowerCase()}`}>{st}</span>
+                        <span className={`closure-status closure-status--${c.status.toLowerCase()}`}>
+                          {STATUS_LABEL[c.status]}
+                        </span>
                       </td>
                       <td>
-                        {st !== 'Ended' && (
+                        {c.status !== 'ENDED' && (
                           <button
                             type="button"
+                            aria-label={`End closure for ${labels}`}
                             className="button"
                             onClick={() => void endNow(c)}
                             disabled={ending === c.closureId}
@@ -289,7 +300,7 @@ function CloseSpacesDialog({ spacesText, onCancel, onSubmit, onCreated }: Dialog
         aria-modal="true"
         aria-labelledby="close-spaces-title"
         onKeyDown={(e) => {
-          if (e.key === 'Escape') onCancel()
+          if (e.key === 'Escape' && !busy) onCancel()
         }}
       >
         <h2 id="close-spaces-title">Close spaces</h2>
