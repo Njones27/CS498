@@ -899,7 +899,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description not_pending */
+            /** @description not_pending | missing_object: the file was never uploaded */
             409: {
                 headers: {
                     [name: string]: unknown;

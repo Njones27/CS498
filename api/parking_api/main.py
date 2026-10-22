@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from parking_core.models import utcnow
 from parking_core.settings import Adapters, Settings, get_settings
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -26,6 +27,7 @@ def create_app(settings: Settings | None = None, adapters: Adapters | None = Non
     )
     app.state.settings = settings
     app.state.adapters = adapters
+    app.state.now = utcnow
     app.include_router(public.router)
     app.include_router(auth.router)
     app.include_router(uploads.router)

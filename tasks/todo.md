@@ -15,9 +15,9 @@ One photo goes upload -> queue -> worker -> status -> driver map, fully local, s
 - [x] `adapters/aws.py` (boto3; public endpoint for signing; `ensure_resources`)
 - [x] `state_rules.decide_state` (+ `require_car_check`), `status.build_status` / `lot_summary`
 - [x] `auth.py` dev signer + HS256 verifier
-- [ ] API route bodies incl. `/_test/uploads` and 15-min expiry takeover
-- [ ] `seed/seed.py` idempotent, `seed/import_pklot.py`, lot JSON, `eval/fixtures`
-- [ ] Tests listed in the plan ("Tests that gate wave 1": core, api, seed)
+- [x] API route bodies incl. `/_test/uploads` and 15-min expiry takeover
+- [x] `seed/seed.py` idempotent, `seed/import_pklot.py`, lot JSON, `eval/fixtures`
+- [x] Tests listed in the plan ("Tests that gate wave 1": core, api, seed)
 
 ## Worker (PR 3)
 - [ ] `handler.process_message` (viewpoint-scoped, permanent vs retryable, receive_count attempts)
