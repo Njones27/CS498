@@ -237,3 +237,13 @@ def test_dev_users():
     s = Settings(app_env="test", _env_file=None)
     assert users[s.dev_admin_email] == (s.dev_admin_password, ["admin"])
     assert users[s.dev_user_email] == (s.dev_user_password, [])
+
+
+def test_build_status_processing_ignores_snapshot_older_than_data():
+    """A queued photo captured before the newest observation will not change the map."""
+    fresh = [st("s0", SpaceState.FREE, age_min=0)]  # observed_at == NOW == capture_time
+    out = build_status(make_lot(), make_layout(1), fresh, [], snap(JobStatus.QUEUED), NOW)
+    assert out["processing"] is False
+    older = [st("s0", SpaceState.FREE, age_min=5)]
+    out = build_status(make_lot(), make_layout(1), older, [], snap(JobStatus.PROCESSING), NOW)
+    assert out["processing"] is True

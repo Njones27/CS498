@@ -85,11 +85,17 @@ def build_status(
 ) -> dict[str, Any]:
     rows = _space_rows(lot, layout, statuses, closures, now)
     observed = [r["observedAt"] for r in rows if r["observedAt"] is not None]
+    last_observed = max(observed) if observed else None
+    processing = (
+        latest_snapshot is not None
+        and latest_snapshot.job_status in _IN_FLIGHT
+        and (last_observed is None or latest_snapshot.capture_time > last_observed)
+    )
     return {
         "lotId": lot.lot_id,
-        "lastObservedAt": max(observed) if observed else None,
+        "lastObservedAt": last_observed,
         "isStale": _is_stale(rows),
-        "processing": latest_snapshot is not None and latest_snapshot.job_status in _IN_FLIGHT,
+        "processing": processing,
         "noObservations": not observed,
         "layoutVersion": layout.version,
         "spaces": rows,
