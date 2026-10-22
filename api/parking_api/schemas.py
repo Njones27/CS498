@@ -8,12 +8,18 @@ from typing import Literal
 from parking_core.models import CamelModel, ClosureReason, SpaceState, SpaceType
 from pydantic import Field
 
+JobStatusOut = Literal["UPLOAD_PENDING", "QUEUED", "PROCESSING", "COMPLETE", "FAILED", "EXPIRED"]
+"""JobStatus values plus the derived EXPIRED (UPLOAD_PENDING older than 15 minutes)."""
+
 
 class ErrorResponse(CamelModel):
     error: str = Field(description="Machine-readable code, e.g. duplicate, session_expired")
     message: str
-    original_image_id: str | None = None
-    uploaded_at: datetime | None = None
+    original_image_id: str | None = Field(default=None, description="Set on 409 duplicate")
+    uploaded_at: datetime | None = Field(default=None, description="Set on 409 duplicate")
+    details: list[dict[str, object]] | None = Field(
+        default=None, description="Pydantic error list on 422 validation_error"
+    )
 
 
 class HealthResponse(CamelModel):
@@ -47,7 +53,7 @@ class LotSummary(CamelModel):
         description="Active spaces minus closed ones; the denominator of openPercent"
     )
     open_percent: int | None = Field(
-        description="free / total * 100, or null when hasRecentData is false"
+        description="round(free / total * 100), or null when hasRecentData is false or total is 0"
     )
     is_stale: bool = Field(description="Some nonclosed space is past the lot's allowed data age")
     has_recent_data: bool = Field(
@@ -56,6 +62,8 @@ class LotSummary(CamelModel):
 
 
 class LotListItem(CamelModel):
+    """Only lots with a published layout appear; layoutVersion is therefore never null."""
+
     lot_id: str
     name: str
     location: str
@@ -81,7 +89,7 @@ class RectOut(CamelModel):
 class SchematicSpace(CamelModel):
     space_id: str
     label: str
-    type: SpaceType
+    type: SpaceType = Field(description="ParkingSpace.spaceType in the published layout JSON")
     rect: RectOut
 
 
@@ -132,8 +140,12 @@ class LotStatusOut(CamelModel):
     lot_id: str
     last_observed_at: datetime | None
     is_stale: bool
-    processing: bool
-    no_observations: bool
+    processing: bool = Field(
+        description="A snapshot for this lot is QUEUED or PROCESSING (US-11 #5)"
+    )
+    no_observations: bool = Field(
+        description="No space has any observation yet; show 'No observations yet' (US-01 #5)"
+    )
     layout_version: int
     spaces: list[SpaceStatusOut]
     counts: StatusCounts
@@ -143,6 +155,9 @@ class LotStatusOut(CamelModel):
 
 
 class UploadRequest(CamelModel):
+    """Accepted types and the 15 MB cap are fixed in the contract (HDD §10); the matching
+    settings exist for the presign policy and must agree with these."""
+
     lot_id: str
     view_id: str
     capture_time: datetime
@@ -159,13 +174,10 @@ class UploadSlot(CamelModel):
 
 class UploadCompleteResponse(CamelModel):
     image_id: str
-    job_status: str
+    job_status: JobStatusOut
 
 
 # --- admin snapshots --------------------------------------------------------
-
-
-JobStatusOut = Literal["UPLOAD_PENDING", "QUEUED", "PROCESSING", "COMPLETE", "FAILED", "EXPIRED"]
 
 
 class SnapshotOut(CamelModel):

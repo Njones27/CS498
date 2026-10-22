@@ -224,3 +224,4 @@ web/node_modules/
 web/dist/
 .venv/
 *.tsbuildinfo
+.claude/worktrees/

@@ -177,6 +177,9 @@ class SpaceObservation(CamelModel):
 
 
 class SpaceStatus(CamelModel):
+    """Current view for the dashboard. `confidence` is the ACPDS occupied score of the
+    observation behind this state; the API exposes it as `spaces[].score`."""
+
     lot_id: str
     space_id: str
     state: SpaceState
