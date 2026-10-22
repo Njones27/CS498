@@ -61,6 +61,12 @@ def obs_sk(space_id: str) -> str:
     return f"OBS#{space_id}"
 
 
+def detections_sk() -> str:
+    """The one IMG#{imageId} item holding every detection on that photo (admin overlay). Kept
+    out of the snapshot's META item so status and snapshot listings never read it."""
+    return "DET#"
+
+
 def hash_pk(sha256: str) -> str:
     return f"HASH#{sha256}"
 

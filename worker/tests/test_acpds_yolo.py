@@ -28,6 +28,7 @@ from parking_worker.scorers.acpds_yolo import (
     bgr_to_rgb_chw,
     car_overlaps,
     decode_photo,
+    detection_box,
     header_size,
     quad,
     rasterize,
@@ -179,6 +180,40 @@ def test_score_combines_acpds_and_overlap_in_input_order():
     assert out[0].car_overlap == 1.0 and out[1].car_overlap == 0.0
     assert out[0].acpds_score > 0.99 and out[1].acpds_score < 0.01
     assert detector.calls == 1
+
+
+def test_score_reports_every_detection_but_only_cars_overlap():
+    pytest.importorskip("torch")
+    near = car((20, 20, 60, 60), conf=0.8)  # covers S1
+    corner = car((70, 70, 90, 90), cls_name="truck", conf=0.5)  # clips S2's corner
+    phone = car((0, 80, 10, 95), cls_name="cell phone", conf=0.7)  # covers S3, misread class
+    faint = car((0, 0, 100, 100), conf=0.1)  # below yolo_conf: dropped everywhere
+    sc = scorer(detector=FakeDetector([near, corner, phone, faint]))
+    s2 = [(0.8, 0.8), (0.95, 0.8), (0.95, 0.95), (0.8, 0.95)]
+    s3 = [(0.0, 0.8), (0.1, 0.8), (0.1, 0.95), (0.0, 0.95)]
+    out = sc.score(png(blank()), [outline("S1"), outline("S2", s2), outline("S3", s3)])
+
+    # Every class above yolo_conf is reported for the overlay, the misread phone included...
+    assert [(d.cls_name, d.conf) for d in sc.last_detections] == [
+        ("car", 0.8),
+        ("truck", 0.5),
+        ("cell phone", 0.7),
+    ]
+    assert sc.last_detections[0].box == pytest.approx((0.2, 0.2, 0.6, 0.6))
+    assert sc.last_detections[2].box == pytest.approx((0.0, 0.8, 0.1, 0.95))
+    # ...but only cars, trucks and buses count towards car overlap.
+    by_id = {s.space_id: s for s in out}
+    assert by_id["S1"].car_overlap == 1.0
+    assert by_id["S2"].car_overlap > 0
+    assert by_id["S3"].car_overlap == 0.0
+
+    assert sc.score(png(blank()), []) == [] and sc.last_detections == []
+
+
+def test_detection_boxes_are_clamped_photo_fractions():
+    box = detection_box(car((-5, 10, 120, 50)), W, H)
+    assert box.box == pytest.approx((0.0, 0.1, 1.0, 0.5))
+    assert (box.cls_name, box.conf) == ("car", 0.9)
 
 
 def test_out_of_frame_space_gets_no_acpds_score_and_is_never_free():

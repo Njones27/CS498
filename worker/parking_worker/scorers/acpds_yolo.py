@@ -7,7 +7,8 @@ Both models sit behind plain callables so tests can inject fakes without torch o
 
 * ``acpds_model(image, rois) -> logits [N, 2]``: image is the preprocessed RGB float32 tensor
   ``[3, H, W]``, rois are ``[N, 4, 2]`` corner fractions in ACPDS' convention.
-* ``car_detector(bgr) -> list[Detection]`` on the decoded BGR uint8 photo.
+* ``car_detector(bgr) -> list[Detection]`` on the decoded BGR uint8 photo. It returns every
+  class; only car/truck/bus count towards car overlap, the rest are kept for the admin overlay.
 
 The five ACPDS details that fail silently when missed (detection plan p.2) live here:
 ``RCNN(roi_res=128, pooling_type="square")``, corners as x / (width - 1), BGR -> RGB, logit
@@ -28,7 +29,7 @@ from typing import TYPE_CHECKING, Any, Literal, get_args
 import cv2
 import numpy as np
 from parking_core.errors import PermanentJobError
-from parking_core.models import AlignedOutline, Cutoffs, Point, SpaceScore
+from parking_core.models import AlignedOutline, CarBox, Cutoffs, Point, SpaceScore
 
 if TYPE_CHECKING:
     from parking_core.settings import Settings
@@ -45,6 +46,9 @@ in passes of 32, at the same speed). Chunking keeps big lots inside the worker's
 MANIFEST_NAME = "manifest.json"
 DOWNLOAD_HINT = "Run `uv run python scripts/download_weights.py` (see models/README.md)."
 VISION_PACKAGES = ("torch", "torchvision", "ultralytics")
+YOLO_MAX_DET = 600
+"""Per-photo detection cap (ultralytics defaults to 300). Every class is kept for the overlay,
+so a busy lot's misread non-car boxes must not push real cars out of the cap."""
 MAX_PIXELS = 100_000_000
 """Photos above 100 MP are refused (a drone frame is ~12-50 MP); checked from the header."""
 _MAX_COORD = 1e6  # px; keeps absurd outline coordinates inside int32 for cv2.fillPoly
@@ -248,6 +252,14 @@ def car_overlaps(
     return out
 
 
+def detection_box(det: Detection, width: int, height: int) -> CarBox:
+    """A detection's box as photo fractions (clamped to 0..1) for storage and the overlay."""
+    x1, y1, x2, y2 = det.box_xyxy
+    fx = [min(1.0, max(0.0, v / width)) for v in (x1, x2)]
+    fy = [min(1.0, max(0.0, v / height)) for v in (y1, y2)]
+    return CarBox(cls_name=det.cls_name, conf=det.conf, box=(fx[0], fy[0], fx[1], fy[1]))
+
+
 # --- pinned weights --------------------------------------------------------------------------
 
 
@@ -312,10 +324,16 @@ def load_acpds(path: Path) -> AcpdsModel:  # pragma: no cover - needs torch and 
 
 
 class YoloCarDetector:  # pragma: no cover - needs ultralytics and the weights
-    """``ultralytics.YOLO`` as a ``CarDetector``: car/truck/bus boxes (and masks when seg)."""
+    """``ultralytics.YOLO`` as a ``CarDetector``: boxes (and masks when seg) of every class, or
+    only ``classes`` when given. The scorer picks the car classes itself."""
 
     def __init__(
-        self, path: Path, conf: float, seg: bool, imgsz: int = 1280, classes=CAR_CLASSES
+        self,
+        path: Path,
+        conf: float,
+        seg: bool,
+        imgsz: int = 1280,
+        classes: frozenset[str] | None = None,
     ) -> None:
         from ultralytics import YOLO
 
@@ -323,7 +341,11 @@ class YoloCarDetector:  # pragma: no cover - needs ultralytics and the weights
         self.conf = conf
         self.seg = seg
         self.imgsz = imgsz
-        self.class_ids = [i for i, name in self.model.names.items() if name in classes]
+        self.class_ids = (
+            None
+            if classes is None
+            else [i for i, name in self.model.names.items() if name in classes]
+        )
 
     def __call__(self, bgr: np.ndarray) -> list[Detection]:
         height, width = bgr.shape[:2]
@@ -332,6 +354,7 @@ class YoloCarDetector:  # pragma: no cover - needs ultralytics and the weights
             conf=self.conf,
             imgsz=self.imgsz,
             classes=self.class_ids,
+            max_det=YOLO_MAX_DET,
             device="cpu",
             verbose=False,
         )[0]
@@ -343,14 +366,16 @@ class YoloCarDetector:  # pragma: no cover - needs ultralytics and the weights
         detections = []
         for i in range(len(xyxy)):
             mask, xy0 = None, (0, 0)
-            if polygons is not None:
+            cls_name = self.model.names[int(cls_ids[i])]
+            if polygons is not None and cls_name in CAR_CLASSES:
                 # Masks come back as polygons in photo pixels (masks.data is at the letterboxed
-                # inference size); rasterize each one cropped to its own bounding box.
+                # inference size); rasterize each one cropped to its own bounding box. Only car
+                # classes use masks (overlap), so other classes keep mask=None.
                 mask, mx0, my0 = rasterize(polygons[i], width, height)
                 xy0 = (mx0, my0)
             detections.append(
                 Detection(
-                    cls_name=self.model.names[int(cls_ids[i])],
+                    cls_name=cls_name,
                     conf=float(confs[i]),
                     box_xyxy=tuple(float(v) for v in xyxy[i]),
                     mask=mask,
@@ -388,6 +413,7 @@ class AcpdsYoloScorer:
         self.overlap_mode: OverlapMode = overlap_mode
         self.input_res = input_res
         self.yolo_imgsz = yolo_imgsz
+        self.last_detections: list[CarBox] = []
 
     @classmethod
     def from_settings(cls, settings: Settings) -> AcpdsYoloScorer:
@@ -426,6 +452,9 @@ class AcpdsYoloScorer:
         )
 
     def score(self, image: bytes, outlines: list[AlignedOutline]) -> list[SpaceScore]:
+        """Score every outline. Also sets ``last_detections`` to every detection on the photo at
+        ``conf >= yolo_conf``, any class (a debug view); only cars count towards overlap."""
+        self.last_detections = []
         bgr = decode_photo(image)
         if not outlines:
             return []
@@ -436,9 +465,9 @@ class AcpdsYoloScorer:
         visible = [o for o in outlines if o.in_frame]
         scores = iter(self.acpds_scores(bgr, visible)) if visible else iter(())
         acpds = [float(next(scores)) if o.in_frame else None for o in outlines]
-        overlaps = car_overlaps(
-            outlines, self.car_detector(bgr), width, height, self.overlap_mode, self.yolo_conf
-        )
+        found = [d for d in self.car_detector(bgr) if d.conf >= self.yolo_conf]
+        overlaps = car_overlaps(outlines, found, width, height, self.overlap_mode, self.yolo_conf)
+        self.last_detections = [detection_box(d, width, height) for d in found]
         return [
             SpaceScore(
                 space_id=o.space_id,

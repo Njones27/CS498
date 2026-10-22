@@ -13,6 +13,7 @@ from typing import Protocol
 
 from .models import (
     AlignedOutline,
+    CarBox,
     ClaimResult,
     Closure,
     JobStatus,
@@ -120,6 +121,14 @@ class Repository(Protocol):
     # Observations and status
     def put_observations(self, observations: Iterable[SpaceObservation]) -> None: ...
     def list_observations(self, image_id: str) -> list[SpaceObservation]: ...
+    def put_detections(self, image_id: str, detections: list[CarBox]) -> None:
+        """Store every detection on one photo (overwrites). DynamoDB: one IMG#/DET# item."""
+        ...
+
+    def get_detections(self, image_id: str) -> list[CarBox]:
+        """The photo's stored detections; [] when none were stored."""
+        ...
+
     def update_status_if_newer(self, status: SpaceStatus) -> bool:
         """Conditional write: only when the stored observedAt is older (HDD §4.1 step 7)."""
         ...
@@ -145,6 +154,9 @@ class Aligner(Protocol):
 
 class SpaceScorer(Protocol):
     model_version: str
+    last_detections: list[CarBox]
+    """Every detection (any class) on the photo passed to the last `score` call, as photo
+    fractions. A debug view for the admin overlay: only car classes feed car overlap."""
 
     def score(self, image: bytes, outlines: list[AlignedOutline]) -> list[SpaceScore]: ...
 

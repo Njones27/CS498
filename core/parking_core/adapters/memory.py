@@ -13,11 +13,13 @@ import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import quote
 
 from ..auth import HS256Verifier
 from ..errors import NotPublishedError
 from ..keys import layout_snapshot_key
 from ..models import (
+    CarBox,
     ClaimResult,
     Closure,
     JobStatus,
@@ -36,6 +38,7 @@ from ..models import (
 from ..settings import Adapters, Settings
 
 TEST_UPLOAD_PREFIX = "/api/_test/uploads/"
+TEST_OBJECT_PREFIX = "/api/_test/objects/"
 
 
 def image_id_from_raw_key(key: str) -> str:
@@ -84,7 +87,8 @@ class MemoryObjectStore:
         return f"{TEST_UPLOAD_PREFIX}{image_id}"
 
     def presign_get(self, key: str, expires_seconds: int = 300) -> str:
-        return f"memory://{key}"
+        """Served by the test-only route GET /_test/objects/{key} (APP_ENV=test)."""
+        return f"{TEST_OBJECT_PREFIX}{quote(key, safe='/')}"
 
     def put_for_image(self, image_id: str, data: bytes, content_type: str) -> bool:
         """Store bytes under the key registered by `presign_put`. False if none was."""
@@ -170,6 +174,7 @@ class MemoryRepository:
         self._snapshots: dict[str, Snapshot] = {}
         self._hashes: dict[str, tuple[str, datetime]] = {}  # sha256 -> (imageId, claimedAt)
         self._observations: dict[tuple[str, str], SpaceObservation] = {}
+        self._detections: dict[str, list[CarBox]] = {}
         self._statuses: dict[tuple[str, str], SpaceStatus] = {}
         self._closures: dict[tuple[str, str], Closure] = {}
 
@@ -331,6 +336,14 @@ class MemoryRepository:
                 for (iid, _), o in sorted(self._observations.items())
                 if iid == image_id
             ]
+
+    def put_detections(self, image_id: str, detections: list[CarBox]) -> None:
+        with self._lock:
+            self._detections[image_id] = [d.model_copy(deep=True) for d in detections]
+
+    def get_detections(self, image_id: str) -> list[CarBox]:
+        with self._lock:
+            return [d.model_copy(deep=True) for d in self._detections.get(image_id, [])]
 
     def update_status_if_newer(self, status: SpaceStatus) -> bool:
         key = (status.lot_id, status.space_id)

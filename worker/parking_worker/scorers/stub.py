@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 
-from parking_core.models import AlignedOutline, SpaceScore
+from parking_core.models import AlignedOutline, CarBox, SpaceScore
 
 
 class StubScorer:
     def __init__(self, model_version: str = "stub-0") -> None:
         self.model_version = model_version
+        self.last_detections: list[CarBox] = []  # the stub detects nothing
 
     def score(self, image: bytes, outlines: list[AlignedOutline]) -> list[SpaceScore]:
         image_key = hashlib.sha256(image).hexdigest()[:16]

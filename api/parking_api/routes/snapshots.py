@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Query
-from parking_core.models import JobStatus, Snapshot, effective_status
+from parking_core.models import CarBox, JobStatus, Snapshot, effective_status
+from parking_core.settings import Adapters
 
 from ..deps import AdaptersDep, AdminDep, NowDep, error
 from ..jobs import enqueue_job
-from ..schemas import ErrorResponse, ObservationOut, SnapshotDetail, SnapshotOut
+from ..schemas import CarBoxOut, ErrorResponse, ObservationOut, SnapshotDetail, SnapshotOut
 
 router = APIRouter(prefix="/admin/snapshots", tags=["admin"])
+log = logging.getLogger(__name__)
 
 
 def snapshot_out(s: Snapshot, now: datetime) -> dict[str, object]:
@@ -57,7 +60,7 @@ def list_snapshots(
         403: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
     },
-    summary="One snapshot with its observations",
+    summary="One snapshot with its observations, car detections and a photo URL",
 )
 def get_snapshot(
     image_id: str, admin: AdminDep, adapters: AdaptersDep, now: NowDep
@@ -73,10 +76,31 @@ def get_snapshot(
             acpds_score=o.acpds_score,
             car_overlap=o.car_overlap,
             in_frame=o.in_frame,
+            polygon=o.polygon,
         )
         for o in repo.list_observations(image_id)
     ]
-    return SnapshotDetail(**snapshot_out(snap, now), observations=observations)
+    return SnapshotDetail(
+        **snapshot_out(snap, now),
+        observations=observations,
+        detections=[car_box_out(b) for b in repo.get_detections(image_id)],
+        photo_url=photo_url(adapters, snap),
+    )
+
+
+def photo_url(adapters: Adapters, snap: Snapshot) -> str | None:
+    """Presigned GET for the photo, or None when it is missing or storage fails: the photo is
+    optional on the detail page, so a storage hiccup must not fail the whole request."""
+    store = adapters.object_store
+    try:
+        return store.presign_get(snap.s3_key) if store.exists(snap.s3_key) else None
+    except Exception:
+        log.warning("Photo URL unavailable for snapshot %s", snap.image_id, exc_info=True)
+        return None
+
+
+def car_box_out(box: CarBox) -> CarBoxOut:
+    return CarBoxOut(cls_name=box.cls_name, conf=box.conf, box=list(box.box))
 
 
 @router.post(

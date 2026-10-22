@@ -105,6 +105,10 @@ describe('upload flow', () => {
     })
     expect(requestBody.sha256).toMatch(/^[0-9a-f]{64}$/)
     expect(putFile).toHaveBeenCalledWith('http://s3/put', expect.any(File), expect.any(Function))
+    expect(screen.getByRole('link', { name: 'View the photo with results' })).toHaveAttribute(
+      'href',
+      '/admin/snapshots/img-1/photo',
+    )
   })
 
   it('explains a 409 duplicate and links to the original snapshot', async () => {

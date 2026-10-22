@@ -129,6 +129,17 @@ class LayoutVersion(CamelModel):
     snapshot_key: str
 
 
+class CarBox(CamelModel):
+    """One object detection on a photo (any class, e.g. car or a misread "cell phone"), kept
+    for the admin photo overlay (`Repository.put_detections`). Only car/truck/bus count
+    towards car overlap."""
+
+    cls_name: str
+    conf: float
+    box: tuple[float, float, float, float]
+    """(x1, y1, x2, y2) as fractions of the photo size, like `Point`."""
+
+
 class Snapshot(CamelModel):
     """One uploaded photo plus its job record (HDD §1.3, §5.1)."""
 
@@ -174,6 +185,8 @@ class SpaceObservation(CamelModel):
     car_overlap: float | None = None
     in_frame: bool = True
     capture_time: datetime
+    polygon: Polygon | None = None
+    """The space's aligned outline on this photo (fractions); None on older observations."""
 
 
 class SpaceStatus(CamelModel):

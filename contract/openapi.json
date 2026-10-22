@@ -1,6 +1,36 @@
 {
   "components": {
     "schemas": {
+      "CarBoxOut": {
+        "properties": {
+          "box": {
+            "description": "[x1, y1, x2, y2] as fractions of the photo size",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Box",
+            "type": "array"
+          },
+          "clsName": {
+            "description": "Detector class, e.g. car, truck, bus, or a non-car class such as cell phone",
+            "title": "Clsname",
+            "type": "string"
+          },
+          "conf": {
+            "title": "Conf",
+            "type": "number"
+          }
+        },
+        "required": [
+          "clsName",
+          "conf",
+          "box"
+        ],
+        "title": "CarBoxOut",
+        "type": "object"
+      },
       "ClosureCreate": {
         "properties": {
           "endsAt": {
@@ -552,6 +582,31 @@
             "title": "Inframe",
             "type": "boolean"
           },
+          "polygon": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Aligned outline on this photo as [x, y] fractions; null on older observations",
+            "title": "Polygon"
+          },
           "spaceId": {
             "title": "Spaceid",
             "type": "string"
@@ -565,7 +620,8 @@
           "state",
           "acpdsScore",
           "carOverlap",
-          "inFrame"
+          "inFrame",
+          "polygon"
         ],
         "title": "ObservationOut",
         "type": "object"
@@ -659,6 +715,14 @@
             "title": "Createdat",
             "type": "string"
           },
+          "detections": {
+            "description": "Every detection on the photo, any class (debug view; only car, truck and bus count towards car overlap)",
+            "items": {
+              "$ref": "#/components/schemas/CarBoxOut"
+            },
+            "title": "Detections",
+            "type": "array"
+          },
           "error": {
             "anyOf": [
               {
@@ -723,6 +787,18 @@
             "title": "Observations",
             "type": "array"
           },
+          "photoUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Short-lived URL for the uploaded photo; null when it is not in storage",
+            "title": "Photourl"
+          },
           "processingMs": {
             "anyOf": [
               {
@@ -752,7 +828,9 @@
           "error",
           "layoutVersion",
           "createdAt",
-          "observations"
+          "observations",
+          "detections",
+          "photoUrl"
         ],
         "title": "SnapshotDetail",
         "type": "object"
@@ -1093,6 +1171,51 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/_test/objects/{key}": {
+      "get": {
+        "operationId": "test_object__test_objects__key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stored bytes with their content type"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "Serve a stored object the way a presigned GET would",
+        "tags": [
+          "test-only"
+        ]
+      }
+    },
     "/_test/uploads/{image_id}": {
       "put": {
         "operationId": "test_upload__test_uploads__image_id__put",
@@ -1609,7 +1732,7 @@
             "description": "validation_error"
           }
         },
-        "summary": "One snapshot with its observations",
+        "summary": "One snapshot with its observations, car detections and a photo URL",
         "tags": [
           "admin"
         ]

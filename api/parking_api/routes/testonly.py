@@ -1,10 +1,12 @@
-"""Test-only upload target. Mounted only when APP_ENV=test (memory object store has no S3)."""
+"""Test-only upload target and photo reads. Mounted only when APP_ENV=test (the memory object
+store has no S3, so presigned PUT/GET URLs point here)."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 
 from ..deps import AdaptersDep, error
+from ..schemas import ErrorResponse
 
 router = APIRouter(prefix="/_test", tags=["test-only"])
 
@@ -18,3 +20,24 @@ async def test_upload(image_id: str, request: Request, adapters: AdaptersDep) ->
     store = adapters.object_store
     if not store.put_for_image(image_id, body, content_type):  # type: ignore[attr-defined]
         raise error(404, "not_found", "No upload slot for this image")
+
+
+@router.get(
+    "/objects/{key:path}",
+    response_class=Response,
+    responses={
+        200: {"description": "The stored bytes with their content type"},
+        404: {"model": ErrorResponse},
+    },
+    summary="Serve a stored object the way a presigned GET would",
+)
+def test_object(key: str, adapters: AdaptersDep) -> Response:
+    store = adapters.object_store
+    try:
+        data = store.get(key)
+        content_type = store.content_type(key)  # type: ignore[attr-defined]
+    except KeyError:
+        raise error(404, "not_found", "Object not found") from None
+    return Response(
+        content=data, media_type=content_type, headers={"X-Content-Type-Options": "nosniff"}
+    )

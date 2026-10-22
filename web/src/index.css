@@ -185,3 +185,43 @@ a { color: var(--accent); }
 }
 .modal__spaces { margin: 0; font-weight: 600; }
 .modal__actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+/* Snapshot photo page: outlines and car boxes drawn over the uploaded photo. Colours are bright
+   to read on asphalt; each state also has its own line style (solid, double, dotted) and the
+   car boxes are dashed, so nothing depends on colour alone (NFR-8). */
+:root {
+  --photo-free: #22c55e;
+  --photo-occupied: #ef4444;
+  --photo-unknown: #facc15;
+  --photo-car: #38bdf8;
+  --photo-other: #cbd5e1;
+  --photo-halo: rgba(0, 0, 0, 0.75);
+}
+.photo-toggles { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; margin: 0.5rem 0; }
+.photo-toggles label { display: flex; align-items: center; gap: 0.4rem; min-height: 44px; font-weight: 600; }
+.photo-toggles input { width: 20px; height: 20px; }
+.photo-view { position: relative; display: block; margin: 0.75rem 0; line-height: 0; background: #000; border-radius: 8px; overflow: hidden; }
+.photo-view__img { display: block; width: 100%; max-width: 100%; height: auto; }
+.photo-view__overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+.photo-space__line, .photo-space__inner { fill: transparent; stroke-linejoin: round; }
+.photo-space__line { stroke-width: 2; }
+.photo-space__inner { display: none; }
+.photo-space.space--free .photo-space__line { stroke: var(--photo-free); }
+.photo-space.space--occupied .photo-space__line { stroke: var(--photo-occupied); stroke-width: 5; }
+.photo-space.space--occupied .photo-space__inner { display: inline; stroke: var(--photo-halo); stroke-width: 1.5; }
+.photo-space.space--unknown .photo-space__line { stroke: var(--photo-unknown); stroke-width: 2.5; stroke-dasharray: 1 4; stroke-linecap: round; }
+.photo-space:hover .photo-space__line { stroke-width: 4; }
+.photo-space.space--occupied:hover .photo-space__line { stroke-width: 7; }
+.photo-label { fill: #fff; stroke: var(--photo-halo); paint-order: stroke; font-weight: 700; pointer-events: none; }
+.photo-box__rect { fill: none; stroke-width: 2; }
+.photo-box--car .photo-box__rect { stroke: var(--photo-car); stroke-dasharray: 8 4; }
+/* Non-car classes (debug only): lighter grey, thinner, short dashes, so they read as secondary. */
+.photo-box--other .photo-box__rect { stroke: var(--photo-other); stroke-width: 1.25; stroke-dasharray: 3 4; opacity: 0.85; }
+.box-swatch.photo-box--car .photo-box__rect { stroke-dasharray: 4 2; }
+.box-swatch.photo-box--other .photo-box__rect { stroke: #8a94a3; stroke-dasharray: 2 2; }
+.photo-model { margin-top: 0.75rem; overflow-wrap: anywhere; }
+.photo-spaces { margin-top: 0.75rem; }
+.photo-spaces summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+.photo-spaces__wrap { overflow-x: auto; max-height: 60vh; }
+.photo-spaces__table { width: 100%; border-collapse: collapse; background: var(--surface); font-variant-numeric: tabular-nums; }
+.photo-spaces__table th, .photo-spaces__table td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); }

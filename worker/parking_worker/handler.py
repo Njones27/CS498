@@ -13,6 +13,7 @@ from parking_core.errors import NotPublishedError, PermanentJobError
 from parking_core.interfaces import Aligner, SpaceScorer
 from parking_core.keys import layout_snapshot_key
 from parking_core.models import (
+    CarBox,
     Cutoffs,
     JobMessage,
     JobStatus,
@@ -82,7 +83,7 @@ def process_message(
 
     started = time.monotonic()
     try:
-        written, layout_version = _run(image_id, adapters, aligner, scorer, cutoffs)
+        written, layout_version, detections = _run(image_id, adapters, aligner, scorer, cutoffs)
     except PermanentJobError as exc:
         log.warning("Job %s failed permanently: %s", image_id, exc)
         moved = repo.transition_job(
@@ -121,6 +122,7 @@ def process_message(
         )
         return ProcessResult(image_id, "failed_retryable", str(exc))
 
+    repo.put_detections(image_id, detections)  # overlay debug data; an overwrite, so idempotent
     moved = repo.transition_job(
         image_id,
         {JobStatus.PROCESSING},
@@ -175,8 +177,10 @@ def _run(
     aligner: Aligner,
     scorer: SpaceScorer,
     cutoffs: Cutoffs,
-) -> tuple[int, int]:
-    """Score one photo and write observations/statuses. Returns (spaces, layout version)."""
+) -> tuple[int, int, list[CarBox]]:
+    """Score one photo and write observations/statuses.
+
+    Returns (spaces, layout version, every detection on the photo, any class)."""
     repo = adapters.repository
     snapshot = repo.get_snapshot(image_id)
     if snapshot is None:
@@ -196,11 +200,13 @@ def _run(
     outlines = aligner.align(image, viewpoint)  # AlignmentError is a PermanentJobError
     in_view = set(viewpoint.outlines)
     scores = [s for s in scorer.score(image, outlines) if s.space_id in in_view]
+    outline_by_id = {o.space_id: o for o in outlines}
 
     observations: list[SpaceObservation] = []
     statuses: list[SpaceStatus] = []
     for score in scores:
         state = decide_state(score.acpds_score, score.car_overlap, score.in_frame, cutoffs)
+        outline = outline_by_id.get(score.space_id)
         observations.append(
             SpaceObservation(
                 image_id=image_id,
@@ -211,6 +217,7 @@ def _run(
                 car_overlap=score.car_overlap,
                 in_frame=score.in_frame,
                 capture_time=snapshot.capture_time,
+                polygon=outline.polygon if outline else None,
             )
         )
         statuses.append(
@@ -227,7 +234,7 @@ def _run(
     repo.put_observations(observations)
     for status in statuses:
         repo.update_status_if_newer(status)
-    return len(observations), layout.version
+    return len(observations), layout.version, list(scorer.last_detections)
 
 
 def _load_layout(adapters: Adapters, snapshot: Snapshot) -> PublishedLayout:
