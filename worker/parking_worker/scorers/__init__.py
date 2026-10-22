@@ -10,7 +10,10 @@ from .stub import StubScorer
 def build_scorer(settings: Settings) -> SpaceScorer:
     if settings.detector == "stub":
         return StubScorer()
-    raise NotImplementedError("acpds_yolo arrives in wave 2")
+    # Imported here so the stub worker (and CI) never needs torch or ultralytics.
+    from .acpds_yolo import AcpdsYoloScorer
+
+    return AcpdsYoloScorer.from_settings(settings)
 
 
 __all__ = ["FakeScorer", "StubScorer", "build_scorer"]

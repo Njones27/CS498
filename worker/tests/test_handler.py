@@ -238,10 +238,15 @@ def test_run_forever_processes_and_stops(world: World):
     assert world.repo.get_snapshot("img-1").job_status is JobStatus.COMPLETE
 
 
-def test_build_scorer():
+def test_build_scorer(tmp_path):
     assert isinstance(build_scorer(Settings(app_env="test", _env_file=None)), StubScorer)
-    with pytest.raises(NotImplementedError):
-        build_scorer(Settings(app_env="test", detector="acpds_yolo", _env_file=None))
+    # The real detector refuses to start without its pinned weights (test_acpds_yolo.py).
+    settings = Settings(
+        app_env="test", detector="acpds_yolo", models_dir=str(tmp_path), _env_file=None
+    )
+    # Without torch (CI) it names the vision extra; with it, the missing weights.
+    with pytest.raises(RuntimeError, match="vision extra|download_weights.py"):
+        build_scorer(settings)
 
 
 def test_message_for_pending_upload_is_deferred(world: World):

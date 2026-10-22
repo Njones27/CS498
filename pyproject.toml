@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 dependencies = ["parking-core", "parking-api", "parking-worker", "parking-seed"]
 
 [tool.uv]
-# The worker uses opencv-python-headless. ultralytics (next PR) requires opencv-python, which
+# The worker uses opencv-python-headless. ultralytics requires opencv-python, which
 # would install a second, GUI-linked cv2 over the headless build in the same site-packages.
 # This override drops that requirement everywhere so only the headless wheel is installed.
 override-dependencies = ["opencv-python ; sys_platform == 'never'"]
@@ -19,6 +19,14 @@ parking-core = { workspace = true }
 parking-api = { workspace = true }
 parking-worker = { workspace = true }
 parking-seed = { workspace = true }
+# Linux (Docker, CI) gets the CPU-only PyTorch wheels; macOS gets the PyPI wheels.
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [dependency-groups]
 dev = [
@@ -32,7 +40,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["web", "eval"]
+extend-exclude = ["web", "eval", "worker/parking_worker/scorers/acpds"]  # acpds: vendored upstream code
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "W"]
@@ -40,5 +48,12 @@ select = ["E", "F", "I", "B", "UP", "W"]
 [tool.pytest.ini_options]
 pythonpath = ["core", "api", "worker", "seed"]
 testpaths = ["core/tests", "api/tests", "worker/tests", "seed/tests", "tests"]
-markers = ["compose: needs the Docker Compose stack (RUN_COMPOSE_TESTS=1)"]
-addopts = "-m 'not compose'"
+markers = [
+  "compose: needs the Docker Compose stack (RUN_COMPOSE_TESTS=1)",
+  "real_model: needs torch and the downloaded weights (RUN_MODEL_TESTS=1)",
+]
+addopts = "-m 'not compose and not real_model'"
+
+[tool.coverage.run]
+# Vendored upstream model code: it only runs with torch and the real weights (real_model tests).
+omit = ["*/parking_worker/scorers/acpds/*"]
