@@ -1,0 +1,56 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from parking_core import keys
+from parking_core.settings import Settings, build_adapters
+from parking_seed.loader import load_lot_file, seed_lot
+from parking_seed.pklot import build_lot, cluster_rows, parse_xml
+
+HERE = Path(__file__).parent
+
+
+def test_seed_twice_is_idempotent():
+    adapters = build_adapters(Settings(app_env="test", _env_file=None))  # type: ignore[call-arg]
+    data = load_lot_file("test-lot")
+    first = seed_lot(adapters, data, b"ref")
+    second = seed_lot(adapters, data, b"ref")
+    assert (
+        first.summary() == second.summary() == ("Loaded Test Lot with 14 spaces and 2 viewpoints")
+    )
+    assert first.created and not second.created
+    repo = adapters.repository
+    assert [lot.lot_id for lot in repo.list_lots()] == ["test-lot"]
+    assert len(repo.list_spaces("test-lot")) == 14
+    assert [v.version for v in repo.list_layout_versions("test-lot")] == [1]
+    layout = repo.get_published_layout("test-lot")
+    assert layout is not None and len(layout.active_spaces()) == 14
+    v1 = layout.viewpoint("V1")
+    assert v1 is not None and len(v1.outlines) == 10
+    assert len(layout.viewpoint("V2").outlines) == 7
+    assert adapters.object_store.exists(keys.reference_image_key("test-lot", "V1"))
+
+
+def test_lot_json_outlines_are_normalized():
+    data = load_lot_file("test-lot")
+    ids = {s["spaceId"] for s in data["spaces"]}
+    for vp in data["viewpoints"]:
+        for sid, poly in vp["outlines"].items():
+            assert sid in ids and len(poly) == 4
+            assert all(0 <= x <= 1 and 0 <= y <= 1 for x, y in poly)
+
+
+def test_import_pklot_fixture():
+    xml = (HERE / "pklot_sample.xml").read_text()
+    assert len(parse_xml(xml)) == 5
+    assert [len(r) for r in cluster_rows(parse_xml(xml))] == [3, 2]
+    lot = build_lot(xml, (1000, 500), "pk", "PK Test")
+    assert [s["label"] for s in lot["spaces"]] == ["A-01", "A-02", "A-03", "B-01", "B-02"]
+    # Row A sorted left to right regardless of XML order.
+    assert [s["spaceId"] for s in lot["spaces"][:3]] == ["pk-1", "pk-2", "pk-3"]
+    outline = lot["viewpoints"][0]["outlines"]["pk-1"]
+    assert outline[0] == [0.05, 0.1]
+    rects = [s["rect"] for s in lot["spaces"]]
+    assert all(r["x"] + r["w"] <= 1000 and r["y"] + r["h"] <= 600 for r in rects)
+    json.dumps(lot)  # serializable

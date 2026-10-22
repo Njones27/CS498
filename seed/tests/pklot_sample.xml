@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<parking id="sample">
+  <space id="2" occupied="1">
+    <rotatedRect><center x="150" y="80"/><size w="90" h="60"/><angle d="-80"/></rotatedRect>
+    <contour><point x="110" y="50"/><point x="190" y="50"/><point x="190" y="110"/><point x="110" y="110"/></contour>
+  </space>
+  <space id="1" occupied="0">
+    <rotatedRect><center x="80" y="85"/><size w="90" h="60"/><angle d="-80"/></rotatedRect>
+    <contour><point x="50" y="50"/><point x="110" y="50"/><point x="110" y="115"/><point x="50" y="115"/></contour>
+  </space>
+  <space id="3" occupied="0">
+    <rotatedRect><center x="230" y="78"/><size w="90" h="60"/><angle d="-80"/></rotatedRect>
+    <contour><point x="190" y="50"/><point x="270" y="50"/><point x="270" y="108"/><point x="190" y="108"/></contour>
+  </space>
+  <space id="4" occupied="1">
+    <rotatedRect><center x="90" y="300"/><size w="100" h="70"/><angle d="-80"/></rotatedRect>
+    <contour><point x="50" y="260"/><point x="130" y="260"/><point x="130" y="340"/><point x="50" y="340"/></contour>
+  </space>
+  <space id="5" occupied="0">
+    <rotatedRect><center x="180" y="305"/><size w="100" h="70"/><angle d="-80"/></rotatedRect>
+    <contour><point x="130" y="260"/><point x="230" y="260"/><point x="230" y="345"/><point x="130" y="345"/></contour>
+  </space>
+</parking>
