@@ -1,5 +1,7 @@
 """Single-table DynamoDB key design (HDD §5.2). Also used by the memory adapter."""
 
+from datetime import UTC, datetime
+
 PK = "PK"
 SK = "SK"
 GSI1 = "GSI1"
@@ -30,6 +32,25 @@ def layout_sk(version: int) -> str:
 
 def closure_sk(closure_id: str) -> str:
     return f"CLOSURE#{closure_id}"
+
+
+def gsi1_snapshot(lot_id: str, capture_time: datetime, image_id: str) -> tuple[str, str]:
+    """GSI1 keys for an IMG#/META item so snapshots list newest capture first per lot.
+
+    The sort key is a fixed-width UTC ISO timestamp with the image id as tie-break, so two
+    photos captured in the same second never collide.
+    """
+    utc = capture_time.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")
+    return lot_pk(lot_id), f"{utc}#{image_id}"
+
+
+LOTS_INDEX_PK = "LOTS"
+"""GSI1 partition key shared by every LOT#/META item, so `list_lots` is a Query, not a Scan.
+GSI1SK is the lot id."""
+
+
+def gsi1_lot(lot_id: str) -> tuple[str, str]:
+    return LOTS_INDEX_PK, lot_id
 
 
 def image_pk(image_id: str) -> str:

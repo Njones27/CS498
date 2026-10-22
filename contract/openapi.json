@@ -38,6 +38,22 @@
       },
       "ErrorResponse": {
         "properties": {
+          "details": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pydantic error list on 422 validation_error",
+            "title": "Details"
+          },
           "error": {
             "description": "Machine-readable code, e.g. duplicate, session_expired",
             "title": "Error",
@@ -56,6 +72,7 @@
                 "type": "null"
               }
             ],
+            "description": "Set on 409 duplicate",
             "title": "Originalimageid"
           },
           "uploadedAt": {
@@ -68,6 +85,7 @@
                 "type": "null"
               }
             ],
+            "description": "Set on 409 duplicate",
             "title": "Uploadedat"
           }
         },
@@ -76,19 +94,6 @@
           "message"
         ],
         "title": "ErrorResponse",
-        "type": "object"
-      },
-      "HTTPValidationError": {
-        "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "title": "Detail",
-            "type": "array"
-          }
-        },
-        "title": "HTTPValidationError",
         "type": "object"
       },
       "HealthResponse": {
@@ -231,6 +236,7 @@
         "type": "object"
       },
       "LotListItem": {
+        "description": "Only lots with a published layout appear; layoutVersion is therefore never null.",
         "properties": {
           "layoutVersion": {
             "title": "Layoutversion",
@@ -297,10 +303,12 @@
             "type": "string"
           },
           "noObservations": {
+            "description": "No space has any observation yet; show 'No observations yet' (US-01 #5)",
             "title": "Noobservations",
             "type": "boolean"
           },
           "processing": {
+            "description": "A snapshot for this lot is QUEUED or PROCESSING (US-11 #5)",
             "title": "Processing",
             "type": "boolean"
           },
@@ -358,7 +366,7 @@
                 "type": "null"
               }
             ],
-            "description": "free / total * 100, or null when hasRecentData is false",
+            "description": "round(free / total * 100), or null when hasRecentData is false or total is 0",
             "title": "Openpercent"
           },
           "total": {
@@ -490,7 +498,8 @@
             "type": "string"
           },
           "type": {
-            "$ref": "#/components/schemas/SpaceType"
+            "$ref": "#/components/schemas/SpaceType",
+            "description": "ParkingSpace.spaceType in the published layout JSON"
           }
         },
         "required": [
@@ -836,6 +845,14 @@
             "type": "string"
           },
           "jobStatus": {
+            "enum": [
+              "UPLOAD_PENDING",
+              "QUEUED",
+              "PROCESSING",
+              "COMPLETE",
+              "FAILED",
+              "EXPIRED"
+            ],
             "title": "Jobstatus",
             "type": "string"
           }
@@ -848,6 +865,7 @@
         "type": "object"
       },
       "UploadRequest": {
+        "description": "Accepted types and the 15 MB cap are fixed in the contract (HDD \u00a710); the matching\nsettings exist for the presign policy and must agree with these.",
         "properties": {
           "captureTime": {
             "format": "date-time",
@@ -916,46 +934,6 @@
         "title": "UploadSlot",
         "type": "object"
       },
-      "ValidationError": {
-        "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "title": "Location",
-            "type": "array"
-          },
-          "msg": {
-            "title": "Message",
-            "type": "string"
-          },
-          "type": {
-            "title": "Error Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError",
-        "type": "object"
-      },
       "ViewpointOut": {
         "properties": {
           "name": {
@@ -1005,11 +983,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "validation_error"
           }
         },
         "summary": "Accept the bytes a presigned PUT would",
@@ -1099,11 +1077,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "validation_error"
           }
         },
         "summary": "Recent snapshots for a lot, newest capture first",
@@ -1187,11 +1165,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "validation_error"
           }
         },
         "summary": "One snapshot with its observations",
@@ -1285,11 +1263,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "validation_error"
           }
         },
         "summary": "Requeue a finished, failed job",
@@ -1482,11 +1460,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "validation_error"
           }
         },
         "summary": "Confirm the file arrived and queue the job",
@@ -1543,11 +1521,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "validation_error"
           }
         },
         "summary": "Dev sign-in with email and password",
@@ -1569,6 +1547,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
           }
         },
         "summary": "Health",
@@ -1594,6 +1582,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
           }
         },
         "summary": "List published lots",
@@ -1641,11 +1639,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "validation_error"
           }
         },
         "summary": "Lot details, published schematic layout and viewpoints",
@@ -1693,11 +1691,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "validation_error"
           }
         },
         "summary": "Current state of every space (HDD \u00a76.2)",

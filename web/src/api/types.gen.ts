@@ -209,21 +209,29 @@ export interface components {
         /** ErrorResponse */
         ErrorResponse: {
             /**
+             * Details
+             * @description Pydantic error list on 422 validation_error
+             */
+            details?: {
+                [key: string]: unknown;
+            }[] | null;
+            /**
              * Error
              * @description Machine-readable code, e.g. duplicate, session_expired
              */
             error: string;
             /** Message */
             message: string;
-            /** Originalimageid */
+            /**
+             * Originalimageid
+             * @description Set on 409 duplicate
+             */
             originalImageId?: string | null;
-            /** Uploadedat */
+            /**
+             * Uploadedat
+             * @description Set on 409 duplicate
+             */
             uploadedAt?: string | null;
-        };
-        /** HTTPValidationError */
-        HTTPValidationError: {
-            /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
         };
         /** HealthResponse */
         HealthResponse: {
@@ -281,7 +289,10 @@ export interface components {
             /** Staleafterminutes */
             staleAfterMinutes: number;
         };
-        /** LotListItem */
+        /**
+         * LotListItem
+         * @description Only lots with a published layout appear; layoutVersion is therefore never null.
+         */
         LotListItem: {
             /** Layoutversion */
             layoutVersion: number;
@@ -306,9 +317,15 @@ export interface components {
             layoutVersion: number;
             /** Lotid */
             lotId: string;
-            /** Noobservations */
+            /**
+             * Noobservations
+             * @description No space has any observation yet; show 'No observations yet' (US-01 #5)
+             */
             noObservations: boolean;
-            /** Processing */
+            /**
+             * Processing
+             * @description A snapshot for this lot is QUEUED or PROCESSING (US-11 #5)
+             */
             processing: boolean;
             /** Spaces */
             spaces: components["schemas"]["SpaceStatusOut"][];
@@ -333,7 +350,7 @@ export interface components {
             occupied: number;
             /**
              * Openpercent
-             * @description free / total * 100, or null when hasRecentData is false
+             * @description round(free / total * 100), or null when hasRecentData is false or total is 0
              */
             openPercent: number | null;
             /**
@@ -381,6 +398,7 @@ export interface components {
             rect: components["schemas"]["RectOut"];
             /** Spaceid */
             spaceId: string;
+            /** @description ParkingSpace.spaceType in the published layout JSON */
             type: components["schemas"]["SpaceType"];
         };
         /** SnapshotDetail */
@@ -501,10 +519,17 @@ export interface components {
         UploadCompleteResponse: {
             /** Imageid */
             imageId: string;
-            /** Jobstatus */
-            jobStatus: string;
+            /**
+             * Jobstatus
+             * @enum {string}
+             */
+            jobStatus: "UPLOAD_PENDING" | "QUEUED" | "PROCESSING" | "COMPLETE" | "FAILED" | "EXPIRED";
         };
-        /** UploadRequest */
+        /**
+         * UploadRequest
+         * @description Accepted types and the 15 MB cap are fixed in the contract (HDD §10); the matching
+         *     settings exist for the presign policy and must agree with these.
+         */
         UploadRequest: {
             /**
              * Capturetime
@@ -536,19 +561,6 @@ export interface components {
             imageId: string;
             /** Uploadurl */
             uploadUrl: string;
-        };
-        /** ValidationError */
-        ValidationError: {
-            /** Context */
-            ctx?: Record<string, never>;
-            /** Input */
-            input?: unknown;
-            /** Location */
-            loc: (string | number)[];
-            /** Message */
-            msg: string;
-            /** Error Type */
-            type: string;
         };
         /** ViewpointOut */
         ViewpointOut: {
@@ -584,13 +596,13 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
+            /** @description validation_error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -636,13 +648,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description validation_error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -696,13 +708,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description validation_error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -765,13 +777,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description validation_error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -905,13 +917,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description validation_error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -956,13 +968,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description validation_error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -985,6 +997,15 @@ export interface operations {
                     "application/json": components["schemas"]["HealthResponse"];
                 };
             };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     list_lots_lots_get: {
@@ -1003,6 +1024,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LotListItem"][];
+                };
+            };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -1036,13 +1066,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description validation_error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -1076,13 +1106,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description validation_error */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

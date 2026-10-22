@@ -10,3 +10,7 @@
 - 2026-10-21 Tooling: openapi-typescript 7 needs TypeScript 5.x; Vite's template installs TS 6.
 - 2026-10-21 Claude Code: parallel Bash calls share one working directory, so a `cd` in one
   shell moves the other. Always use absolute paths when running shells in parallel.
+- 2026-10-21 Tooling: something set the macOS `hidden` flag (UF_HIDDEN) on every `.pth` in `.venv`
+  while subagent worktrees ran `uv sync`; Python 3.12 silently skips hidden .pth files, so the
+  editable workspace packages vanished (`ModuleNotFoundError: parking_core`). Check with
+  `ls -lO .venv/lib/python3.12/site-packages/*.pth`, fix with `chflags nohidden`.

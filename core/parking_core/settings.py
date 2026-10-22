@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .interfaces import AuthVerifier, JobQueue, ObjectStore, Repository
@@ -49,6 +49,17 @@ class Settings(BaseSettings):
     upload_url_ttl_seconds: int = 300
     max_upload_bytes: int = 15 * 1024 * 1024
     allowed_upload_types: tuple[str, ...] = Field(default=("image/jpeg", "image/png"))
+
+    @model_validator(mode="after")
+    def _guard_production(self) -> Settings:
+        if self.app_env == "aws":
+            if self.auth_mode == "dev":
+                raise ValueError("AUTH_MODE=dev is not allowed with APP_ENV=aws")
+            if self.jwt_secret == "dev-only-change-me":
+                raise ValueError("JWT_SECRET must be set when APP_ENV=aws")
+        if not self.cutoff_low < self.cutoff_high:
+            raise ValueError("CUTOFF_LOW must be below CUTOFF_HIGH")
+        return self
 
     @property
     def cutoffs(self) -> Cutoffs:

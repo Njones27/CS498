@@ -10,6 +10,7 @@ from parking_core.settings import Adapters, Settings, get_settings
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .routes import auth, public, snapshots, testonly, uploads
+from .schemas import ErrorResponse
 
 API_VERSION = "0.1.0"
 
@@ -21,6 +22,7 @@ def create_app(settings: Settings | None = None, adapters: Adapters | None = Non
         title="Parking Availability API",
         version=API_VERSION,
         description="REST contract between the web app and the backend (HDD §6.1).",
+        responses={422: {"model": ErrorResponse, "description": "validation_error"}},
     )
     app.state.settings = settings
     app.state.adapters = adapters
