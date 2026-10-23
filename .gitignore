@@ -230,3 +230,7 @@ eval/data/
 
 # Claude Code personal settings
 .claude/settings.local.json
+
+# Per-developer Claude Code scratch
+tasks/
+.claude/launch.json
