@@ -89,6 +89,24 @@ class ParkingSpace(CamelModel):
     retired: bool = False
 
 
+class OutlineSource(StrEnum):
+    DRAWN = "drawn"
+    PROPOSED = "proposed"
+
+
+class OutlineStatus(StrEnum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+
+
+class OutlineReview(CamelModel):
+    """Where one outline came from and whether an admin has reviewed it. Proposed outlines
+    (HDD §4.6) start `pending`; validation blocks publishing until they are accepted."""
+
+    source: OutlineSource
+    status: OutlineStatus
+
+
 class Viewpoint(CamelModel):
     lot_id: str
     view_id: str
@@ -100,6 +118,8 @@ class Viewpoint(CamelModel):
     """spaceId -> polygon on this viewpoint's reference image."""
     camera_height_m: float | None = None
     camera_angle_deg: float | None = None
+    outline_review: dict[str, OutlineReview] = Field(default_factory=dict)
+    """spaceId -> review state of that outline; optional per outline."""
 
 
 class PublishedLayout(CamelModel):
@@ -127,6 +147,21 @@ class LayoutVersion(CamelModel):
     published_by: str
     published_at: datetime
     snapshot_key: str
+
+
+class DraftMeta(CamelModel):
+    """The draft layout's header item (PK LOT#{lotId}, SK DRAFT). The draft's spaces and
+    viewpoints are the lot's SPACE# / VIEW# items; `revision` bumps on every save and guards
+    concurrent editors (`Repository.put_draft_meta`)."""
+
+    lot_id: str
+    schematic: Schematic = Field(default_factory=Schematic)
+    revision: int = 0
+    based_on_version: int | None = None
+    """Published version this draft started from; None if the lot was never published."""
+    updated_at: datetime
+    updated_by: str | None = None
+    """Admin email of the last save; None until the first save."""
 
 
 class CarBox(CamelModel):

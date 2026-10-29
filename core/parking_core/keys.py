@@ -34,6 +34,11 @@ def closure_sk(closure_id: str) -> str:
     return f"CLOSURE#{closure_id}"
 
 
+def draft_sk() -> str:
+    """The one LOT#{lotId} item holding the draft layout's header (`DraftMeta`)."""
+    return "DRAFT"
+
+
 def gsi1_snapshot(lot_id: str, capture_time: datetime, image_id: str) -> tuple[str, str]:
     """GSI1 keys for an IMG#/META item so snapshots list newest capture first per lot.
 

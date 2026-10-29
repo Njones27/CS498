@@ -16,6 +16,7 @@ from .models import (
     CarBox,
     ClaimResult,
     Closure,
+    DraftMeta,
     JobStatus,
     LayoutVersion,
     Lot,
@@ -138,6 +139,17 @@ class Repository(Protocol):
     # Closures (read side used by status; CRUD arrives in wave 2)
     def put_closure(self, closure: Closure) -> None: ...
     def list_closures(self, lot_id: str) -> list[Closure]: ...
+
+    # Draft layout (US-07 #7). Draft spaces and viewpoints are the SPACE# / VIEW# items.
+    def get_draft_meta(self, lot_id: str) -> DraftMeta | None: ...
+    def put_draft_meta(self, meta: DraftMeta, expected_revision: int | None) -> bool:
+        """Conditional write on `revision`: succeeds only if the stored item's revision equals
+        `expected_revision`, or, when that is None, only if no draft meta exists yet."""
+        ...
+
+    def delete_space(self, lot_id: str, space_id: str) -> None:
+        """Remove a SPACE# item. Only for never-published spaces; the caller enforces that."""
+        ...
 
 
 class AuthVerifier(Protocol):
