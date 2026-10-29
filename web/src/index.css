@@ -225,3 +225,18 @@ a { color: var(--accent); }
 .photo-spaces__wrap { overflow-x: auto; max-height: 60vh; }
 .photo-spaces__table { width: 100%; border-collapse: collapse; background: var(--surface); font-variant-numeric: tabular-nums; }
 .photo-spaces__table th, .photo-spaces__table td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); }
+
+/* Lot mapping page (US-07, US-08, US-09): header, two panels side by side, validation below. */
+.mapping-page { max-width: 1280px; }
+.mapping-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; }
+.mapping-head h1 { margin-bottom: 0.25rem; }
+.mapping-head__part { font-weight: 400; color: var(--muted); }
+.mapping-head__actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.mapping-save-state { min-height: 1.3em; margin-bottom: 0.75rem; }
+.mapping-notice { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.75rem; }
+.mapping-panels { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
+.mapping-panel { padding: 0.8rem; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); min-width: 0; }
+.mapping-validation { margin-top: 1rem; }
+@media (max-width: 800px) {
+  .mapping-panels { grid-template-columns: minmax(0, 1fr); }
+}
