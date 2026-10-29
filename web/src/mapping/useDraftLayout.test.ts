@@ -24,9 +24,12 @@ function saved(draft: DraftLayout): DraftLayout {
   return { ...draft, revision: draft.revision + 1, updatedAt: '2026-10-28T15:00:00Z', updatedBy: 'admin@example.edu' }
 }
 
-async function loaded(routes: Record<string, Reply | ((init?: RequestInit) => Reply | Promise<Reply>)> = {}) {
+async function loaded(
+  routes: Record<string, Reply | ((init?: RequestInit) => Reply | Promise<Reply>)> = {},
+  options?: Parameters<typeof useDraftLayout>[1],
+) {
   const fetchMock = mockFetch({ [`GET ${URL}`]: { body: draftFixture() }, ...routes })
-  const hook = renderHook(() => useDraftLayout('test-lot'))
+  const hook = renderHook(() => useDraftLayout('test-lot', options))
   await waitFor(() => expect(hook.result.current.draft).not.toBeNull())
   return { fetchMock, hook }
 }
@@ -180,5 +183,119 @@ describe('useDraftLayout', () => {
     expect(result.current.draft).toBeNull()
     await act(async () => other.resolve({ body: draftFixture({ lotId: 'north' }) }))
     expect(result.current.draft?.lotId).toBe('north')
+  })
+
+  describe('undo and redo', () => {
+    it('supports undoing and redoing local changes', async () => {
+      const { hook } = await loaded()
+      expect(hook.result.current.canUndo).toBe(false)
+      expect(hook.result.current.canRedo).toBe(false)
+
+      const first = renamed(draftFixture(), 'Step 1')
+      act(() => hook.result.current.setDraft(first))
+      expect(hook.result.current.draft?.spaces[1].label).toBe('Step 1')
+      expect(hook.result.current.canUndo).toBe(true)
+      expect(hook.result.current.canRedo).toBe(false)
+
+      const second = renamed(first, 'Step 2')
+      act(() => hook.result.current.setDraft(second))
+      expect(hook.result.current.draft?.spaces[1].label).toBe('Step 2')
+      expect(hook.result.current.canUndo).toBe(true)
+      expect(hook.result.current.canRedo).toBe(false)
+
+      // Undo to Step 1
+      act(() => hook.result.current.undo())
+      expect(hook.result.current.draft?.spaces[1].label).toBe('Step 1')
+      expect(hook.result.current.canUndo).toBe(true)
+      expect(hook.result.current.canRedo).toBe(true)
+
+      // Undo to initial
+      act(() => hook.result.current.undo())
+      expect(hook.result.current.draft?.spaces[1].label).toBe(draftFixture().spaces[1].label)
+      expect(hook.result.current.canUndo).toBe(false)
+      expect(hook.result.current.canRedo).toBe(true)
+
+      // Redo to Step 1
+      act(() => hook.result.current.redo())
+      expect(hook.result.current.draft?.spaces[1].label).toBe('Step 1')
+      expect(hook.result.current.canUndo).toBe(true)
+      expect(hook.result.current.canRedo).toBe(true)
+
+      // A new edit clears redo future
+      const third = renamed(hook.result.current.draft!, 'Step 3')
+      act(() => hook.result.current.setDraft(third))
+      expect(hook.result.current.canUndo).toBe(true)
+      expect(hook.result.current.canRedo).toBe(false)
+    })
+
+    it('keeps server revision valid when undoing after a save', async () => {
+      const first = renamed(draftFixture(), 'Edit 1')
+      const { fetchMock, hook } = await loaded({
+        [`PUT ${URL}`]: (init) => {
+          const body = JSON.parse(String(init?.body)) as DraftLayout
+          return { body: saved({ ...body, lotId: 'test-lot', basedOnVersion: 1 }) }
+        },
+      })
+      act(() => hook.result.current.setDraft(first))
+
+      // Save sends revision 0 -> returns revision 1
+      await act(async () => {
+        await hook.result.current.save()
+      })
+      expect(sentBody(fetchMock, 1)).toMatchObject({ revision: 0 })
+      expect(hook.result.current.draft?.revision).toBe(1)
+      expect(hook.result.current.dirty).toBe(false)
+
+      // Now undo back to original layout
+      act(() => hook.result.current.undo())
+      expect(hook.result.current.draft?.spaces[1].label).toBe(draftFixture().spaces[1].label)
+      expect(hook.result.current.draft?.revision).toBe(1) // preserved revision 1!
+      expect(hook.result.current.dirty).toBe(true)
+
+      // Re-saving sends revision 1 (not stale revision 0)
+      await act(async () => {
+        await hook.result.current.save()
+      })
+      expect(sentBody(fetchMock, 2)).toMatchObject({ revision: 1 })
+      expect(hook.result.current.draft?.revision).toBe(2)
+      expect(hook.result.current.dirty).toBe(false)
+    })
+  })
+
+  describe('autosave', () => {
+    it('debounces and automatically saves edits when enabled', async () => {
+      const first = renamed(draftFixture(), 'Autosaved')
+      const { fetchMock, hook } = await loaded(
+        {
+          [`PUT ${URL}`]: (init) => {
+            const body = JSON.parse(String(init?.body)) as DraftLayout
+            return { body: saved({ ...body, lotId: 'test-lot', basedOnVersion: 1 }) }
+          },
+        },
+        { autosave: true, debounceMs: 50 },
+      )
+
+      act(() => hook.result.current.setDraft(first))
+      expect(hook.result.current.dirty).toBe(true)
+      expect(fetchMock.mock.calls.filter((c) => c[1]?.method === 'PUT')).toHaveLength(0)
+
+      // Within 50ms, autosave fires
+      await waitFor(() => expect(hook.result.current.dirty).toBe(false))
+      expect(fetchMock.mock.calls.filter((c) => c[1]?.method === 'PUT')).toHaveLength(1)
+      expect(hook.result.current.draft?.revision).toBe(1)
+    })
+
+    it('does not save automatically when autosave is disabled', async () => {
+      const first = renamed(draftFixture(), 'Manual Only')
+      const { fetchMock, hook } = await loaded(
+        { [`PUT ${URL}`]: { body: saved(first) } },
+        { autosave: false, debounceMs: 50 },
+      )
+
+      act(() => hook.result.current.setDraft(first))
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      expect(fetchMock.mock.calls.filter((c) => c[1]?.method === 'PUT')).toHaveLength(0)
+      expect(hook.result.current.dirty).toBe(true)
+    })
   })
 })

@@ -82,7 +82,10 @@ class MemoryObjectStore:
             return ObjectInfo(size_bytes=len(data), content_type=content_type)
 
     def presign_put(self, key: str, content_type: str, expires_seconds: int = 300) -> str:
-        image_id = image_id_from_raw_key(key)
+        try:
+            image_id = image_id_from_raw_key(key)
+        except ValueError:
+            image_id = uuid.uuid4().hex
         with self._lock:
             self._pending[image_id] = key
         return f"{TEST_UPLOAD_PREFIX}{image_id}"

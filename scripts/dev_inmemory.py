@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import threading
 from pathlib import Path
@@ -57,8 +58,9 @@ def main(lot: str = DEFAULT_LOT, port: int = 8000) -> None:
         name="worker",
     )
     worker.start()
+    host = os.environ.get("HOST", "0.0.0.0")
     try:
-        uvicorn.run(create_app(settings, adapters), host="127.0.0.1", port=port, log_level="info")
+        uvicorn.run(create_app(settings, adapters), host=host, port=port, log_level="info")
     finally:
         stop.set()
 

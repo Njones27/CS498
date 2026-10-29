@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { LotDetail } from '../api/schemas'
 import { useFetch } from '../lib/useFetch'
+import { ReferencePhotoPanel } from './ReferencePhotoPanel'
 import { SchematicEditor } from './SchematicEditor'
 import type { DraftLayout, Issue, MappingSelection } from './types'
 import { useDraftLayout } from './useDraftLayout'
@@ -17,15 +18,32 @@ const NO_ISSUES: Issue[] = []
 /** Lot mapping page (Sketch 5): schematic editor, reference photo panel, validation, Save. */
 export function LotMappingPage() {
   const { lotId = '' } = useParams()
-  const { draft, loading, error, saving, saveError, stale, dirty, setDraft, save, reload, refreshReferenceImages } =
-    useDraftLayout(lotId)
+  const {
+    draft,
+    loading,
+    error,
+    saving,
+    saveError,
+    stale,
+    dirty,
+    savedNote,
+    setDraft,
+    save,
+    reload,
+    refreshReferenceImages,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+    autosave,
+    setAutosave,
+  } = useDraftLayout(lotId)
   // Unpublished lots are not in the public API, so their header falls back to the lot id.
   const detail = useFetch<LotDetail | null>(
     () => api.get<LotDetail>(`/lots/${encodeURIComponent(lotId)}`).catch(() => null),
     `mapping-lot:${lotId}`,
   )
   const lotName = detail.data?.lot.name ?? lotId
-  const [savedNote, setSavedNote] = useState<string | null>(null)
 
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null)
   const [hoveredSpaceId, setHoveredSpaceId] = useState<string | null>(null)
@@ -48,9 +66,43 @@ export function LotMappingPage() {
     return () => window.removeEventListener('beforeunload', warn)
   }, [dirty])
 
+  // Global keyboard shortcuts for Undo (Ctrl+Z / Cmd+Z) and Redo (Ctrl+Y / Cmd+Shift+Z)
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const isMod = e.ctrlKey || e.metaKey
+      if (!isMod) return
+
+      const target = e.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return
+      }
+
+      const key = e.key.toLowerCase()
+      if (key === 'z' && !e.shiftKey) {
+        if (canUndo) {
+          e.preventDefault()
+          undo()
+        }
+      } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+        if (canRedo) {
+          e.preventDefault()
+          redo()
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [canUndo, canRedo, undo, redo])
+
   async function onSave() {
-    setSavedNote(null)
-    if (await save()) setSavedNote('Draft saved')
+    await save()
   }
 
   return (
@@ -64,7 +116,40 @@ export function LotMappingPage() {
           {draft && <span className="mapping-head__part"> · {draftBasis(draft)}</span>}
         </h1>
         <div className="mapping-head__actions">
-          <button type="button" className="button button--primary" onClick={onSave} disabled={!draft || saving || stale}>
+          <button
+            type="button"
+            className="button"
+            onClick={undo}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z / Cmd+Z)"
+            aria-label="Undo"
+          >
+            ↶ Undo
+          </button>
+          <button
+            type="button"
+            className="button"
+            onClick={redo}
+            disabled={!canRedo}
+            title="Redo (Ctrl+Y / Cmd+Shift+Z)"
+            aria-label="Redo"
+          >
+            ↷ Redo
+          </button>
+          <label className="mapping-autosave" title="Automatically save changes after 1.5s of inactivity">
+            <input
+              type="checkbox"
+              checked={autosave}
+              onChange={(e) => setAutosave(e.target.checked)}
+            />
+            <span>Autosave</span>
+          </label>
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={onSave}
+            disabled={!draft || saving || stale}
+          >
             {saving ? 'Saving…' : 'Save'}
           </button>
           <button type="button" className="button" disabled title="Coming soon">
@@ -103,7 +188,7 @@ export function LotMappingPage() {
         <>
           <div className="mapping-panels">
             <SchematicEditor {...selection} draft={draft} onChange={setDraft} issues={issues} />
-            <ReferencePhotoPlaceholder
+            <ReferencePhotoPanel
               {...selection}
               lotId={lotId}
               draft={draft}
@@ -112,6 +197,7 @@ export function LotMappingPage() {
               onChange={setDraft}
               onReferenceUploaded={() => void refreshReferenceImages()}
               issues={issues}
+              onSave={save}
             />
           </div>
           <section className="mapping-panel mapping-validation" aria-label="Validation">
@@ -121,29 +207,5 @@ export function LotMappingPage() {
         </>
       )}
     </main>
-  )
-}
-
-// Stand-in until Rylan's ReferencePhotoPanel lands. It takes the brief §4.4 props, so swapping
-// in the real panel only changes the component name.
-
-interface ReferencePanelProps extends MappingSelection {
-  lotId: string
-  draft: DraftLayout
-  viewId: string | null
-  onViewChange: (viewId: string) => void
-  onChange: (next: DraftLayout) => void
-  onReferenceUploaded: () => void
-  issues: Issue[]
-}
-
-function ReferencePhotoPlaceholder(props: ReferencePanelProps) {
-  const names = props.draft.viewpoints.map((v) => `${v.viewId} ${v.name}`).join(', ')
-  return (
-    <section className="mapping-panel" aria-label="Reference photo">
-      <h2>Reference photo</h2>
-      <p>{names || 'No viewpoints yet'}</p>
-      <p className="muted">The reference photo panel is coming soon.</p>
-    </section>
   )
 }

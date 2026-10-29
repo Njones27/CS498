@@ -10,7 +10,17 @@ from parking_core.models import utcnow
 from parking_core.settings import Adapters, Settings, get_settings
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .routes import auth, closures, layout, lots_admin, public, snapshots, testonly, uploads
+from .routes import (
+    auth,
+    closures,
+    layout,
+    lots_admin,
+    public,
+    reference,
+    snapshots,
+    testonly,
+    uploads,
+)
 from .schemas import ErrorResponse
 
 API_VERSION = "0.1.0"
@@ -35,6 +45,7 @@ def create_app(settings: Settings | None = None, adapters: Adapters | None = Non
     app.include_router(closures.router)
     app.include_router(layout.router)
     app.include_router(lots_admin.router)
+    app.include_router(reference.router)
     if settings.app_env == "test":
         app.include_router(testonly.router)
 
