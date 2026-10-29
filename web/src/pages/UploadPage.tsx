@@ -1,5 +1,6 @@
 import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
+import { useAdminLot } from '../admin/AdminLotContext'
 import { ApiError, api, errorMessage } from '../api/client'
 import type {
   LotDetail,
@@ -23,14 +24,6 @@ import { useFetch } from '../lib/useFetch'
 /** localStorage key shared with the admin lot picker (US-16 #3). */
 export const ADMIN_LOT_KEY = 'parking.admin.lotId'
 
-function rememberedLot(): string {
-  try {
-    return localStorage.getItem(ADMIN_LOT_KEY) ?? ''
-  } catch {
-    return ''
-  }
-}
-
 type Outcome =
   | { kind: 'success'; imageId: string }
   | { kind: 'duplicate'; uploadedAt: string | null | undefined; imageId: string | null | undefined }
@@ -39,7 +32,7 @@ type Outcome =
 /** US-04 / US-05: upload a lot photo with its capture time. */
 export function UploadPage() {
   const lots = useFetch(() => api.get<LotListItem[]>('/lots'), 'lots')
-  const [storedLotId, setLotId] = useState(rememberedLot)
+  const { lotId: storedLotId, setLotId } = useAdminLot()
   const lotId = lots.data && !lots.data.some((l) => l.lotId === storedLotId) ? '' : storedLotId
   const detail = useFetch<LotDetail | null>(
     () => (lotId ? api.get<LotDetail>(`/lots/${encodeURIComponent(lotId)}`) : Promise.resolve(null)),
@@ -68,11 +61,6 @@ export function UploadPage() {
   function onLotChange(e: ChangeEvent<HTMLSelectElement>) {
     setLotId(e.target.value)
     setViewId('')
-    try {
-      localStorage.setItem(ADMIN_LOT_KEY, e.target.value)
-    } catch {
-      // storage unavailable; the picker just will not remember
-    }
   }
 
   async function onFileChange(e: ChangeEvent<HTMLInputElement>) {

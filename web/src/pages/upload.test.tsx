@@ -204,19 +204,3 @@ describe('upload form integrity', () => {
     expect(time.value).toMatch(/^2026-10-21T11:15/)
   })
 })
-
-describe('snapshots placeholder', () => {
-  it('resolves the duplicate link target and shows the snapshot id', () => {
-    mockFetch({})
-    renderApp('/admin/snapshots#img-0', ADMIN)
-    expect(screen.getByRole('heading', { name: 'Snapshots' })).toBeInTheDocument()
-    expect(screen.getByText('The Snapshots page is coming soon.')).toBeInTheDocument()
-    expect(screen.getByText('img-0')).toBeInTheDocument()
-  })
-
-  it('stays behind the admin guard', () => {
-    mockFetch({})
-    renderApp('/admin/snapshots#img-0')
-    expect(screen.getByTestId('location')).toHaveTextContent('/signin?next=%2Fadmin%2Fsnapshots%23img-0')
-  })
-})

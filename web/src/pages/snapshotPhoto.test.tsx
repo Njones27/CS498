@@ -180,7 +180,7 @@ describe('snapshot photo page', () => {
     expect(await screen.findByText('Photo not available')).toBeInTheDocument()
     expect(screen.queryByRole('img', { name: /Uploaded photo/ })).not.toBeInTheDocument()
     expect(screen.queryByText('Processing…')).not.toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls.filter(([u]) => String(u) === '/api/admin/snapshots/img-1')).toHaveLength(1)
   })
 
   it('does not report a missing photo while the job is still queued', async () => {
