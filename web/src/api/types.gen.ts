@@ -73,6 +73,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/lots/{lot_id}/layout/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The lot's editable draft layout */
+        get: operations["get_draft_admin_lots__lot_id__layout_draft_get"];
+        /** Save the draft layout; drivers see nothing until it is published */
+        put: operations["put_draft_admin_lots__lot_id__layout_draft_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/snapshots": {
         parameters: {
             query?: never;
@@ -332,6 +350,166 @@ export interface components {
          * @enum {string}
          */
         ClosureReason: "CONSTRUCTION" | "EVENT" | "MAINTENANCE" | "RESERVED";
+        /** DraftErrorResponse */
+        DraftErrorResponse: {
+            /**
+             * Details
+             * @description Pydantic error list on 422 validation_error
+             */
+            details?: {
+                [key: string]: unknown;
+            }[] | null;
+            /**
+             * Error
+             * @description Machine-readable code, e.g. duplicate, session_expired
+             */
+            error: string;
+            /** Message */
+            message: string;
+            /**
+             * Originalimageid
+             * @description Set on 409 duplicate
+             */
+            originalImageId?: string | null;
+            /**
+             * Spaceids
+             * @description Set on 422 cannot_delete_published_space
+             */
+            spaceIds?: string[] | null;
+            /**
+             * Uploadedat
+             * @description Set on 409 duplicate
+             */
+            uploadedAt?: string | null;
+        };
+        /** DraftLayout */
+        DraftLayout: {
+            /**
+             * Basedonversion
+             * @description Published version this draft started from; null if never published
+             */
+            basedOnVersion: number | null;
+            /** Lotid */
+            lotId: string;
+            /**
+             * Revision
+             * @description Bumps on every successful save
+             */
+            revision: number;
+            schematic: components["schemas"]["DraftSchematic"];
+            /** Spaces */
+            spaces: components["schemas"]["DraftSpace"][];
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /**
+             * Updatedby
+             * @description Null until the first save
+             */
+            updatedBy: string | null;
+            /** Viewpoints */
+            viewpoints: components["schemas"]["DraftViewpoint"][];
+        };
+        /**
+         * DraftLayoutUpdate
+         * @description PUT body: the DraftLayout shape without updatedAt, updatedBy and referenceImage.
+         */
+        DraftLayoutUpdate: {
+            /**
+             * Revision
+             * @description Must equal the stored revision, else 409 stale_revision
+             */
+            revision: number;
+            schematic: components["schemas"]["DraftSchematic"];
+            /** Spaces */
+            spaces: components["schemas"]["DraftSpace"][];
+            /** Viewpoints */
+            viewpoints: components["schemas"]["DraftViewpointIn"][];
+        };
+        /**
+         * DraftRect
+         * @description Schematic rectangle in schematic units.
+         */
+        DraftRect: {
+            /** H */
+            h: number;
+            /** W */
+            w: number;
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+        };
+        /** DraftSchematic */
+        DraftSchematic: {
+            /** Height */
+            height: number;
+            /** Width */
+            width: number;
+        };
+        /** DraftSpace */
+        DraftSpace: {
+            /**
+             * Label
+             * @description Editable display label
+             */
+            label: string;
+            rect: components["schemas"]["DraftRect"];
+            /** Retired */
+            retired: boolean;
+            /**
+             * Spaceid
+             * @description Stable id; never changes once created
+             */
+            spaceId: string;
+            type: components["schemas"]["SpaceType"];
+        };
+        /** DraftViewpoint */
+        DraftViewpoint: {
+            /** Name */
+            name: string;
+            /** Outlinereview */
+            outlineReview: {
+                [key: string]: components["schemas"]["OutlineReviewOut"];
+            };
+            /**
+             * Outlines
+             * @description spaceId -> outline on the reference photo
+             */
+            outlines: {
+                [key: string]: [
+                    number,
+                    number
+                ][];
+            };
+            /** @description Null until a reference photo is uploaded */
+            referenceImage: components["schemas"]["ReferenceImageOut"] | null;
+            /** Viewid */
+            viewId: string;
+        };
+        /**
+         * DraftViewpointIn
+         * @description A viewpoint in a draft save. The reference photo is set only by its own endpoints.
+         */
+        DraftViewpointIn: {
+            /** Name */
+            name: string;
+            /** Outlinereview */
+            outlineReview?: {
+                [key: string]: components["schemas"]["OutlineReviewOut"];
+            };
+            /** Outlines */
+            outlines?: {
+                [key: string]: [
+                    number,
+                    number
+                ][];
+            };
+            /** Viewid */
+            viewId: string;
+        };
         /** ErrorResponse */
         ErrorResponse: {
             /**
@@ -507,6 +685,21 @@ export interface components {
             spaceId: string;
             state: components["schemas"]["SpaceState"];
         };
+        /** OutlineReviewOut */
+        OutlineReviewOut: {
+            source: components["schemas"]["OutlineSource"];
+            status: components["schemas"]["OutlineStatus"];
+        };
+        /**
+         * OutlineSource
+         * @enum {string}
+         */
+        OutlineSource: "drawn" | "proposed";
+        /**
+         * OutlineStatus
+         * @enum {string}
+         */
+        OutlineStatus: "pending" | "accepted";
         /** RectOut */
         RectOut: {
             /** H */
@@ -517,6 +710,18 @@ export interface components {
             x: number;
             /** Y */
             y: number;
+        };
+        /** ReferenceImageOut */
+        ReferenceImageOut: {
+            /** Height */
+            height: number | null;
+            /**
+             * Url
+             * @description Presigned GET, read-only and short-lived
+             */
+            url: string;
+            /** Width */
+            width: number | null;
         };
         /** SchematicOut */
         SchematicOut: {
@@ -988,6 +1193,139 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_draft_admin_lots__lot_id__layout_draft_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftLayout"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_draft_admin_lots__lot_id__layout_draft_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftLayoutUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftLayout"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description stale_revision */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description cannot_delete_published_space or validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftErrorResponse"];
                 };
             };
         };
