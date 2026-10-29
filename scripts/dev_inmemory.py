@@ -2,8 +2,9 @@
 
 No Docker needed. Useful for frontend work and browser checks:
 
-    uv run python scripts/dev_inmemory.py          # API on :8000
-    cd web && npm run dev                           # Vite on :5173 proxies /api -> :8000
+    uv run python scripts/dev_inmemory.py                   # API on :8000, seeds test-lot
+    uv run python scripts/dev_inmemory.py --lot drone-lot   # seed another lot from seed/lots/
+    cd web && npm run dev                                    # Vite on :5173 proxies /api -> :8000
 
 Presigned uploads go to the test-only route /_test/uploads/{imageId}; the worker thread picks
 jobs off the in-memory queue and scores them with the stub scorer.
@@ -11,6 +12,7 @@ jobs off the in-memory queue and scores them with the stub scorer.
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -33,14 +35,12 @@ from parking_worker.poller import run_forever  # noqa: E402
 from parking_worker.scorers import build_scorer  # noqa: E402
 
 
-def main(port: int = 8000) -> None:
+def main(lot: str = DEFAULT_LOT, port: int = 8000) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     settings = Settings(app_env="test", _env_file=None)  # type: ignore[call-arg]
     adapters = build_adapters(settings)
-    image = FIXTURES_DIR / f"{DEFAULT_LOT}.jpg"
-    result = seed_lot(
-        adapters, load_lot_file(DEFAULT_LOT), image.read_bytes() if image.exists() else None
-    )
+    image = FIXTURES_DIR / f"{lot}.jpg"
+    result = seed_lot(adapters, load_lot_file(lot), image.read_bytes() if image.exists() else None)
     print(result.summary())
     print(f"Dev admin: {settings.dev_admin_email} / {settings.dev_admin_password}")
 
@@ -66,4 +66,8 @@ def main(port: int = 8000) -> None:
 
 
 if __name__ == "__main__":
-    main(int(sys.argv[1]) if len(sys.argv) > 1 else 8000)
+    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser.add_argument("--lot", default=DEFAULT_LOT, help="lot id under seed/lots/")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    main(args.lot, args.port)

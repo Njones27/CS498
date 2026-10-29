@@ -1,16 +1,28 @@
 import { Link } from 'react-router-dom'
+import { useAdminLot } from '../admin/AdminLotContext'
 import { MapLink } from '../mapping/MapLink'
 
-const COMING_SOON = ['Snapshots']
-
 export function AdminHomePage() {
+  const { lotId, lots } = useAdminLot()
+  const lot = lots?.find((l) => l.lotId === lotId)
   return (
     <main className="page page--narrow">
       <h1>Admin</h1>
+      {lot && (
+        <p className="hint">
+          Working on <strong>{lot.name}</strong>
+          {!lot.published && ' (not published yet)'}. Switch lots with the picker at the top.
+        </p>
+      )}
       <ul className="admin-links">
         <li>
           <Link to="/admin/upload" className="admin-link">
             Upload
+          </Link>
+        </li>
+        <li>
+          <Link to="/admin/snapshots" className="admin-link">
+            Snapshots
           </Link>
         </li>
         <li>
@@ -21,13 +33,11 @@ export function AdminHomePage() {
         <li>
           <MapLink />
         </li>
-        {COMING_SOON.map((name) => (
-          <li key={name}>
-            <span className="admin-link admin-link--disabled" aria-disabled="true">
-              {name} <span className="muted">(coming soon)</span>
-            </span>
-          </li>
-        ))}
+        <li>
+          <Link to="/admin/lots/new" className="admin-link">
+            New lot
+          </Link>
+        </li>
       </ul>
     </main>
   )

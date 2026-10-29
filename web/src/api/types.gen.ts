@@ -38,6 +38,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/lots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every lot, published or not, sorted by name */
+        get: operations["list_admin_lots_admin_lots_get"];
+        put?: never;
+        /** Create an unpublished lot with an empty draft layout */
+        post: operations["create_lot_admin_lots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/lots/{lot_id}/closures": {
         parameters: {
             query?: never;
@@ -299,6 +317,52 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdminLotCreate */
+        AdminLotCreate: {
+            /**
+             * Location
+             * @description Free text, trimmed
+             * @default
+             */
+            location: string;
+            /**
+             * Name
+             * @description Trimmed; must not be blank or match another lot's name
+             */
+            name: string;
+            /**
+             * Staleafterminutes
+             * @description Allowed data age before drivers see a stale banner
+             * @default 30
+             */
+            staleAfterMinutes: number;
+        };
+        /** AdminLotOut */
+        AdminLotOut: {
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Layoutversion
+             * @description Current published version; null if never
+             */
+            layoutVersion: number | null;
+            /** Location */
+            location: string;
+            /** Lotid */
+            lotId: string;
+            /** Name */
+            name: string;
+            /**
+             * Published
+             * @description Has a published layout, so drivers can see it
+             */
+            published: boolean;
+            /** Staleafterminutes */
+            staleAfterMinutes: number;
+        };
         /** CarBoxOut */
         CarBoxOut: {
             /**
@@ -1062,6 +1126,117 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_admin_lots_admin_lots_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLotOut"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_lot_admin_lots_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminLotCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLotOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description duplicate_lot_name */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description validation_error */
             422: {
