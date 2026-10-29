@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import type { LotDetail } from '../api/schemas'
 import { useFetch } from '../lib/useFetch'
 import { ReferencePhotoPanel } from './ReferencePhotoPanel'
+import { SchematicEditor } from './SchematicEditor'
 import type { DraftLayout, Issue, MappingSelection } from './types'
 import { useDraftLayout } from './useDraftLayout'
 
@@ -186,7 +187,7 @@ export function LotMappingPage() {
       {draft && (
         <>
           <div className="mapping-panels">
-            <SchematicPlaceholder {...selection} draft={draft} onChange={setDraft} issues={issues} />
+            <SchematicEditor {...selection} draft={draft} onChange={setDraft} issues={issues} />
             <ReferencePhotoPanel
               {...selection}
               lotId={lotId}
@@ -206,27 +207,5 @@ export function LotMappingPage() {
         </>
       )}
     </main>
-  )
-}
-
-// Stand-in until David's SchematicEditor lands. It takes the
-// brief §4.4 props, so swapping in a real panel only changes the component name.
-
-interface SchematicPanelProps extends MappingSelection {
-  draft: DraftLayout
-  onChange: (next: DraftLayout) => void
-  issues: Issue[]
-}
-
-function SchematicPlaceholder(props: SchematicPanelProps) {
-  const retired = props.draft.spaces.filter((s) => s.retired).length
-  return (
-    <section className="mapping-panel" aria-label="Schematic">
-      <h2>Schematic</h2>
-      <p>
-        {props.draft.spaces.length - retired} spaces{retired > 0 && `, ${retired} retired`}
-      </p>
-      <p className="muted">The schematic editor is coming soon.</p>
-    </section>
   )
 }
