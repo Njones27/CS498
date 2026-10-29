@@ -1,6 +1,87 @@
 {
   "components": {
     "schemas": {
+      "AdminLotCreate": {
+        "properties": {
+          "location": {
+            "default": "",
+            "description": "Free text, trimmed",
+            "title": "Location",
+            "type": "string"
+          },
+          "name": {
+            "description": "Trimmed; must not be blank or match another lot's name",
+            "title": "Name",
+            "type": "string"
+          },
+          "staleAfterMinutes": {
+            "default": 30,
+            "description": "Allowed data age before drivers see a stale banner",
+            "maximum": 1440.0,
+            "minimum": 1.0,
+            "title": "Staleafterminutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AdminLotCreate",
+        "type": "object"
+      },
+      "AdminLotOut": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "layoutVersion": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current published version; null if never",
+            "title": "Layoutversion"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "lotId": {
+            "title": "Lotid",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "published": {
+            "description": "Has a published layout, so drivers can see it",
+            "title": "Published",
+            "type": "boolean"
+          },
+          "staleAfterMinutes": {
+            "title": "Staleafterminutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lotId",
+          "name",
+          "location",
+          "staleAfterMinutes",
+          "published",
+          "layoutVersion",
+          "createdAt"
+        ],
+        "title": "AdminLotOut",
+        "type": "object"
+      },
       "CarBoxOut": {
         "properties": {
           "box": {
@@ -1695,6 +1776,166 @@
         "summary": "Accept the bytes a presigned PUT would",
         "tags": [
           "test-only"
+        ]
+      }
+    },
+    "/admin/lots": {
+      "get": {
+        "operationId": "list_admin_lots_admin_lots_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminLotOut"
+                  },
+                  "title": "Response List Admin Lots Admin Lots Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "Every lot, published or not, sorted by name",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "create_lot_admin_lots_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminLotCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLotOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "duplicate_lot_name"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "Create an unpublished lot with an empty draft layout",
+        "tags": [
+          "admin"
         ]
       }
     },
