@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LotDetail, LotListItem } from '../api/schemas'
@@ -112,6 +112,106 @@ describe('LotMappingPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid request')
     expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeInTheDocument()
+  })
+
+  it('toggles autosave and persists setting to localStorage', async () => {
+    mockFetch({ 'GET /lots/test-lot': { body: detail }, [`GET ${URL}`]: { body: draftFixture() } })
+    renderApp('/admin/lots/test-lot/map', ADMIN)
+    const toggle = (await screen.findByRole('checkbox', { name: 'Autosave' })) as HTMLInputElement
+    expect(toggle.checked).toBe(false)
+
+    await userEvent.click(toggle)
+    expect(toggle.checked).toBe(true)
+    expect(localStorage.getItem('parking.autosave')).toBe('true')
+
+    await userEvent.click(toggle)
+    expect(toggle.checked).toBe(false)
+    expect(localStorage.getItem('parking.autosave')).toBe('false')
+  })
+
+  it('supports undo and redo buttons for layout edits', async () => {
+    mockFetch({ 'GET /lots/test-lot': { body: detail }, [`GET ${URL}`]: { body: draftFixture() } })
+    renderApp('/admin/lots/test-lot/map', ADMIN)
+
+    const undoBtn = await screen.findByRole('button', { name: 'Undo' })
+    const redoBtn = screen.getByRole('button', { name: 'Redo' })
+    expect(undoBtn).toBeDisabled()
+    expect(redoBtn).toBeDisabled()
+
+    // Add a new viewpoint to trigger an edit
+    await userEvent.click(await screen.findByRole('button', { name: '+ Viewpoint' }))
+    const nameInput = screen.getByPlaceholderText('e.g. South Corner')
+    await userEvent.type(nameInput, 'Gate View')
+    await userEvent.click(screen.getByRole('button', { name: 'Add Viewpoint' }))
+
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(undoBtn).toBeEnabled()
+    expect(redoBtn).toBeDisabled()
+
+    // Undo the addition
+    await userEvent.click(undoBtn)
+    expect(undoBtn).toBeDisabled()
+    expect(redoBtn).toBeEnabled()
+
+    // Redo the addition
+    await userEvent.click(redoBtn)
+    expect(undoBtn).toBeEnabled()
+    expect(redoBtn).toBeDisabled()
+  })
+
+  it('supports keyboard shortcuts for undo (Ctrl+Z) and redo (Ctrl+Y)', async () => {
+    mockFetch({ 'GET /lots/test-lot': { body: detail }, [`GET ${URL}`]: { body: draftFixture() } })
+    renderApp('/admin/lots/test-lot/map', ADMIN)
+
+    const undoBtn = await screen.findByRole('button', { name: 'Undo' })
+    const redoBtn = screen.getByRole('button', { name: 'Redo' })
+
+    // Add viewpoint to make draft dirty
+    await userEvent.click(await screen.findByRole('button', { name: '+ Viewpoint' }))
+    await userEvent.type(screen.getByPlaceholderText('e.g. South Corner'), 'Gate View')
+    await userEvent.click(screen.getByRole('button', { name: 'Add Viewpoint' }))
+    expect(undoBtn).toBeEnabled()
+
+    // Ctrl+Z undoes
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+    expect(undoBtn).toBeDisabled()
+    expect(redoBtn).toBeEnabled()
+
+    // Ctrl+Y redoes
+    fireEvent.keyDown(window, { key: 'y', ctrlKey: true })
+    expect(undoBtn).toBeEnabled()
+    expect(redoBtn).toBeDisabled()
+
+    // Ctrl+Shift+Z also redoes
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+    expect(undoBtn).toBeDisabled()
+    expect(redoBtn).toBeEnabled()
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true })
+    expect(undoBtn).toBeEnabled()
+    expect(redoBtn).toBeDisabled()
+  })
+
+  it('does not trigger undo/redo shortcuts when typing inside an input element', async () => {
+    mockFetch({ 'GET /lots/test-lot': { body: detail }, [`GET ${URL}`]: { body: draftFixture() } })
+    renderApp('/admin/lots/test-lot/map', ADMIN)
+
+    const undoBtn = await screen.findByRole('button', { name: 'Undo' })
+
+    // Make an edit first
+    await userEvent.click(await screen.findByRole('button', { name: '+ Viewpoint' }))
+    const input = screen.getByPlaceholderText('e.g. South Corner')
+    await userEvent.type(input, 'Gate View')
+    await userEvent.click(screen.getByRole('button', { name: 'Add Viewpoint' }))
+    expect(undoBtn).toBeEnabled()
+
+    // Open add viewpoint dialog again and press Ctrl+Z while input is focused
+    await userEvent.click(screen.getByRole('button', { name: '+ Viewpoint' }))
+    const nextInput = screen.getByPlaceholderText('e.g. South Corner')
+    nextInput.focus()
+
+    fireEvent.keyDown(nextInput, { key: 'z', ctrlKey: true })
+    // Undo was not triggered, button is still enabled
+    expect(undoBtn).toBeEnabled()
   })
 
   it('sends a signed-out visitor to sign in', async () => {

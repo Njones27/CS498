@@ -105,6 +105,8 @@ export function ReferencePhotoPanel({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (clicks.length > 0) {
         if (e.key === 'Escape') {
+          e.preventDefault()
+          e.stopImmediatePropagation()
           setClicks([])
           if (selectedOutline) setIsDrawing(false)
         } else if (
@@ -113,6 +115,7 @@ export function ReferencePhotoPanel({
           ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z')
         ) {
           e.preventDefault()
+          e.stopImmediatePropagation()
           setClicks((prev) => prev.slice(0, -1))
         }
       } else if (e.key === 'Escape' && isDrawing) {
