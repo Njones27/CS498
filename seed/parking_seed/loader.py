@@ -8,11 +8,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from parking_core import keys
+from parking_core.layouts import (
+    Draft,
+    ValidationFailedError,
+    build_layout,
+    next_version,
+    validate_draft,
+    write_layout,
+)
 from parking_core.models import (
-    LayoutVersion,
+    DraftMeta,
     Lot,
     ParkingSpace,
-    PublishedLayout,
     Schematic,
     Viewpoint,
     utcnow,
@@ -36,6 +43,8 @@ class SeedResult:
     created: bool
 
     def summary(self) -> str:
+        if not self.created:
+            return f"{self.name} is already published (v{self.published_version}); left it as is"
         return f"Loaded {self.name} with {self.spaces} spaces and {self.viewpoints} viewpoints"
 
 
@@ -48,17 +57,31 @@ def seed_lot(
     data: dict,
     reference_image: bytes | None = None,
 ) -> SeedResult:
-    """Upsert the lot, spaces and viewpoints; publish v1 only if nothing is published yet."""
+    """Load a lot and publish it as v1, unless it is already published.
+
+    A published lot is left alone, so re-running the seed never overwrites an admin's draft
+    edits. The layout goes through the same validation as an admin's publish; a lot file
+    with errors raises ValidationFailedError before anything is written.
+    """
     repo, store = adapters.repository, adapters.object_store
     lot_id = data["lotId"]
     now = utcnow()
     existing = repo.get_lot(lot_id)
+    if existing is not None and existing.current_layout_version is not None:
+        return SeedResult(
+            lot_id=lot_id,
+            name=existing.name,
+            spaces=len(repo.list_spaces(lot_id)),
+            viewpoints=len(repo.list_viewpoints(lot_id)),
+            published_version=existing.current_layout_version,
+            created=False,
+        )
+
     lot = Lot(
         lot_id=lot_id,
         name=data["name"],
         location=data.get("location", ""),
         stale_after_minutes=data.get("staleAfterMinutes", 30),
-        current_layout_version=existing.current_layout_version if existing else None,
         created_at=existing.created_at if existing else now,
     )
     spaces = [ParkingSpace.model_validate({**s, "lotId": lot_id}) for s in data["spaces"]]
@@ -67,45 +90,41 @@ def seed_lot(
     for v in data["viewpoints"]:
         vp = Viewpoint.model_validate({**v, "lotId": lot_id})
         if reference_image is not None:
-            ref_key = keys.reference_image_key(lot_id, vp.view_id, ref_sha)
-            store.put(ref_key, reference_image, "image/jpeg")
-            vp.reference_image_key = ref_key
+            vp.reference_image_key = keys.reference_image_key(lot_id, vp.view_id, ref_sha)
         viewpoints.append(vp)
+    old_meta = repo.get_draft_meta(lot_id)
+    meta = DraftMeta(
+        lot_id=lot_id,
+        schematic=Schematic.model_validate(data.get("schematic", {})),
+        revision=old_meta.revision + 1 if old_meta else 0,
+        updated_at=now,
+    )
+    draft = Draft(meta, spaces, viewpoints)
+    report = validate_draft(draft, None)
+    if not report.ok:
+        raise ValidationFailedError(report)
 
+    for vp in viewpoints:
+        if reference_image is not None and vp.reference_image_key is not None:
+            store.put(vp.reference_image_key, reference_image, "image/jpeg")
     repo.put_lot(lot)
     repo.put_spaces(spaces)
     for vp in viewpoints:
         repo.put_viewpoint(vp)
-
-    created = lot.current_layout_version is None
-    version = lot.current_layout_version or 1
-    if created:
-        snapshot_key = keys.layout_snapshot_key(lot_id, version)
-        layout = PublishedLayout(
-            lot_id=lot_id,
-            version=version,
-            schematic=Schematic.model_validate(data.get("schematic", {})),
-            spaces=spaces,
-            viewpoints=viewpoints,
-            published_at=now,
-            published_by=SEEDED_BY,
+    version = next_version(repo, lot_id)
+    if old_meta is not None:
+        # An earlier seed stopped before publishing and someone opened the draft since: this
+        # seed replaced its items, so move its revision on and point it at the new version.
+        repo.put_draft_meta(
+            meta.model_copy(update={"based_on_version": version}),
+            expected_revision=old_meta.revision,
         )
-        store.put(snapshot_key, layout.model_dump_json().encode(), "application/json")
-        repo.publish_layout(
-            lot_id,
-            LayoutVersion(
-                lot_id=lot_id,
-                version=version,
-                published_by=SEEDED_BY,
-                published_at=now,
-                snapshot_key=snapshot_key,
-            ),
-        )
+    write_layout(repo, store, build_layout(lot_id, version, draft, SEEDED_BY, now))
     return SeedResult(
         lot_id=lot_id,
         name=lot.name,
         spaces=len(spaces),
         viewpoints=len(viewpoints),
         published_version=version,
-        created=created,
+        created=True,
     )

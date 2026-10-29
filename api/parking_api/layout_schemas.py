@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
+from parking_core.layouts import ValidationReport
 from parking_core.models import CamelModel, OutlineSource, OutlineStatus, SpaceType
 from pydantic import Field, model_validator
 
@@ -116,3 +117,17 @@ class DraftErrorResponse(ErrorResponse):
     space_ids: list[str] | None = Field(
         default=None, description="Set on 422 cannot_delete_published_space"
     )
+
+
+class PublishRequest(CamelModel):
+    revision: int = Field(description="The draft revision being published, else 409 stale_revision")
+
+
+class LayoutVersionOut(CamelModel):
+    version: int
+    published_by: str
+    published_at: datetime
+
+
+class ValidationFailedResponse(ErrorResponse):
+    report: ValidationReport = Field(description="Set on 409 validation_failed")

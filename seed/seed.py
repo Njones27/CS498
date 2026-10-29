@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 
+from parking_core.layouts import ValidationFailedError
 from parking_core.settings import build_adapters, get_settings
 from parking_seed.loader import DEFAULT_LOT, FIXTURES_DIR, load_lot_file, seed_lot
 
@@ -25,7 +26,13 @@ def main(argv: list[str] | None = None) -> int:
     adapters = build_adapters(settings)
     image_path = FIXTURES_DIR / f"{args.lot}.jpg"
     image = image_path.read_bytes() if image_path.exists() else None
-    result = seed_lot(adapters, load_lot_file(args.lot), image)
+    try:
+        result = seed_lot(adapters, load_lot_file(args.lot), image)
+    except ValidationFailedError as exc:
+        print(f"Not loaded: {args.lot} has validation errors")
+        for issue in exc.report.errors:
+            print(f"  x {issue.message}")
+        return 1
     print(result.summary())
     return 0
 
