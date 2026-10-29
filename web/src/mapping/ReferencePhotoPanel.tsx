@@ -19,12 +19,12 @@ import type {
   ReferenceUploadSlot,
 } from './types'
 
-export function resolveImageUrl(url: string | null | undefined): string {
+function resolveImageUrl(url: string | null | undefined): string {
   if (!url) return ''
   if (url.includes('example.com/ref-v1') || url.includes('example.com/ref-v2')) {
     url = '/api/_test/objects/reference/test-lot/V1/2585ffab2de3.jpg'
   }
-  if (url.startsWith('/api/')) {
+  if (url.startsWith('/api/') || url.startsWith('/_test/')) {
     const base = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '')
     return `${base}${url}`
   }
@@ -43,6 +43,7 @@ export function ReferencePhotoPanel({
   onSelectSpace,
   hoveredSpaceId,
   onHoverSpace,
+  onSave,
 }: ReferencePhotoPanelProps) {
   const currentViewId = viewId ?? draft.viewpoints[0]?.viewId ?? null
   const currentViewpoint = draft.viewpoints.find((v) => v.viewId === currentViewId) ?? null
@@ -80,8 +81,8 @@ export function ReferencePhotoPanel({
     (currentViewpoint && selectedSpaceId && currentViewpoint.outlineReview?.[selectedSpaceId]) || null
   const isSelectedProposedPending = selectedReview?.status === 'pending'
 
-  const svgWidth = loadedDimensions?.width || currentViewpoint?.referenceImage?.width || 1000
-  const svgHeight = loadedDimensions?.height || currentViewpoint?.referenceImage?.height || 750
+  const svgWidth = currentViewpoint?.referenceImage?.width || loadedDimensions?.width || 1000
+  const svgHeight = currentViewpoint?.referenceImage?.height || loadedDimensions?.height || 750
 
   // When selected space or viewpoint changes, reset clicks and set drawing mode accordingly
   useEffect(() => {
@@ -95,11 +96,23 @@ export function ReferencePhotoPanel({
 
   useEffect(() => {
     setPhotoError(false)
-    setLoadedDimensions(null)
-  }, [currentViewId, currentViewpoint?.referenceImage?.url])
+    if (currentViewpoint?.referenceImage?.width && currentViewpoint?.referenceImage?.height) {
+      setLoadedDimensions({
+        width: currentViewpoint.referenceImage.width,
+        height: currentViewpoint.referenceImage.height,
+      })
+    } else {
+      setLoadedDimensions(null)
+    }
+  }, [
+    currentViewId,
+    currentViewpoint?.referenceImage?.url,
+    currentViewpoint?.referenceImage?.width,
+    currentViewpoint?.referenceImage?.height,
+  ])
 
   // Keyboard shortcuts:
-  // - Esc: cancel clicks or exit drawing mode
+  // - Esc: cancel clicks, exit drawing mode, or deselect space
   // - Backspace / Delete / Ctrl+Z: undo last placed point (solves misclicking!)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -118,13 +131,17 @@ export function ReferencePhotoPanel({
           e.stopImmediatePropagation()
           setClicks((prev) => prev.slice(0, -1))
         }
-      } else if (e.key === 'Escape' && isDrawing) {
-        setIsDrawing(false)
+      } else if (e.key === 'Escape') {
+        if (isDrawing) {
+          setIsDrawing(false)
+        } else if (selectedSpaceId) {
+          onSelectSpace(null)
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [clicks.length, isDrawing, selectedOutline])
+  }, [clicks.length, isDrawing, selectedOutline, selectedSpaceId, onSelectSpace])
 
   // Global pointer listeners for dragging corner handles
   useEffect(() => {
@@ -201,6 +218,9 @@ export function ReferencePhotoPanel({
     setIsAddingViewpoint(false)
     onChange(nextDraft)
     onViewChange(nextViewId)
+    if (onSave) {
+      void onSave()
+    }
   }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -222,6 +242,14 @@ export function ReferencePhotoPanel({
     setUploadProgress(0)
 
     try {
+      if (onSave) {
+        const saved = await onSave()
+        if (!saved) {
+          setIsUploading(false)
+          return
+        }
+      }
+
       const sha256 = await sha256Hex(file)
 
       // 1. Reserve slot
@@ -259,6 +287,7 @@ export function ReferencePhotoPanel({
       }
 
       setPhotoError(false)
+      setLoadedDimensions(dims)
       const nextVps = draft.viewpoints.map((v) =>
         v.viewId === currentViewpoint.viewId
           ? { ...v, referenceImage: res.referenceImage }
@@ -586,6 +615,19 @@ export function ReferencePhotoPanel({
                     >
                       Cancel
                     </button>
+                    <button
+                      type="button"
+                      className="button button--ghost button--sm"
+                      onClick={() => {
+                        setClicks([])
+                        setIsDrawing(false)
+                        onSelectSpace(null)
+                      }}
+                      title="Done outlining; deselect space"
+                      data-testid="done-drawing-btn"
+                    >
+                      Done
+                    </button>
                   </div>
                 </div>
               )}
@@ -611,6 +653,19 @@ export function ReferencePhotoPanel({
                         Cancel redraw
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className="button button--ghost button--sm"
+                      onClick={() => {
+                        setIsDrawing(false)
+                        setClicks([])
+                        onSelectSpace(null)
+                      }}
+                      title="Done outlining; deselect space"
+                      data-testid="done-drawing-btn"
+                    >
+                      Done
+                    </button>
                   </div>
                 </div>
               )}
@@ -648,6 +703,19 @@ export function ReferencePhotoPanel({
                       }}
                     >
                       Redraw
+                    </button>
+                    <button
+                      type="button"
+                      className="button button--ghost button--sm"
+                      onClick={() => {
+                        setIsDrawing(false)
+                        setClicks([])
+                        onSelectSpace(null)
+                      }}
+                      title="Done; deselect space"
+                      data-testid="done-drawing-btn"
+                    >
+                      Done
                     </button>
                   </div>
                 </div>
@@ -696,6 +764,19 @@ export function ReferencePhotoPanel({
                     >
                       Delete outline
                     </button>
+                    <button
+                      type="button"
+                      className="button button--ghost button--sm"
+                      onClick={() => {
+                        setIsDrawing(false)
+                        setClicks([])
+                        onSelectSpace(null)
+                      }}
+                      title="Done; deselect space"
+                      data-testid="done-drawing-btn"
+                    >
+                      Done
+                    </button>
                   </div>
                 </div>
               )}
@@ -718,8 +799,12 @@ export function ReferencePhotoPanel({
           )}
 
           {/* Photo viewer with SVG overlay */}
-          <div className="photo-view">
+          <div
+            className="photo-view"
+            style={{ aspectRatio: `${svgWidth} / ${svgHeight}` }}
+          >
             <img
+              key={currentViewpoint.referenceImage.url}
               src={
                 photoError
                   ? sampleParkingPhoto
@@ -727,6 +812,7 @@ export function ReferencePhotoPanel({
               }
               alt={`Reference for ${currentViewpoint.name}`}
               className="photo-view__img"
+              style={{ aspectRatio: `${svgWidth} / ${svgHeight}`, objectFit: 'contain' }}
               onLoad={(e) => {
                 if (e.currentTarget.naturalWidth > 0 && e.currentTarget.naturalHeight > 0) {
                   setLoadedDimensions({

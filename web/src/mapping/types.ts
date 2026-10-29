@@ -45,4 +45,5 @@ export interface ReferencePhotoPanelProps extends MappingSelection {
   onChange: (next: DraftLayout) => void
   onReferenceUploaded: () => void
   issues: Issue[]
+  onSave?: () => Promise<DraftLayout | null>
 }

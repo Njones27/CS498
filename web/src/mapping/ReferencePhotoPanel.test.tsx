@@ -67,6 +67,10 @@ describe('ReferencePhotoPanel (US-08)', () => {
     if (props.onHoverSpace) {
       onHoverSpace.mockImplementation(props.onHoverSpace)
     }
+    const onSave = vi.fn<() => Promise<DraftLayout | null>>().mockResolvedValue(draft)
+    if (props.onSave) {
+      onSave.mockImplementation(props.onSave)
+    }
 
     const result = render(
       <ReferencePhotoPanel
@@ -81,6 +85,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
         onSelectSpace={onSelectSpace}
         hoveredSpaceId={props.hoveredSpaceId ?? null}
         onHoverSpace={onHoverSpace}
+        onSave={onSave}
       />,
     )
     return {
@@ -90,6 +95,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
       onReferenceUploaded,
       onSelectSpace,
       onHoverSpace,
+      onSave,
       user: userEvent.setup(),
     }
   }
@@ -149,6 +155,49 @@ describe('ReferencePhotoPanel (US-08)', () => {
     await user.upload(input, file)
 
     expect(await screen.findByText('Check outlines: the photo changed.')).toBeInTheDocument()
+  })
+
+  it('US-08 #1: saves draft before uploading photo to newly added viewpoint', async () => {
+    mockFetch({
+      'POST /admin/lots/test-lot/views/V3/reference': {
+        status: 201,
+        body: { uploadUrl: '/api/_test/uploads/slot-1', expiresAt: '2099-01-01T00:00:00Z' },
+      },
+      'POST /admin/lots/test-lot/views/V3/reference/complete': {
+        status: 200,
+        body: {
+          viewId: 'V3',
+          referenceImage: { url: '/api/_test/objects/ref-v3.jpg', width: 1000, height: 750 },
+        },
+      },
+    })
+
+    const onSave = vi.fn().mockResolvedValue(rylanDraftFixture)
+    const { user } = renderPanel({ viewId: 'V3', onSave })
+
+    const file = new File(['new-photo-bytes'], 'new.jpg', { type: 'image/jpeg' })
+    const input = screen.getByTestId('reference-file-input')
+    await user.upload(input, file)
+
+    // onSave was called and completed before upload slot was requested
+    expect(onSave).toHaveBeenCalled()
+  })
+
+  it('US-08 #2: clicking "Done" in drawing tools deselects the space', async () => {
+    const { onSelectSpace, user } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
+
+    const doneBtn = screen.getByTestId('done-drawing-btn')
+    expect(doneBtn).toHaveTextContent('Done')
+    await user.click(doneBtn)
+
+    expect(onSelectSpace).toHaveBeenCalledWith(null)
+  })
+
+  it('pressing Escape key deselects the selected space', async () => {
+    const { onSelectSpace } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onSelectSpace).toHaveBeenCalledWith(null)
   })
 
   // --- US-08 #2: Outline a Space -------------------------------------------

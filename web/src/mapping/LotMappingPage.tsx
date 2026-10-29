@@ -196,6 +196,7 @@ export function LotMappingPage() {
               onChange={setDraft}
               onReferenceUploaded={() => void refreshReferenceImages()}
               issues={issues}
+              onSave={save}
             />
           </div>
           <section className="mapping-panel mapping-validation" aria-label="Validation">
