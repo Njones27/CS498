@@ -14,6 +14,7 @@ from parking_core.models import EXPIRED, JobStatus, Snapshot, effective_status
 from ..deps import AdaptersDep, AdminDep, NowDep, SettingsDep, error
 from ..jobs import enqueue_job
 from ..schemas import ErrorResponse, UploadCompleteResponse, UploadRequest, UploadSlot
+from ..upload_validation import validate_photo_type_and_size
 from .public import require_published
 
 router = APIRouter(prefix="/admin/uploads", tags=["admin"])
@@ -91,10 +92,7 @@ def request_upload(
     capture_time = body.capture_time.astimezone(UTC)
     if capture_time > now:
         raise error(422, "future_capture_time", "Capture time cannot be in the future")
-    if body.size_bytes > settings.max_upload_bytes:
-        raise error(422, "too_large", "Photos must be 15 MB or smaller")
-    if body.content_type not in settings.allowed_upload_types:
-        raise error(422, "unsupported_type", "Photos must be JPEG or PNG")
+    validate_photo_type_and_size(body.content_type, body.size_bytes, settings)
 
     image_id = uuid4().hex
     key = keys.raw_photo_key(lot.lot_id, body.view_id, image_id, _EXTENSIONS[body.content_type])

@@ -3,6 +3,7 @@ import { fullnessFor } from './fullness'
 import { STATE_VISUALS, visualFor } from './status'
 import { relativeTime } from './relativeTime'
 import { sha256Hex } from './sha256'
+import { resolveUploadUrl } from './putFile'
 
 describe('fullnessFor', () => {
   it.each([
@@ -45,5 +46,21 @@ describe('sha256Hex', () => {
     expect(await sha256Hex(new Blob(['abc']))).toBe(
       'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
     )
+  })
+})
+
+describe('resolveUploadUrl', () => {
+  it('prepends base path to /api/ dev URLs when present', () => {
+    const original = import.meta.env.BASE_URL
+    try {
+      import.meta.env.BASE_URL = '/proxy/5173/'
+      expect(resolveUploadUrl('/api/_test/uploads/123')).toBe('/proxy/5173/api/_test/uploads/123')
+    } finally {
+      import.meta.env.BASE_URL = original
+    }
+  })
+
+  it('leaves full http/https URLs untouched', () => {
+    expect(resolveUploadUrl('https://s3.amazonaws.com/bucket/key')).toBe('https://s3.amazonaws.com/bucket/key')
   })
 })

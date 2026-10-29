@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { LotDetail } from '../api/schemas'
 import { useFetch } from '../lib/useFetch'
+import { ReferencePhotoPanel } from './ReferencePhotoPanel'
 import type { DraftLayout, Issue, MappingSelection } from './types'
 import { useDraftLayout } from './useDraftLayout'
 
@@ -102,7 +103,7 @@ export function LotMappingPage() {
         <>
           <div className="mapping-panels">
             <SchematicPlaceholder {...selection} draft={draft} onChange={setDraft} issues={issues} />
-            <ReferencePhotoPlaceholder
+            <ReferencePhotoPanel
               {...selection}
               lotId={lotId}
               draft={draft}
@@ -123,22 +124,12 @@ export function LotMappingPage() {
   )
 }
 
-// Stand-ins until David's SchematicEditor and Rylan's ReferencePhotoPanel land. They take the
+// Stand-in until David's SchematicEditor lands. It takes the
 // brief §4.4 props, so swapping in a real panel only changes the component name.
 
 interface SchematicPanelProps extends MappingSelection {
   draft: DraftLayout
   onChange: (next: DraftLayout) => void
-  issues: Issue[]
-}
-
-interface ReferencePanelProps extends MappingSelection {
-  lotId: string
-  draft: DraftLayout
-  viewId: string | null
-  onViewChange: (viewId: string) => void
-  onChange: (next: DraftLayout) => void
-  onReferenceUploaded: () => void
   issues: Issue[]
 }
 
@@ -151,17 +142,6 @@ function SchematicPlaceholder(props: SchematicPanelProps) {
         {props.draft.spaces.length - retired} spaces{retired > 0 && `, ${retired} retired`}
       </p>
       <p className="muted">The schematic editor is coming soon.</p>
-    </section>
-  )
-}
-
-function ReferencePhotoPlaceholder(props: ReferencePanelProps) {
-  const names = props.draft.viewpoints.map((v) => `${v.viewId} ${v.name}`).join(', ')
-  return (
-    <section className="mapping-panel" aria-label="Reference photo">
-      <h2>Reference photo</h2>
-      <p>{names || 'No viewpoints yet'}</p>
-      <p className="muted">The reference photo panel is coming soon.</p>
     </section>
   )
 }
