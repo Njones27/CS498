@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { RequireAdmin } from './auth/RequireAdmin'
 import { AppShell } from './components/AppShell'
+import { LotMappingPage } from './mapping/LotMappingPage'
 import { AdminHomePage } from './pages/AdminHomePage'
 import { ClosuresPage } from './pages/ClosuresPage'
 import { LotListPage } from './pages/LotListPage'
@@ -25,6 +26,7 @@ export function AppRoutes() {
           <Route path="/admin/snapshots" element={<RequireAdmin><SnapshotsPlaceholderPage /></RequireAdmin>} />
           <Route path="/admin/snapshots/:imageId/photo" element={<RequireAdmin><SnapshotPhotoPage /></RequireAdmin>} />
           <Route path="/admin/closures" element={<RequireAdmin><ClosuresPage /></RequireAdmin>} />
+          <Route path="/admin/lots/:lotId/map" element={<RequireAdmin><LotMappingPage /></RequireAdmin>} />
           <Route path="*" element={<main className="page"><h1>Page not found</h1></main>} />
         </Route>
       </Routes>

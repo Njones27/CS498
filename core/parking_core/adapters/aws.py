@@ -32,6 +32,7 @@ from ..models import (
     CarBox,
     ClaimResult,
     Closure,
+    DraftMeta,
     JobStatus,
     LayoutVersion,
     Lot,
@@ -155,6 +156,21 @@ def status_item(status: SpaceStatus) -> dict[str, Any]:
 
 def closure_item(closure: Closure) -> dict[str, Any]:
     return model_to_item(closure, k.lot_pk(closure.lot_id), k.closure_sk(closure.closure_id))
+
+
+def draft_meta_item(meta: DraftMeta) -> dict[str, Any]:
+    return model_to_item(meta, k.lot_pk(meta.lot_id), k.draft_sk())
+
+
+def draft_meta_condition(expected_revision: int | None) -> dict[str, Any]:
+    """PutItem condition kwargs for `put_draft_meta` (pure, so it is unit-testable)."""
+    if expected_revision is None:
+        return {"ConditionExpression": "attribute_not_exists(PK)"}
+    return {
+        "ConditionExpression": "#rev = :rev",
+        "ExpressionAttributeNames": {"#rev": "revision"},
+        "ExpressionAttributeValues": {":rev": expected_revision},
+    }
 
 
 def is_conditional_failure(exc: ClientError) -> bool:
@@ -541,6 +557,25 @@ class DynamoRepository:
 
     def list_closures(self, lot_id: str) -> list[Closure]:
         return [item_to_model(i, Closure) for i in self._query_prefix(k.lot_pk(lot_id), "CLOSURE#")]
+
+    # Draft layout
+    def get_draft_meta(self, lot_id: str) -> DraftMeta | None:
+        item = self._get(k.lot_pk(lot_id), k.draft_sk())
+        return item_to_model(item, DraftMeta) if item else None
+
+    def put_draft_meta(self, meta: DraftMeta, expected_revision: int | None) -> bool:
+        try:
+            self._table.put_item(
+                Item=draft_meta_item(meta), **draft_meta_condition(expected_revision)
+            )
+            return True
+        except ClientError as exc:
+            if is_conditional_failure(exc):
+                return False
+            raise
+
+    def delete_space(self, lot_id: str, space_id: str) -> None:
+        self._table.delete_item(Key={k.PK: k.lot_pk(lot_id), k.SK: k.space_sk(space_id)})
 
 
 def transition_update(

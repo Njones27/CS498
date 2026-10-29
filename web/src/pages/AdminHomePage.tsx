@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
+import { MapLink } from '../mapping/MapLink'
 
-const COMING_SOON = ['Snapshots', 'Map']
+const COMING_SOON = ['Snapshots']
 
 export function AdminHomePage() {
   return (
@@ -16,6 +17,9 @@ export function AdminHomePage() {
           <Link to="/admin/closures" className="admin-link">
             Closures
           </Link>
+        </li>
+        <li>
+          <MapLink />
         </li>
         {COMING_SOON.map((name) => (
           <li key={name}>

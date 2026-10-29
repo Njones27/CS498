@@ -22,6 +22,7 @@ from ..models import (
     CarBox,
     ClaimResult,
     Closure,
+    DraftMeta,
     JobStatus,
     LayoutVersion,
     Lot,
@@ -177,6 +178,7 @@ class MemoryRepository:
         self._detections: dict[str, list[CarBox]] = {}
         self._statuses: dict[tuple[str, str], SpaceStatus] = {}
         self._closures: dict[tuple[str, str], Closure] = {}
+        self._drafts: dict[str, DraftMeta] = {}
 
     # Lots and layouts
     def put_lot(self, lot: Lot) -> None:
@@ -370,6 +372,25 @@ class MemoryRepository:
             return [
                 c.model_copy(deep=True) for (lid, _), c in self._closures.items() if lid == lot_id
             ]
+
+    # Draft layout
+    def get_draft_meta(self, lot_id: str) -> DraftMeta | None:
+        with self._lock:
+            meta = self._drafts.get(lot_id)
+            return meta.model_copy(deep=True) if meta else None
+
+    def put_draft_meta(self, meta: DraftMeta, expected_revision: int | None) -> bool:
+        with self._lock:
+            current = self._drafts.get(meta.lot_id)
+            stored = None if current is None else current.revision
+            if stored != expected_revision:
+                return False
+            self._drafts[meta.lot_id] = meta.model_copy(deep=True)
+            return True
+
+    def delete_space(self, lot_id: str, space_id: str) -> None:
+        with self._lock:
+            self._spaces.pop((lot_id, space_id), None)
 
 
 def build_memory_adapters(settings: Settings) -> Adapters:

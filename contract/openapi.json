@@ -198,6 +198,383 @@
         "title": "ClosureReason",
         "type": "string"
       },
+      "DraftErrorResponse": {
+        "properties": {
+          "details": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pydantic error list on 422 validation_error",
+            "title": "Details"
+          },
+          "error": {
+            "description": "Machine-readable code, e.g. duplicate, session_expired",
+            "title": "Error",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "originalImageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on 409 duplicate",
+            "title": "Originalimageid"
+          },
+          "spaceIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on 422 cannot_delete_published_space",
+            "title": "Spaceids"
+          },
+          "uploadedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on 409 duplicate",
+            "title": "Uploadedat"
+          }
+        },
+        "required": [
+          "error",
+          "message"
+        ],
+        "title": "DraftErrorResponse",
+        "type": "object"
+      },
+      "DraftLayout": {
+        "properties": {
+          "basedOnVersion": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Published version this draft started from; null if never published",
+            "title": "Basedonversion"
+          },
+          "lotId": {
+            "title": "Lotid",
+            "type": "string"
+          },
+          "revision": {
+            "description": "Bumps on every successful save",
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schematic": {
+            "$ref": "#/components/schemas/DraftSchematic"
+          },
+          "spaces": {
+            "items": {
+              "$ref": "#/components/schemas/DraftSpace"
+            },
+            "title": "Spaces",
+            "type": "array"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "updatedBy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null until the first save",
+            "title": "Updatedby"
+          },
+          "viewpoints": {
+            "items": {
+              "$ref": "#/components/schemas/DraftViewpoint"
+            },
+            "title": "Viewpoints",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lotId",
+          "revision",
+          "basedOnVersion",
+          "updatedAt",
+          "updatedBy",
+          "schematic",
+          "spaces",
+          "viewpoints"
+        ],
+        "title": "DraftLayout",
+        "type": "object"
+      },
+      "DraftLayoutUpdate": {
+        "description": "PUT body: the DraftLayout shape without updatedAt, updatedBy and referenceImage.",
+        "properties": {
+          "revision": {
+            "description": "Must equal the stored revision, else 409 stale_revision",
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schematic": {
+            "$ref": "#/components/schemas/DraftSchematic"
+          },
+          "spaces": {
+            "items": {
+              "$ref": "#/components/schemas/DraftSpace"
+            },
+            "title": "Spaces",
+            "type": "array"
+          },
+          "viewpoints": {
+            "items": {
+              "$ref": "#/components/schemas/DraftViewpointIn"
+            },
+            "title": "Viewpoints",
+            "type": "array"
+          }
+        },
+        "required": [
+          "revision",
+          "schematic",
+          "spaces",
+          "viewpoints"
+        ],
+        "title": "DraftLayoutUpdate",
+        "type": "object"
+      },
+      "DraftRect": {
+        "description": "Schematic rectangle in schematic units.",
+        "properties": {
+          "h": {
+            "title": "H",
+            "type": "number"
+          },
+          "w": {
+            "title": "W",
+            "type": "number"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "w",
+          "h"
+        ],
+        "title": "DraftRect",
+        "type": "object"
+      },
+      "DraftSchematic": {
+        "properties": {
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "title": "Height",
+            "type": "number"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "title": "Width",
+            "type": "number"
+          }
+        },
+        "required": [
+          "width",
+          "height"
+        ],
+        "title": "DraftSchematic",
+        "type": "object"
+      },
+      "DraftSpace": {
+        "properties": {
+          "label": {
+            "description": "Editable display label",
+            "title": "Label",
+            "type": "string"
+          },
+          "rect": {
+            "$ref": "#/components/schemas/DraftRect"
+          },
+          "retired": {
+            "title": "Retired",
+            "type": "boolean"
+          },
+          "spaceId": {
+            "description": "Stable id; never changes once created",
+            "minLength": 1,
+            "title": "Spaceid",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/SpaceType"
+          }
+        },
+        "required": [
+          "spaceId",
+          "label",
+          "type",
+          "rect",
+          "retired"
+        ],
+        "title": "DraftSpace",
+        "type": "object"
+      },
+      "DraftViewpoint": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "outlineReview": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OutlineReviewOut"
+            },
+            "title": "Outlinereview",
+            "type": "object"
+          },
+          "outlines": {
+            "additionalProperties": {
+              "description": "Four corners as fractions of the photo (0..1), clockwise",
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            },
+            "description": "spaceId -> outline on the reference photo",
+            "title": "Outlines",
+            "type": "object"
+          },
+          "referenceImage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReferenceImageOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null until a reference photo is uploaded"
+          },
+          "viewId": {
+            "title": "Viewid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "viewId",
+          "name",
+          "referenceImage",
+          "outlines",
+          "outlineReview"
+        ],
+        "title": "DraftViewpoint",
+        "type": "object"
+      },
+      "DraftViewpointIn": {
+        "description": "A viewpoint in a draft save. The reference photo is set only by its own endpoints.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "outlineReview": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OutlineReviewOut"
+            },
+            "title": "Outlinereview",
+            "type": "object"
+          },
+          "outlines": {
+            "additionalProperties": {
+              "description": "Four corners as fractions of the photo (0..1), clockwise",
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            },
+            "title": "Outlines",
+            "type": "object"
+          },
+          "viewId": {
+            "minLength": 1,
+            "title": "Viewid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "viewId",
+          "name"
+        ],
+        "title": "DraftViewpointIn",
+        "type": "object"
+      },
       "ErrorResponse": {
         "properties": {
           "details": {
@@ -626,6 +1003,38 @@
         "title": "ObservationOut",
         "type": "object"
       },
+      "OutlineReviewOut": {
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/OutlineSource"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OutlineStatus"
+          }
+        },
+        "required": [
+          "source",
+          "status"
+        ],
+        "title": "OutlineReviewOut",
+        "type": "object"
+      },
+      "OutlineSource": {
+        "enum": [
+          "drawn",
+          "proposed"
+        ],
+        "title": "OutlineSource",
+        "type": "string"
+      },
+      "OutlineStatus": {
+        "enum": [
+          "pending",
+          "accepted"
+        ],
+        "title": "OutlineStatus",
+        "type": "string"
+      },
       "RectOut": {
         "properties": {
           "h": {
@@ -652,6 +1061,44 @@
           "h"
         ],
         "title": "RectOut",
+        "type": "object"
+      },
+      "ReferenceImageOut": {
+        "properties": {
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "url": {
+            "description": "Presigned GET, read-only and short-lived",
+            "title": "Url",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "url",
+          "width",
+          "height"
+        ],
+        "title": "ReferenceImageOut",
         "type": "object"
       },
       "SchematicOut": {
@@ -1551,6 +1998,200 @@
           }
         },
         "summary": "End a closure now; the record is kept",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/lots/{lot_id}/layout/draft": {
+      "get": {
+        "operationId": "get_draft_admin_lots__lot_id__layout_draft_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftLayout"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "The lot's editable draft layout",
+        "tags": [
+          "admin"
+        ]
+      },
+      "put": {
+        "operationId": "put_draft_admin_lots__lot_id__layout_draft_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftLayoutUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftLayout"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "stale_revision"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftErrorResponse"
+                }
+              }
+            },
+            "description": "cannot_delete_published_space or validation_error"
+          }
+        },
+        "summary": "Save the draft layout; drivers see nothing until it is published",
         "tags": [
           "admin"
         ]
