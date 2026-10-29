@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { api } from '../api/client'
+import { Link, useLocation, useParams } from 'react-router-dom'
+import { ApiError, api, errorMessage } from '../api/client'
 import type { LotDetail } from '../api/schemas'
 import { useFetch } from '../lib/useFetch'
 import { ReferencePhotoPanel } from './ReferencePhotoPanel'
 import { SchematicEditor } from './SchematicEditor'
-import type { DraftLayout, Issue, MappingSelection } from './types'
-import { useDraftLayout } from './useDraftLayout'
+import type { DraftLayout, Issue, LayoutVersionOut, MappingSelection, ValidationReport } from './types'
+import { draftPath, useDraftLayout } from './useDraftLayout'
+import { ValidationPanel } from './ValidationPanel'
 
 /** "Draft based on v3", or "Not published yet" for a lot that was never published (brief §8.5). */
 function draftBasis(draft: DraftLayout): string {
@@ -15,7 +16,14 @@ function draftBasis(draft: DraftLayout): string {
 
 const NO_ISSUES: Issue[] = []
 
-/** Lot mapping page (Sketch 5): schematic editor, reference photo panel, validation, Save. */
+/** Navigation state the versions page sets after a Restore. */
+export interface MappingLocationState {
+  restoredFrom?: number
+}
+
+const layoutPath = (lotId: string) => `/admin/lots/${encodeURIComponent(lotId)}/layout`
+
+/** Lot mapping page (Sketch 5): schematic editor, reference photo panel, validation, Save, Publish. */
 export function LotMappingPage() {
   const { lotId = '' } = useParams()
   const {
@@ -38,12 +46,23 @@ export function LotMappingPage() {
     autosave,
     setAutosave,
   } = useDraftLayout(lotId)
+  const location = useLocation()
+  const restoredFrom = (location.state as MappingLocationState | null)?.restoredFrom
   // Unpublished lots are not in the public API, so their header falls back to the lot id.
   const detail = useFetch<LotDetail | null>(
     () => api.get<LotDetail>(`/lots/${encodeURIComponent(lotId)}`).catch(() => null),
     `mapping-lot:${lotId}`,
   )
   const lotName = detail.data?.lot.name ?? lotId
+  // The hook's savedNote says "Draft saved"; this page's own note says what Publish or Restore did.
+  const [pageNote, setPageNote] = useState<string | null>(
+    restoredFrom != null ? `Draft restored from v${restoredFrom}. Publish to make it live.` : null,
+  )
+  const [report, setReport] = useState<ValidationReport | null>(null)
+  const [busy, setBusy] = useState<'validating' | 'publishing' | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  // A publish refused with stale_revision: like a stale save, the draft must be reloaded.
+  const [publishStale, setPublishStale] = useState<string | null>(null)
 
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null)
   const [hoveredSpaceId, setHoveredSpaceId] = useState<string | null>(null)
@@ -56,7 +75,10 @@ export function LotMappingPage() {
     hoveredSpaceId,
     onHoverSpace: setHoveredSpaceId,
   }
-  const issues = NO_ISSUES // from the last validation, once Validate exists
+  // Panels highlight these spaces in red, so only errors; warnings stay in the report.
+  const issues = report?.errors ?? NO_ISSUES
+  const hasErrors = (report?.errors.length ?? 0) > 0
+  const isStale = stale || publishStale != null
 
   // Warn before leaving the page with unsaved edits.
   useEffect(() => {
@@ -102,7 +124,58 @@ export function LotMappingPage() {
   }, [canUndo, canRedo, undo, redo])
 
   async function onSave() {
+    setPageNote(null)
+    setActionError(null)
     await save()
+  }
+
+  async function onValidate() {
+    setPageNote(null)
+    setActionError(null)
+    setBusy('validating')
+    try {
+      // Validate and Publish act on the stored draft, so they always save first: the report then
+      // matches the screen, and a draft changed in another window comes back as stale.
+      if (!(await save())) return
+      setReport(await api.post<ValidationReport>(`${draftPath(lotId)}/validate`))
+    } catch (e: unknown) {
+      setActionError(errorMessage(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function onPublish() {
+    setPageNote(null)
+    setActionError(null)
+    setBusy('publishing')
+    try {
+      const current = await save()
+      if (!current) return
+      const published = await api.post<LayoutVersionOut>(`${layoutPath(lotId)}/publish`, { revision: current.revision })
+      setReport(null)
+      setPageNote(`Published v${published.version}`)
+      detail.reload()
+      reload() // publishing moves the draft to a new revision based on the new version
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.code === 'validation_failed') {
+        setReport((e.body as { report?: ValidationReport }).report ?? null)
+        setActionError(e.message)
+      } else if (e instanceof ApiError && e.code === 'stale_revision') {
+        setPublishStale(e.message)
+      } else {
+        setActionError(errorMessage(e))
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  function onReload() {
+    setPageNote(null)
+    setPublishStale(null)
+    setActionError(null)
+    reload()
   }
 
   return (
@@ -116,6 +189,9 @@ export function LotMappingPage() {
           {draft && <span className="mapping-head__part"> · {draftBasis(draft)}</span>}
         </h1>
         <div className="mapping-head__actions">
+          <Link to={`/admin/lots/${encodeURIComponent(lotId)}/versions`} className="button button--ghost">
+            Versions
+          </Link>
           <button
             type="button"
             className="button"
@@ -146,35 +222,46 @@ export function LotMappingPage() {
           </label>
           <button
             type="button"
-            className="button button--primary"
+            className="button"
             onClick={onSave}
-            disabled={!draft || saving || stale}
+            disabled={!draft || saving || busy != null || isStale}
           >
-            {saving ? 'Saving…' : 'Save'}
+            {saving && busy == null ? 'Saving…' : 'Save'}
           </button>
-          <button type="button" className="button" disabled title="Coming soon">
-            Validate
+          <button
+            type="button"
+            className="button"
+            onClick={onValidate}
+            disabled={!draft || saving || busy != null || isStale}
+          >
+            {busy === 'validating' ? 'Validating…' : 'Validate'}
           </button>
-          <button type="button" className="button" disabled title="Coming soon">
-            Publish
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={onPublish}
+            disabled={!draft || saving || busy != null || isStale || hasErrors}
+            title={hasErrors ? 'Fix the errors in the validation report first' : undefined}
+          >
+            {busy === 'publishing' ? 'Publishing…' : 'Publish'}
           </button>
         </div>
       </div>
 
       <p className="hint mapping-save-state" aria-live="polite">
-        {draft && !stale && (dirty ? 'Unsaved changes' : (savedNote ?? `Revision ${draft.revision}`))}
+        {draft && !isStale && (dirty ? 'Unsaved changes' : (savedNote ?? pageNote ?? `Revision ${draft.revision}`))}
       </p>
-      {stale && (
+      {isStale && (
         <div className="notice notice--warn mapping-notice" role="alert">
-          <span>{saveError}</span>
-          <button type="button" className="button" onClick={reload}>
+          <span>{stale ? saveError : publishStale}</span>
+          <button type="button" className="button" onClick={onReload}>
             Reload
           </button>
         </div>
       )}
-      {!stale && saveError && (
+      {!isStale && (saveError || actionError) && (
         <p className="notice notice--error" role="alert">
-          {saveError}
+          {saveError ?? actionError}
         </p>
       )}
       {error && (
@@ -200,10 +287,7 @@ export function LotMappingPage() {
               onSave={save}
             />
           </div>
-          <section className="mapping-panel mapping-validation" aria-label="Validation">
-            <h2>Validation</h2>
-            <p className="muted">Validation is coming soon.</p>
-          </section>
+          <ValidationPanel report={report} draft={draft} onSelectSpace={setSelectedSpaceId} />
         </>
       )}
     </main>
