@@ -377,3 +377,40 @@ a { color: var(--accent); }
   font: inherit; font-size: 0.875rem; padding: 0.3rem 0.4rem; min-height: 32px;
   border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text);
 }
+
+/* Schematic editor (US-07): editable rectangles, resize handles, + Row dialog, selected-space panel.
+   States are never shown by color alone: errors are dashed and carry a note, retired spaces say "Retired". */
+.schematic-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.schematic {
+  display: block; width: 100%; height: auto; max-height: 60vh;
+  border: 1px solid var(--border); border-radius: 6px; touch-action: none; user-select: none;
+}
+.schematic__bg { fill: var(--bg); }
+.schematic-space { cursor: move; }
+.schematic-space:focus { outline: none; }
+.schematic-space__rect { fill: var(--surface); stroke: var(--muted); stroke-width: 2; }
+.schematic-space__label { fill: var(--text); font-weight: 600; pointer-events: none; }
+.schematic-space--hovered .schematic-space__rect { fill: var(--selected-bg); stroke: var(--accent); stroke-width: 3; }
+.schematic-space--selected .schematic-space__rect,
+.schematic-space:focus-visible .schematic-space__rect { stroke: var(--accent); stroke-width: 4; }
+.schematic-space--retired { cursor: pointer; }
+.schematic-space--retired .schematic-space__rect { fill: var(--unknown-bg); stroke: var(--no-data); stroke-dasharray: 6 4; }
+.schematic-space--retired .schematic-space__label { fill: var(--muted); }
+.schematic-space--error .schematic-space__rect { stroke: var(--nearly-full); stroke-width: 4; stroke-dasharray: 10 4; }
+.schematic-space__note { fill: var(--nearly-full); font-weight: 700; pointer-events: none; }
+.schematic-space__marker { fill: var(--muted); font-weight: 700; pointer-events: none; }
+.schematic-badge { pointer-events: none; }
+.schematic-badge rect { fill: var(--accent); }
+.schematic-badge text { fill: var(--accent-text); font-weight: 700; }
+.schematic-handle { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+.schematic-handle--nw, .schematic-handle--se { cursor: nwse-resize; }
+.schematic-handle--ne, .schematic-handle--sw { cursor: nesw-resize; }
+.schematic-legend { margin-top: 0.4rem; }
+.schematic-dialog, .schematic-side {
+  margin: 0.5rem 0; padding: 0.7rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+}
+.schematic-dialog__actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.schematic-side__title { margin: 0; font-size: 1rem; }
+.schematic-side__issues { margin: 0; padding-left: 1.2rem; color: var(--nearly-full); }
+.schematic-note--error { margin: 0; color: var(--nearly-full); font-weight: 600; }
+.schematic-note--error::before { content: '⚠ '; }
