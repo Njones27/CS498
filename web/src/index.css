@@ -62,9 +62,9 @@ a { color: var(--accent); }
 .button--ghost { background: transparent; }
 
 .notice { padding: 0.6rem 0.8rem; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); }
-.notice--warn { background: var(--warn-bg); border-color: #e7c27d; }
-.notice--error { background: var(--error-bg); border-color: #f0a8a0; }
-.notice--ok { background: var(--ok-bg); border-color: #9fd3b0; }
+.notice--warn { background: var(--warn-bg); border-color: var(--warn-border); }
+.notice--error { background: var(--error-bg); border-color: var(--error-border); }
+.notice--ok { background: var(--ok-bg); border-color: var(--ok-border); }
 .hint { color: var(--muted); font-size: 0.875rem; margin: 0; }
 
 .form, .form__fields { display: grid; gap: 0.9rem; }
@@ -86,13 +86,13 @@ a { color: var(--accent); }
 .lot-row__top, .lot-row__bottom { display: flex; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
 .lot-row__name { font-weight: 700; }
 .lot-row__count { color: var(--muted); }
-.bar { height: 12px; border-radius: 6px; background: #e6e9ee; overflow: hidden; }
+.bar { height: 12px; border-radius: 6px; background: var(--track); overflow: hidden; }
 .bar__fill { height: 100%; }
 .bar--plenty .bar__fill { background: var(--plenty); }
 .bar--filling .bar__fill { background: var(--filling); }
 .bar--nearly-full .bar__fill { background: var(--nearly-full); }
 .bar--no-data .bar__fill {
-  background: repeating-linear-gradient(45deg, var(--no-data) 0 6px, #c4cad2 6px 12px);
+  background: repeating-linear-gradient(45deg, var(--no-data) 0 6px, var(--no-data-alt) 6px 12px);
 }
 .level { font-weight: 600; }
 .level--plenty { color: var(--plenty); }
@@ -141,11 +141,11 @@ a { color: var(--accent); }
 
 .popover {
   margin-top: 0.5rem; padding: 0.5rem 2rem 0.5rem 0.75rem; position: relative;
-  background: var(--text); color: #fff; border-radius: 6px; font-size: 0.9rem;
+  background: var(--popover-bg); color: var(--popover-text); border-radius: 6px; font-size: 0.9rem;
 }
 .popover__close {
   position: absolute; top: 0.15rem; right: 0.25rem; background: none; border: 0;
-  color: #fff; font-size: 1.2rem; cursor: pointer; min-width: 32px; min-height: 32px;
+  color: var(--popover-text); font-size: 1.2rem; cursor: pointer; min-width: 32px; min-height: 32px;
 }
 
 /* Admin */
@@ -177,7 +177,7 @@ a { color: var(--accent); }
 .closure-status--ended::before { content: '✓ '; }
 .modal-backdrop {
   position: fixed; inset: 0; display: grid; place-items: center; padding: 1rem;
-  background: rgba(28, 36, 48, 0.45); z-index: 10;
+  background: var(--backdrop); z-index: 10;
 }
 .modal {
   width: 100%; max-width: 440px; max-height: 100%; overflow-y: auto; padding: 1rem;
@@ -218,7 +218,7 @@ a { color: var(--accent); }
 /* Non-car classes (debug only): lighter grey, thinner, short dashes, so they read as secondary. */
 .photo-box--other .photo-box__rect { stroke: var(--photo-other); stroke-width: 1.25; stroke-dasharray: 3 4; opacity: 0.85; }
 .box-swatch.photo-box--car .photo-box__rect { stroke-dasharray: 4 2; }
-.box-swatch.photo-box--other .photo-box__rect { stroke: #8a94a3; stroke-dasharray: 2 2; }
+.box-swatch.photo-box--other .photo-box__rect { stroke: var(--photo-swatch-other); stroke-dasharray: 2 2; }
 .photo-model { margin-top: 0.75rem; overflow-wrap: anywhere; }
 .photo-spaces { margin-top: 0.75rem; }
 .photo-spaces summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
@@ -257,7 +257,7 @@ a { color: var(--accent); }
 .snapshots-table th, .snapshots-table td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .snapshot-row { cursor: pointer; }
 .snapshot-row:hover { background: var(--bg); }
-.snapshot-row--selected { background: #eaf1fb; }
+.snapshot-row--selected { background: var(--selected-bg); }
 .snapshot-row--highlight { outline: 3px solid var(--accent); outline-offset: -3px; }
 .snapshot-row__retry-error { display: block; color: var(--nearly-full); font-size: 0.875rem; }
 .job-status { font-weight: 600; white-space: nowrap; }
@@ -277,3 +277,103 @@ a { color: var(--accent); }
 .snapshot-detail__facts dd { margin: 0; }
 .snapshot-detail__model { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.875rem; }
 .snapshot-detail__state { display: inline-flex; align-items: center; gap: 0.35rem; }
+
+/* --- Dark mode ---
+   Follows the OS setting by default. The header theme toggle sets data-theme="light" or "dark" on
+   <html> to override it (no attribute = Auto). The dark tokens are listed twice, once for each way
+   of turning dark mode on; keep the two lists in step. States keep their patterns and icons in both
+   modes (NFR-8), and text tokens meet WCAG AA on --bg, --surface and the state backgrounds.
+   The --photo-* colours are drawn over the photo itself, so they stay the same in both modes. */
+:root {
+  /* Light values for colours that used to be hard-coded in the classes above. */
+  --track: #e6e9ee;
+  --no-data-alt: #c4cad2;
+  --warn-border: #e7c27d;
+  --error-border: #f0a8a0;
+  --ok-border: #9fd3b0;
+  --selected-bg: #eaf1fb;
+  --popover-bg: #1c2430;
+  --popover-text: #ffffff;
+  --backdrop: rgba(28, 36, 48, 0.45);
+  --photo-swatch-other: #8a94a3;
+}
+:root[data-theme='light'] { color-scheme: light; }
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f141a;
+  --surface: #1a212b;
+  --text: #e6e9ee;
+  --muted: #a3adba;
+  --border: #3a4350;
+  --accent: #7cb0ff;
+  --accent-text: #0b1a33;
+  --plenty: #4cc27a;
+  --filling: #f0a43a;
+  --nearly-full: #ff8a80;
+  --no-data: #6b7480;
+  --free-bg: #1a212b;
+  --free-stroke: #4cc27a;
+  --occupied-bg: #3a4452;
+  --occupied-ink: #e6e9ee;
+  --unknown-bg: #262d37;
+  --unknown-line: #56606e;
+  --closed-bg: #3d2f12;
+  --closed-ink: #f0b44c;
+  --warn-bg: #3a2c12;
+  --error-bg: #3d1d1b;
+  --ok-bg: #16301f;
+  --track: #2c343f;
+  --no-data-alt: #4a525e;
+  --warn-border: #8a6a2a;
+  --error-border: #8f3a33;
+  --ok-border: #2f6b43;
+  --selected-bg: #1d3352;
+  --popover-bg: #e6e9ee;
+  --popover-text: #10151c;
+  --backdrop: rgba(0, 0, 0, 0.6);
+  --photo-swatch-other: #9aa3ae;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #0f141a;
+    --surface: #1a212b;
+    --text: #e6e9ee;
+    --muted: #a3adba;
+    --border: #3a4350;
+    --accent: #7cb0ff;
+    --accent-text: #0b1a33;
+    --plenty: #4cc27a;
+    --filling: #f0a43a;
+    --nearly-full: #ff8a80;
+    --no-data: #6b7480;
+    --free-bg: #1a212b;
+    --free-stroke: #4cc27a;
+    --occupied-bg: #3a4452;
+    --occupied-ink: #e6e9ee;
+    --unknown-bg: #262d37;
+    --unknown-line: #56606e;
+    --closed-bg: #3d2f12;
+    --closed-ink: #f0b44c;
+    --warn-bg: #3a2c12;
+    --error-bg: #3d1d1b;
+    --ok-bg: #16301f;
+    --track: #2c343f;
+    --no-data-alt: #4a525e;
+    --warn-border: #8a6a2a;
+    --error-border: #8f3a33;
+    --ok-border: #2f6b43;
+    --selected-bg: #1d3352;
+    --popover-bg: #e6e9ee;
+    --popover-text: #10151c;
+    --backdrop: rgba(0, 0, 0, 0.6);
+    --photo-swatch-other: #9aa3ae;
+  }
+}
+/* Form fields did not set a text colour, so they fell back to the browser default. */
+.form input, .form select { color: var(--text); }
+.topbar__end { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; justify-content: flex-end; }
+.theme-toggle select {
+  font: inherit; font-size: 0.875rem; padding: 0.3rem 0.4rem; min-height: 32px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text);
+}
