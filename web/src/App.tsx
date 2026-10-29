@@ -3,6 +3,7 @@ import { AuthProvider } from './auth/AuthContext'
 import { RequireAdmin } from './auth/RequireAdmin'
 import { AppShell } from './components/AppShell'
 import { LotMappingPage } from './mapping/LotMappingPage'
+import { VersionsPage } from './mapping/VersionsPage'
 import { AdminHomePage } from './pages/AdminHomePage'
 import { ClosuresPage } from './pages/ClosuresPage'
 import { LotListPage } from './pages/LotListPage'
@@ -29,6 +30,7 @@ export function AppRoutes() {
           <Route path="/admin/closures" element={<RequireAdmin><ClosuresPage /></RequireAdmin>} />
           <Route path="/admin/lots/new" element={<RequireAdmin><NewLotPage /></RequireAdmin>} />
           <Route path="/admin/lots/:lotId/map" element={<RequireAdmin><LotMappingPage /></RequireAdmin>} />
+          <Route path="/admin/lots/:lotId/versions" element={<RequireAdmin><VersionsPage /></RequireAdmin>} />
           <Route path="*" element={<main className="page"><h1>Page not found</h1></main>} />
         </Route>
       </Routes>

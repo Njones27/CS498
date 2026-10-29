@@ -109,6 +109,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/lots/{lot_id}/layout/draft/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check the saved draft for errors and warnings, compared with the published layout */
+        post: operations["validate_admin_lots__lot_id__layout_draft_validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/lots/{lot_id}/layout/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate the saved draft and publish it as the next version */
+        post: operations["publish_admin_lots__lot_id__layout_publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/lots/{lot_id}/layout/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Published versions, newest first */
+        get: operations["versions_admin_lots__lot_id__layout_versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/lots/{lot_id}/layout/versions/{version}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replace the draft with a published version's contents; publish to make it live */
+        post: operations["restore_admin_lots__lot_id__layout_versions__version__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/lots/{lot_id}/views/{view_id}/reference": {
         parameters: {
             query?: never;
@@ -644,11 +712,58 @@ export interface components {
              */
             status: "ok";
         };
+        /** Issue */
+        Issue: {
+            /**
+             * Code
+             * @description Machine-readable rule, e.g. duplicate_label
+             */
+            code: string;
+            /** Message */
+            message: string;
+            /**
+             * Spaceids
+             * @description Spaces the issue is about; may be empty
+             */
+            spaceIds: string[];
+            /**
+             * Viewid
+             * @description The viewpoint the issue is about, if any
+             */
+            viewId: string | null;
+        };
+        /**
+         * LayoutDiff
+         * @description Space ids that change for drivers and the worker if this draft is published.
+         */
+        LayoutDiff: {
+            /** Added */
+            added: string[];
+            /**
+             * Changed
+             * @description Rect, label, type or outlines differ
+             */
+            changed: string[];
+            /** Retired */
+            retired: string[];
+        };
         /** LayoutOut */
         LayoutOut: {
             schematic: components["schemas"]["SchematicOut"];
             /** Spaces */
             spaces: components["schemas"]["SchematicSpace"][];
+            /** Version */
+            version: number;
+        };
+        /** LayoutVersionOut */
+        LayoutVersionOut: {
+            /**
+             * Publishedat
+             * Format: date-time
+             */
+            publishedAt: string;
+            /** Publishedby */
+            publishedBy: string;
             /** Version */
             version: number;
         };
@@ -798,6 +913,14 @@ export interface components {
          * @enum {string}
          */
         OutlineStatus: "pending" | "accepted";
+        /** PublishRequest */
+        PublishRequest: {
+            /**
+             * Revision
+             * @description The draft revision being published, else 409 stale_revision
+             */
+            revision: number;
+        };
         /** RectOut */
         RectOut: {
             /** H */
@@ -1054,6 +1177,53 @@ export interface components {
             imageId: string;
             /** Uploadurl */
             uploadUrl: string;
+        };
+        /** ValidationFailedResponse */
+        ValidationFailedResponse: {
+            /**
+             * Details
+             * @description Pydantic error list on 422 validation_error
+             */
+            details?: {
+                [key: string]: unknown;
+            }[] | null;
+            /**
+             * Error
+             * @description Machine-readable code, e.g. duplicate, session_expired
+             */
+            error: string;
+            /** Message */
+            message: string;
+            /**
+             * Originalimageid
+             * @description Set on 409 duplicate
+             */
+            originalImageId?: string | null;
+            /** @description Set on 409 validation_failed */
+            report: components["schemas"]["ValidationReport"];
+            /**
+             * Uploadedat
+             * @description Set on 409 duplicate
+             */
+            uploadedAt?: string | null;
+        };
+        /** ValidationReport */
+        ValidationReport: {
+            /**
+             * Comparedwith
+             * @description Published version the diff is against
+             */
+            comparedWith: number | null;
+            diff: components["schemas"]["LayoutDiff"];
+            /** Errors */
+            errors: components["schemas"]["Issue"][];
+            /**
+             * Ok
+             * @description True when there are no errors; warnings never block
+             */
+            ok: boolean;
+            /** Warnings */
+            warnings: components["schemas"]["Issue"][];
         };
         /** ViewpointOut */
         ViewpointOut: {
@@ -1581,6 +1751,269 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DraftErrorResponse"];
+                };
+            };
+        };
+    };
+    validate_admin_lots__lot_id__layout_draft_validate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationReport"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    publish_admin_lots__lot_id__layout_publish_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LayoutVersionOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_failed (with the report) or stale_revision */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationFailedResponse"];
+                };
+            };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    versions_admin_lots__lot_id__layout_versions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LayoutVersionOut"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    restore_admin_lots__lot_id__layout_versions__version__restore_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lot_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftLayout"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description stale_revision */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

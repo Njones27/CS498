@@ -728,6 +728,81 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "Issue": {
+        "properties": {
+          "code": {
+            "description": "Machine-readable rule, e.g. duplicate_label",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "spaceIds": {
+            "description": "Spaces the issue is about; may be empty",
+            "items": {
+              "type": "string"
+            },
+            "title": "Spaceids",
+            "type": "array"
+          },
+          "viewId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The viewpoint the issue is about, if any",
+            "title": "Viewid"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "spaceIds",
+          "viewId"
+        ],
+        "title": "Issue",
+        "type": "object"
+      },
+      "LayoutDiff": {
+        "description": "Space ids that change for drivers and the worker if this draft is published.",
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "changed": {
+            "description": "Rect, label, type or outlines differ",
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed",
+            "type": "array"
+          },
+          "retired": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Retired",
+            "type": "array"
+          }
+        },
+        "required": [
+          "added",
+          "retired",
+          "changed"
+        ],
+        "title": "LayoutDiff",
+        "type": "object"
+      },
       "LayoutOut": {
         "properties": {
           "schematic": {
@@ -751,6 +826,30 @@
           "spaces"
         ],
         "title": "LayoutOut",
+        "type": "object"
+      },
+      "LayoutVersionOut": {
+        "properties": {
+          "publishedAt": {
+            "format": "date-time",
+            "title": "Publishedat",
+            "type": "string"
+          },
+          "publishedBy": {
+            "title": "Publishedby",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "publishedBy",
+          "publishedAt"
+        ],
+        "title": "LayoutVersionOut",
         "type": "object"
       },
       "LoginRequest": {
@@ -1115,6 +1214,20 @@
         ],
         "title": "OutlineStatus",
         "type": "string"
+      },
+      "PublishRequest": {
+        "properties": {
+          "revision": {
+            "description": "The draft revision being published, else 409 stale_revision",
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "PublishRequest",
+        "type": "object"
       },
       "RectOut": {
         "properties": {
@@ -1784,6 +1897,118 @@
           "expiresAt"
         ],
         "title": "UploadSlot",
+        "type": "object"
+      },
+      "ValidationFailedResponse": {
+        "properties": {
+          "details": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pydantic error list on 422 validation_error",
+            "title": "Details"
+          },
+          "error": {
+            "description": "Machine-readable code, e.g. duplicate, session_expired",
+            "title": "Error",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "originalImageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on 409 duplicate",
+            "title": "Originalimageid"
+          },
+          "report": {
+            "$ref": "#/components/schemas/ValidationReport",
+            "description": "Set on 409 validation_failed"
+          },
+          "uploadedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on 409 duplicate",
+            "title": "Uploadedat"
+          }
+        },
+        "required": [
+          "error",
+          "message",
+          "report"
+        ],
+        "title": "ValidationFailedResponse",
+        "type": "object"
+      },
+      "ValidationReport": {
+        "properties": {
+          "comparedWith": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Published version the diff is against",
+            "title": "Comparedwith"
+          },
+          "diff": {
+            "$ref": "#/components/schemas/LayoutDiff"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/Issue"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "ok": {
+            "description": "True when there are no errors; warnings never block",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/Issue"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "errors",
+          "warnings",
+          "comparedWith",
+          "diff"
+        ],
+        "title": "ValidationReport",
         "type": "object"
       },
       "ViewpointOut": {
@@ -2547,6 +2772,401 @@
           }
         },
         "summary": "Save the draft layout; drivers see nothing until it is published",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/lots/{lot_id}/layout/draft/validate": {
+      "post": {
+        "operationId": "validate_admin_lots__lot_id__layout_draft_validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "Check the saved draft for errors and warnings, compared with the published layout",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/lots/{lot_id}/layout/publish": {
+      "post": {
+        "operationId": "publish_admin_lots__lot_id__layout_publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LayoutVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationFailedResponse"
+                }
+              }
+            },
+            "description": "validation_failed (with the report) or stale_revision"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "Validate the saved draft and publish it as the next version",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/lots/{lot_id}/layout/versions": {
+      "get": {
+        "operationId": "versions_admin_lots__lot_id__layout_versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LayoutVersionOut"
+                  },
+                  "title": "Response Versions Admin Lots  Lot Id  Layout Versions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "Published versions, newest first",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/lots/{lot_id}/layout/versions/{version}/restore": {
+      "post": {
+        "operationId": "restore_admin_lots__lot_id__layout_versions__version__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftLayout"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "stale_revision"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "Replace the draft with a published version's contents; publish to make it live",
         "tags": [
           "admin"
         ]

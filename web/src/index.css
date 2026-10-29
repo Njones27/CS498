@@ -633,3 +633,23 @@ a { color: var(--accent); }
 .schematic-side__issues { margin: 0; padding-left: 1.2rem; color: var(--nearly-full); }
 .schematic-note--error { margin: 0; color: var(--nearly-full); font-weight: 600; }
 .schematic-note--error::before { content: '⚠ '; }
+
+/* Validation panel (US-09 #1, Sketch 6) and versions page (US-09 #6, #7). */
+.validation-ok { margin: 0.25rem 0 0; color: var(--plenty); }
+.validation-issues { list-style: none; margin: 0.5rem 0 0; padding: 0; display: grid; gap: 0.25rem; }
+.validation-issue__button {
+  display: flex; align-items: baseline; gap: 0.6rem; width: 100%; padding: 0.35rem 0.5rem;
+  border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left;
+}
+button.validation-issue__button { cursor: pointer; }
+button.validation-issue__button:hover, button.validation-issue__button:focus-visible { background: var(--bg); }
+.validation-issue__mark { font-weight: 700; width: 1ch; flex: none; }
+.validation-issue--error .validation-issue__mark { color: var(--nearly-full); }
+.validation-issue--warning .validation-issue__mark { color: var(--filling); }
+.validation-issue__text { flex: 1; min-width: 0; }
+.validation-issue__spaces { color: var(--muted); }
+.validation-issue__tag { flex: none; font-size: 0.8rem; color: var(--muted); }
+.versions-table-wrap { overflow-x: auto; }
+.versions-table { width: 100%; border-collapse: collapse; background: var(--surface); }
+.versions-table th, .versions-table td { text-align: left; vertical-align: middle; padding: 0.5rem; border-bottom: 1px solid var(--border); }
+.versions-live { font-size: 0.8rem; font-weight: 600; color: var(--muted); }

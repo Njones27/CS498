@@ -10,9 +10,22 @@ from datetime import datetime
 
 from fastapi import APIRouter
 from parking_core.interfaces import ObjectStore
-from parking_core.layouts import ensure_draft_meta, published_space_ids
+from parking_core.layouts import (
+    StaleRevisionError,
+    ValidationFailedError,
+    ValidationReport,
+    current_published,
+    ensure_draft_meta,
+    list_versions,
+    load_draft,
+    publish_draft,
+    published_space_ids,
+    restore_version,
+    validate_draft,
+)
 from parking_core.models import (
     DraftMeta,
+    LayoutVersion,
     Lot,
     OutlineReview,
     ParkingSpace,
@@ -30,8 +43,11 @@ from ..layout_schemas import (
     DraftSchematic,
     DraftSpace,
     DraftViewpoint,
+    LayoutVersionOut,
     OutlineReviewOut,
+    PublishRequest,
     ReferenceImageOut,
+    ValidationFailedResponse,
 )
 from ..schemas import ErrorResponse
 
@@ -40,6 +56,7 @@ router = APIRouter(prefix="/admin/lots/{lot_id}/layout", tags=["admin"])
 _AUTH = {401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}}
 
 STALE_MESSAGE = "This draft changed in another window. Reload to see the latest."
+VALIDATION_FAILED_MESSAGE = "Fix the errors in the validation report before publishing."
 
 
 def _space_out(s: ParkingSpace) -> DraftSpace:
@@ -195,3 +212,90 @@ def _saved_meta(meta: DraftMeta, schematic: DraftSchematic, email: str, now: dat
             "updated_by": email,
         }
     )
+
+
+def _version_out(v: LayoutVersion) -> LayoutVersionOut:
+    return LayoutVersionOut(
+        version=v.version, published_by=v.published_by, published_at=v.published_at
+    )
+
+
+@router.post(
+    "/draft/validate",
+    response_model=ValidationReport,
+    responses={**_AUTH, 404: {"model": ErrorResponse}},
+    summary="Check the saved draft for errors and warnings, compared with the published layout",
+)
+def validate(lot_id: str, admin: AdminDep, adapters: AdaptersDep, now: NowDep) -> ValidationReport:
+    repo = adapters.repository
+    draft = load_draft(repo, _require_lot(adapters, lot_id), now)
+    return validate_draft(draft, current_published(repo, lot_id))
+
+
+@router.post(
+    "/publish",
+    status_code=201,
+    response_model=LayoutVersionOut,
+    responses={
+        **_AUTH,
+        404: {"model": ErrorResponse},
+        409: {
+            "model": ValidationFailedResponse,
+            "description": "validation_failed (with the report) or stale_revision",
+        },
+    },
+    summary="Validate the saved draft and publish it as the next version",
+)
+def publish(
+    lot_id: str, body: PublishRequest, admin: AdminDep, adapters: AdaptersDep, now: NowDep
+) -> LayoutVersionOut:
+    lot = _require_lot(adapters, lot_id)
+    try:
+        version = publish_draft(
+            adapters.repository, adapters.object_store, lot, body.revision, admin.email, now
+        )
+    except StaleRevisionError:
+        raise error(409, "stale_revision", STALE_MESSAGE) from None
+    except ValidationFailedError as exc:
+        raise error(
+            409,
+            "validation_failed",
+            VALIDATION_FAILED_MESSAGE,
+            report=exc.report.model_dump(mode="json"),
+        ) from None
+    return _version_out(version)
+
+
+@router.get(
+    "/versions",
+    response_model=list[LayoutVersionOut],
+    responses={**_AUTH, 404: {"model": ErrorResponse}},
+    summary="Published versions, newest first",
+)
+def versions(lot_id: str, admin: AdminDep, adapters: AdaptersDep) -> list[LayoutVersionOut]:
+    _require_lot(adapters, lot_id)
+    return [_version_out(v) for v in list_versions(adapters.repository, lot_id)]
+
+
+@router.post(
+    "/versions/{version}/restore",
+    response_model=DraftLayout,
+    responses={
+        **_AUTH,
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse, "description": "stale_revision"},
+    },
+    summary="Replace the draft with a published version's contents; publish to make it live",
+)
+def restore(
+    lot_id: str, version: int, admin: AdminDep, adapters: AdaptersDep, now: NowDep
+) -> DraftLayout:
+    repo, store = adapters.repository, adapters.object_store
+    lot = _require_lot(adapters, lot_id)
+    try:
+        draft = restore_version(repo, store, lot, version, admin.email, now)
+    except LookupError:
+        raise error(404, "not_found", "Version not found") from None
+    except StaleRevisionError:
+        raise error(409, "stale_revision", STALE_MESSAGE) from None
+    return draft_out(draft.meta, draft.spaces, draft.viewpoints, store)

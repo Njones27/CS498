@@ -18,16 +18,10 @@ export type ReferenceCompleteResponse = S['ReferenceCompleteResponse']
 export type Point = [number, number]
 export type Outline = Point[]
 
-/**
- * One validation problem (brief §4.3). Hand-written only until `POST .../layout/draft/validate` lands
- * with validation, which makes it `S['Issue']`; the shape here matches §4.3 exactly.
- */
-export interface Issue {
-  code: string
-  message: string
-  spaceIds: string[]
-  viewId: string | null
-}
+/** One validation problem (brief §4.3): `code`, `message`, `spaceIds`, `viewId`. */
+export type Issue = S['Issue']
+export type ValidationReport = S['ValidationReport']
+export type LayoutVersionOut = S['LayoutVersionOut']
 
 /** Selection and hover shared by both panels. All callbacks are pure; panels never call the API for draft data. */
 export interface MappingSelection {
