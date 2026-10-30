@@ -9,24 +9,9 @@ import type { DraftLayout } from './types'
 
 vi.mock('../lib/putFile', () => ({ putFile: vi.fn() }))
 
-class MockImage {
-  onload: (() => void) | null = null
-  onerror: (() => void) | null = null
-  naturalWidth = 1000
-  naturalHeight = 750
-  set src(_val: string) {
-    setTimeout(() => this.onload?.(), 0)
-  }
-}
-
 describe('ReferencePhotoPanel (US-08)', () => {
   beforeEach(() => {
     vi.mocked(putFile).mockResolvedValue()
-    vi.stubGlobal('Image', MockImage)
-    if (!window.URL.createObjectURL) {
-      window.URL.createObjectURL = () => 'blob:mock'
-      window.URL.revokeObjectURL = () => {}
-    }
     vi.spyOn(SVGElement.prototype, 'getBoundingClientRect').mockReturnValue({
       width: 500,
       height: 500,
@@ -103,7 +88,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
   // --- US-08 #1: Upload a Reference Photo -----------------------------------
   it('US-08 #1: uploads reference photo and completes flow', async () => {
     const onReferenceUploaded = vi.fn()
-    mockFetch({
+    const fetchMock = mockFetch({
       'POST /admin/lots/test-lot/views/V3/reference': {
         status: 201,
         body: { uploadUrl: '/api/_test/uploads/slot-1', expiresAt: '2099-01-01T00:00:00Z' },
@@ -130,6 +115,9 @@ describe('ReferencePhotoPanel (US-08)', () => {
     await vi.waitFor(() => {
       expect(onReferenceUploaded).toHaveBeenCalled()
     })
+    // The server reads the photo's size from the file; the panel sends only the hash.
+    const complete = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/reference/complete'))
+    expect(Object.keys(JSON.parse(String(complete?.[1]?.body)))).toEqual(['sha256'])
   })
 
   it('US-08 #1: shows warning when replacing an existing reference photo', async () => {

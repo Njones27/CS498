@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from parking_core import keys
 
 from ..deps import AdaptersDep, AdminDep, NowDep, SettingsDep, error
+from ..image_size import image_size
 from ..reference_schemas import (
     ReferenceCompleteRequest,
     ReferenceCompleteResponse,
@@ -71,10 +72,14 @@ def request_reference_upload(
         404: {"model": ErrorResponse},
         409: {
             "model": ErrorResponse,
-            "description": "missing_object: file was never uploaded | hash_mismatch",
+            "description": (
+                "missing_object: file was never uploaded | hash_mismatch | "
+                "too_large: the stored file is over the size limit | "
+                "unsupported_type: the stored file is not a readable JPEG or PNG"
+            ),
         },
     },
-    summary="Confirm the reference photo arrived and record dimensions",
+    summary="Confirm the reference photo arrived and record its size, read from the file",
 )
 def complete_reference_upload(
     lot_id: str,
@@ -82,6 +87,7 @@ def complete_reference_upload(
     body: ReferenceCompleteRequest,
     admin: AdminDep,
     adapters: AdaptersDep,
+    settings: SettingsDep,
     now: NowDep,
 ) -> ReferenceCompleteResponse:
     repo = adapters.repository
@@ -96,19 +102,31 @@ def complete_reference_upload(
     info = store.head(key)
     if info is None:
         raise error(409, "missing_object", "The photo has not finished uploading")
+    # A presigned PUT cannot cap the body, so the reserved size proves nothing: check the stored
+    # object before reading it. The whole object is then at most max_upload_bytes.
+    if info.size_bytes > settings.max_upload_bytes:
+        raise error(409, "too_large", "Photos must be 15 MB or smaller")
+    media_type = info.content_type.split(";", 1)[0].strip().lower()
+    if media_type not in settings.allowed_upload_types:
+        raise error(409, "unsupported_type", "Photos must be JPEG or PNG")
 
     data = store.get(key)
     actual_hash = hashlib.sha256(data).hexdigest()
     if actual_hash != body.sha256:
         raise error(409, "hash_mismatch", "Uploaded file does not match its hash")
+    # The outlines and the worker's aligner depend on these, so they come from the file.
+    size = image_size(data, media_type)
+    if size is None:
+        raise error(409, "unsupported_type", "Photos must be JPEG or PNG")
+    width, height = size
 
     vp.reference_image_key = key
-    vp.image_width = body.width
-    vp.image_height = body.height
+    vp.image_width = width
+    vp.image_height = height
     repo.put_viewpoint(vp)
 
     url = store.presign_get(key)
     return ReferenceCompleteResponse(
         view_id=view_id,
-        reference_image=ReferenceImageInfo(url=url, width=body.width, height=body.height),
+        reference_image=ReferenceImageInfo(url=url, width=width, height=height),
     )

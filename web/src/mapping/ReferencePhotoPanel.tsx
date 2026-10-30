@@ -60,7 +60,6 @@ export function ReferencePhotoPanel({
   const [replaceWarning, setReplaceWarning] = useState<string | null>(null)
   const [statusNotice, setStatusNotice] = useState<string | null>(null)
   const [photoError, setPhotoError] = useState(false)
-  const [loadedDimensions, setLoadedDimensions] = useState<{ width: number; height: number } | null>(null)
 
   // Explicit drawing mode state: true when user is placing corners
   const [isDrawing, setIsDrawing] = useState(false)
@@ -81,8 +80,10 @@ export function ReferencePhotoPanel({
     (currentViewpoint && selectedSpaceId && currentViewpoint.outlineReview?.[selectedSpaceId]) || null
   const isSelectedProposedPending = selectedReview?.status === 'pending'
 
-  const svgWidth = currentViewpoint?.referenceImage?.width || loadedDimensions?.width || 1000
-  const svgHeight = currentViewpoint?.referenceImage?.height || loadedDimensions?.height || 750
+  // The server reads the size from the photo itself, so it matches the picture. Every upload and
+  // seeded viewpoint records one; the fallback only covers a viewpoint stored without it.
+  const svgWidth = currentViewpoint?.referenceImage?.width ?? 1000
+  const svgHeight = currentViewpoint?.referenceImage?.height ?? 750
 
   // When selected space or viewpoint changes, reset clicks and set drawing mode accordingly
   useEffect(() => {
@@ -96,20 +97,7 @@ export function ReferencePhotoPanel({
 
   useEffect(() => {
     setPhotoError(false)
-    if (currentViewpoint?.referenceImage?.width && currentViewpoint?.referenceImage?.height) {
-      setLoadedDimensions({
-        width: currentViewpoint.referenceImage.width,
-        height: currentViewpoint.referenceImage.height,
-      })
-    } else {
-      setLoadedDimensions(null)
-    }
-  }, [
-    currentViewId,
-    currentViewpoint?.referenceImage?.url,
-    currentViewpoint?.referenceImage?.width,
-    currentViewpoint?.referenceImage?.height,
-  ])
+  }, [currentViewId, currentViewpoint?.referenceImage?.url])
 
   // Keyboard shortcuts:
   // - Esc: cancel clicks, exit drawing mode, or deselect space
@@ -261,25 +249,10 @@ export function ReferencePhotoPanel({
       // 2. PUT file with progress
       await putFile(slot.uploadUrl, file, (fraction) => setUploadProgress(fraction))
 
-      // 3. Read image dimensions
-      const dims = await new Promise<{ width: number; height: number }>((resolve, reject) => {
-        const img = new Image()
-        const url = URL.createObjectURL(file)
-        img.onload = () => {
-          URL.revokeObjectURL(url)
-          resolve({ width: img.naturalWidth || 1000, height: img.naturalHeight || 750 })
-        }
-        img.onerror = () => {
-          URL.revokeObjectURL(url)
-          reject(new Error('Failed to read image dimensions'))
-        }
-        img.src = url
-      })
-
-      // 4. Complete upload
+      // 3. Complete upload; the server reads the photo's size from the file
       const res = await api.post<ReferenceCompleteResponse>(
         `/admin/lots/${lotId}/views/${currentViewpoint.viewId}/reference/complete`,
-        { sha256, width: dims.width, height: dims.height },
+        { sha256 },
       )
 
       if (hadPreviousImage) {
@@ -287,7 +260,6 @@ export function ReferencePhotoPanel({
       }
 
       setPhotoError(false)
-      setLoadedDimensions(dims)
       const nextVps = draft.viewpoints.map((v) =>
         v.viewId === currentViewpoint.viewId
           ? { ...v, referenceImage: res.referenceImage }
@@ -813,14 +785,6 @@ export function ReferencePhotoPanel({
               alt={`Reference for ${currentViewpoint.name}`}
               className="photo-view__img"
               style={{ aspectRatio: `${svgWidth} / ${svgHeight}`, objectFit: 'contain' }}
-              onLoad={(e) => {
-                if (e.currentTarget.naturalWidth > 0 && e.currentTarget.naturalHeight > 0) {
-                  setLoadedDimensions({
-                    width: e.currentTarget.naturalWidth,
-                    height: e.currentTarget.naturalHeight,
-                  })
-                }
-              }}
               onError={() => setPhotoError(true)}
             />
             <svg
