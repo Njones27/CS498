@@ -689,6 +689,47 @@ def test_restore_drops_never_published_spaces(client, admin_headers):
     assert len(restored["spaces"]) == 14
 
 
+def lose_snapshot(adapters, monkeypatch, key="layouts/test-lot/v1.json"):
+    """The object store no longer has `key` (a snapshot deleted by hand, say)."""
+    store = adapters.object_store
+    get, exists = store.get, store.exists
+
+    def get_or_missing(k: str) -> bytes:
+        if k == key:
+            raise KeyError(k)
+        return get(k)
+
+    monkeypatch.setattr(store, "get", get_or_missing)
+    monkeypatch.setattr(store, "exists", lambda k: k != key and exists(k))
+
+
+SNAPSHOT_MISSING = {
+    "error": "snapshot_missing",
+    "message": "A published version of this lot is missing from storage, so the draft can't "
+    "be changed safely. Ask an operator to restore it.",
+}
+
+
+# A missing snapshot is a server fault, not an unknown version (KeyError is a LookupError).
+def test_restore_with_missing_snapshot_is_500(client, admin_headers, adapters, monkeypatch):
+    lose_snapshot(adapters, monkeypatch)
+    r = client.post(f"{LAYOUT}/versions/1/restore", headers=admin_headers)
+    assert (r.status_code, r.json()) == (500, SNAPSHOT_MISSING)
+    assert get_draft(client, admin_headers)["revision"] == 0
+
+
+def test_deleting_a_space_with_missing_snapshot_is_500(
+    client, admin_headers, adapters, monkeypatch
+):
+    edit(client, admin_headers, lambda b: b["spaces"].append(NEW_SPACE))
+    lose_snapshot(adapters, monkeypatch)
+    body = as_body(get_draft(client, admin_headers))
+    body["spaces"] = [s for s in body["spaces"] if s["spaceId"] != NEW_SPACE["spaceId"]]
+    r = put(client, admin_headers, body)
+    assert (r.status_code, r.json()) == (500, SNAPSHOT_MISSING)
+    assert get_draft(client, admin_headers)["revision"] == 1
+
+
 def test_restore_unknown_version_is_404(client, admin_headers):
     r = client.post(f"{LAYOUT}/versions/9/restore", headers=admin_headers)
     assert r.status_code == 404 and r.json()["error"] == "not_found"

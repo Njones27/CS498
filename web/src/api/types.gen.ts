@@ -1753,6 +1753,15 @@ export interface operations {
                     "application/json": components["schemas"]["DraftErrorResponse"];
                 };
             };
+            /** @description snapshot_missing */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     validate_admin_lots__lot_id__layout_draft_validate_post: {
@@ -2009,6 +2018,15 @@ export interface operations {
             };
             /** @description validation_error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description snapshot_missing */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

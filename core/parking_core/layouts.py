@@ -70,7 +70,8 @@ def published_space_ids(repo: Repository, store: ObjectStore, lot_id: str) -> se
     """Every space id in any published version of the lot (retired ones included).
 
     Those spaces can be retired but never deleted, so old snapshots and observations stay
-    valid. A missing snapshot object raises KeyError rather than letting a delete through.
+    valid. A missing snapshot object raises SnapshotMissingError rather than letting a delete
+    through.
     """
     ids: set[str] = set()
     for version in repo.list_layout_versions(lot_id):
@@ -78,8 +79,19 @@ def published_space_ids(repo: Repository, store: ObjectStore, lot_id: str) -> se
     return ids
 
 
+class SnapshotMissingError(Exception):
+    """A published version's snapshot object is gone from the object store. Not a
+    LookupError: the version exists, so this is a server fault, not an unknown version."""
+
+
 def read_version(store: ObjectStore, version: LayoutVersion) -> PublishedLayout:
-    return PublishedLayout.model_validate_json(store.get(version.snapshot_key))
+    try:
+        data = store.get(version.snapshot_key)
+    except KeyError:
+        raise SnapshotMissingError(
+            f"Snapshot of {version.lot_id} v{version.version} is missing: {version.snapshot_key}"
+        ) from None
+    return PublishedLayout.model_validate_json(data)
 
 
 @dataclass
@@ -516,8 +528,9 @@ def restore_version(
     - Viewpoints this version lacks are kept (viewpoints are never removed) with no outlines.
     - `basedOnVersion` becomes the restored version.
 
-    Raises LookupError for an unknown version and StaleRevisionError if the draft was saved
-    while restoring, in which case nothing is written.
+    Raises LookupError for an unknown version, SnapshotMissingError when a published
+    version's snapshot is missing, and StaleRevisionError if the draft was saved while
+    restoring, in which case nothing is written.
     """
     lot_id = lot.lot_id
     entry = next((v for v in repo.list_layout_versions(lot_id) if v.version == version), None)

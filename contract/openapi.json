@@ -2769,6 +2769,16 @@
               }
             },
             "description": "cannot_delete_published_space or validation_error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "snapshot_missing"
           }
         },
         "summary": "Save the draft layout; drivers see nothing until it is published",
@@ -3164,6 +3174,16 @@
               }
             },
             "description": "validation_error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "snapshot_missing"
           }
         },
         "summary": "Replace the draft with a published version's contents; publish to make it live",

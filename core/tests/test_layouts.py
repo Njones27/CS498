@@ -13,6 +13,7 @@ from parking_core.adapters import aws
 from parking_core.adapters.memory import MemoryObjectStore, MemoryRepository
 from parking_core.layouts import (
     Draft,
+    SnapshotMissingError,
     StaleRevisionError,
     ValidationFailedError,
     diff_draft,
@@ -280,7 +281,7 @@ def test_published_space_ids_refuses_missing_snapshot(repo, store):
             lot_id="L", version=1, published_by="a", published_at=NOW, snapshot_key="gone"
         ),
     )
-    with pytest.raises(KeyError):
+    with pytest.raises(SnapshotMissingError, match="Snapshot of L v1 is missing: gone"):
         published_space_ids(repo, store, "L")
 
 
