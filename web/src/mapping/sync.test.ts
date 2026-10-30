@@ -2,15 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { davidFixture, space } from './fixtures/david'
 import { fitSchematic } from './schematic/edits'
 import { labelForRect } from './schematic/labels'
+import { isValidQuad } from './photo/geom'
 import {
   addSpaceFromOutline,
   addSpaceOnSchematic,
   afterRectChange,
   applyMat,
+  dropPendingProposals,
   fitTransform,
   invert,
   photoToSchematic,
   proposeOutlines,
+  rectToOutline,
   reprojectPending,
   suggestOutline,
   type Mat3,
@@ -146,9 +149,88 @@ describe('photo <-> schematic sync', () => {
         s.spaceId === added.spaceId || s.spaceId === 'A-01' ? { ...s, rect: { ...s.rect, x: s.rect.x + 30 } } : s,
       ),
     }
-    const next = reprojectPending(moved, [added.spaceId, 'A-01'])
+    const next = reprojectPending(draft, moved, [added.spaceId, 'A-01'])
     expect(next.viewpoints[0].outlines[added.spaceId]).not.toEqual(draft.viewpoints[0].outlines[added.spaceId])
     expect(next.viewpoints[0].outlines['A-01']).toEqual(draft.viewpoints[0].outlines['A-01'])
+  })
+
+  it('a pending proposal that is not our projection (a detector\'s, or one dragged) does not move', () => {
+    const { draft, space: added } = addSpaceOnSchematic(gridDraft(), { x: 480, y: 40, w: 100, h: 120 })
+    const id = added.spaceId
+    const theirs: Outline = [
+      [0.5, 0.1],
+      [0.55, 0.1],
+      [0.55, 0.2],
+      [0.5, 0.2],
+    ]
+    const detected = { ...draft, viewpoints: [{ ...draft.viewpoints[0], outlines: { ...draft.viewpoints[0].outlines, [id]: theirs } }] }
+    const moved = { ...detected, spaces: detected.spaces.map((s) => (s.spaceId === id ? { ...s, rect: { ...s.rect, x: 520 } } : s)) }
+    expect(reprojectPending(detected, moved, [id]).viewpoints[0].outlines[id]).toEqual(theirs)
+  })
+
+  it('retiring a space drops its pending proposal', () => {
+    const { draft, space: added } = addSpaceOnSchematic(gridDraft(), { x: 480, y: 40, w: 100, h: 120 })
+    const next = dropPendingProposals(draft, [added.spaceId, 'A-01'])
+    expect(next.viewpoints[0].outlines).not.toHaveProperty(added.spaceId)
+    expect(next.viewpoints[0].outlineReview).not.toHaveProperty(added.spaceId)
+    expect(next.viewpoints[0].outlines).toHaveProperty('A-01') // accepted outlines stay
+  })
+
+  it('one row of hand-drawn outlines (not quite on a line) still fits, on corners', () => {
+    // Five spaces in one row; outline tops jitter, so their centres are nearly but not exactly in line.
+    const spaces = [0, 1, 2, 3, 4].map((i) => space(`A-0${i + 1}`, 20 + i * 110, 20))
+    const jitter = [0, 0.003, -0.002, 0.003, -0.001]
+    const outlines = Object.fromEntries(
+      spaces.map((s, i) => [s.spaceId, outlineOf(s.rect).map(([x, y], k) => [x, k < 2 ? y + jitter[i] : y] as Point)]),
+    )
+    const draft = davidFixture({ spaces, viewpoints: [{ ...davidFixture().viewpoints[0], outlines, outlineReview: {} }] })
+    const m = photoToSchematic(draft, draft.viewpoints[0])!
+    expect(invert(m)).not.toBeNull()
+    const { space: added } = addSpaceFromOutline(draft, 'V1', outlineOf({ x: 570, y: 20, w: 100, h: 120 }))
+    expect(added.rect.h).toBeGreaterThan(90) // a real space, not squashed onto one line
+    expect(added.label).toBe('A-06')
+  })
+
+  it('a box mapped far off the map (towards the horizon) is placed by its row instead', () => {
+    const draft = gridDraft()
+    // Huge, far right of the photo's fitted area: mapped through the perspective it would be enormous.
+    const { draft: next, space: added } = addSpaceFromOutline(draft, 'V1', [
+      [0.05, 0.9],
+      [0.99, 0.9],
+      [0.99, 0.99],
+      [0.05, 0.99],
+    ])
+    expect(added.rect.w).toBe(100)
+    expect(next.schematic.width).toBeLessThanOrEqual(1100)
+  })
+
+  it('a projected outline pulled onto the photo edge is dropped when it folds', () => {
+    const draft = gridDraft()
+    // Mostly off the bottom-right of the photo, with its middle just inside.
+    const toPhoto = invert(photoToSchematic(draft, draft.viewpoints[0])!)!
+    const out = rectToOutline(toPhoto, { x: 400, y: 300, w: 100, h: 120 })
+    expect(out === null || isValidQuad(out)).toBe(true)
+  })
+
+  it('accepted proposals are not used to fit the map', () => {
+    const draft = gridDraft()
+    const v = draft.viewpoints[0]
+    const skewed = {
+      ...draft,
+      viewpoints: [
+        {
+          ...v,
+          outlines: { ...v.outlines, 'A-01': [[0.9, 0.9], [0.95, 0.9], [0.95, 0.95], [0.9, 0.95]] as Outline },
+          outlineReview: { ...v.outlineReview, 'A-01': { source: 'proposed' as const, status: 'accepted' as const } },
+        },
+      ],
+    }
+    expect(photoToSchematic(skewed, skewed.viewpoints[0])).toEqual(
+      photoToSchematic(
+        { ...draft, spaces: draft.spaces.filter((s) => s.spaceId !== 'A-01') },
+        draft.viewpoints[0],
+      ),
+    )
   })
 
   it('suggests where an unoutlined space sits on the photo', () => {
@@ -178,7 +260,7 @@ describe('map area growth', () => {
 
   it('afterRectChange grows the map after a drag past the edge', () => {
     const draft = davidFixture({ spaces: [space('A-01', 980, 40)] })
-    expect(afterRectChange(draft, ['A-01']).draft.schematic.width).toBe(1100)
+    expect(afterRectChange(draft, draft, ['A-01']).draft.schematic.width).toBe(1100)
   })
 
   it('labels a rect after the row it lines up with', () => {

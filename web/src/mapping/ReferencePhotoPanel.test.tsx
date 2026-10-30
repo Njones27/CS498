@@ -669,7 +669,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
       fireEvent.pointerDown(svg, { clientX: 325, clientY: 42, button: 0 })
       fireEvent.pointerMove(window, { clientX: 340, clientY: 80 })
       expect(screen.getByTestId('photo-drawbox')).toBeInTheDocument()
-      fireEvent.pointerUp(window, { clientX: 360, clientY: 192 })
+      fireEvent.pointerUp(svg, { clientX: 360, clientY: 192 })
       fireEvent.click(svg, { clientX: 360, clientY: 192 }) // the click after release places no corner
 
       expect(onChange).toHaveBeenCalledTimes(1)
@@ -701,6 +701,14 @@ describe('ReferencePhotoPanel (US-08)', () => {
       fireEvent.click(svg, { clientX: 325, clientY: 192 })
       expect(onChange).toHaveBeenCalledTimes(1)
       expect(onChange.mock.calls[0][0].spaces).toHaveLength(6)
+    })
+
+    it('four corners that fold onto each other are refused, not saved', () => {
+      const { onChange } = renderPanel({ draft: syncedDraft() })
+      const svg = screen.getByTestId('photo-svg')
+      for (const x of [100, 200, 200, 100]) fireEvent.click(svg, { clientX: x, clientY: 100 })
+      expect(onChange).not.toHaveBeenCalled()
+      expect(screen.getByRole('alert')).toHaveTextContent('Those corners do not make a four-sided shape')
     })
 
     it('a click on empty photo clears a selected, outlined space instead of drawing', () => {

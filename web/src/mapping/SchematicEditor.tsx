@@ -22,7 +22,7 @@ import {
   type Corner,
 } from './schematic/geometry'
 import { duplicateLabelIds, nextRowStart, parseLabel, type ParsedLabel } from './schematic/labels'
-import { addSpaceOnSchematic, afterRectChange, proposeOutlines } from './sync'
+import { addSpaceOnSchematic, afterRectChange, dropPendingProposals, proposeOutlines } from './sync'
 import type { DraftLayout, DraftRect, DraftSpace, Issue, MappingSelection, Point, SpaceType } from './types'
 
 export interface SchematicEditorProps extends MappingSelection {
@@ -267,7 +267,7 @@ export function SchematicEditor({
       const rect = rectAt(ev)
       const { draft: current, onChange: emit } = latest.current
       const now = current.spaces.find((s) => s.spaceId === space.spaceId)
-      if (now && !sameRect(rect, now.rect)) emitGrown(afterRectChange(updateSpace(current, space.spaceId, { rect }), [space.spaceId]), emit)
+      if (now && !sameRect(rect, now.rect)) emitGrown(afterRectChange(current, updateSpace(current, space.spaceId, { rect }), [space.spaceId]), emit)
     }
     const stop = () => {
       window.removeEventListener('pointermove', onMove)
@@ -289,7 +289,7 @@ export function SchematicEditor({
     e.preventDefault()
     const n = e.shiftKey ? 10 : 1
     const rect = moveRect(selected.rect, step[0] * n, step[1] * n, dragBounds())
-    if (!sameRect(rect, selected.rect)) emitGrown(afterRectChange(updateSpace(draft, selected.spaceId, { rect }), [selected.spaceId]))
+    if (!sameRect(rect, selected.rect)) emitGrown(afterRectChange(draft, updateSpace(draft, selected.spaceId, { rect }), [selected.spaceId]))
   }
 
   /** Esc clears the selection, except while typing in a field. */
@@ -540,7 +540,10 @@ export function SchematicEditor({
               <button
                 type="button"
                 className="button"
-                onClick={() => onChange(updateSpace(draft, selected.spaceId, { retired: true }))}
+                // A proposal waiting for review would block publishing for a space nobody will outline.
+                onClick={() =>
+                  onChange(dropPendingProposals(updateSpace(draft, selected.spaceId, { retired: true }), [selected.spaceId]))
+                }
               >
                 Retire space
               </button>

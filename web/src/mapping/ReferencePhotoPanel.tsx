@@ -4,6 +4,7 @@ import { putFile } from '../lib/putFile'
 import { sha256Hex } from '../lib/sha256'
 import {
   getSvgPoint,
+  isValidQuad,
   orderClockwise,
   polygonCenter,
   polygonToSvgPoints,
@@ -123,6 +124,8 @@ export function ReferencePhotoPanel({
   const [box, setBox] = useState<[Point, Point] | null>(null)
   const stopBox = useRef<(() => void) | null>(null)
   useEffect(() => () => stopBox.current?.(), [])
+  // The click the browser sends after a box drag is released; it must not place a corner.
+  const boxClickRef = useRef(false)
 
   const selectedSpace = draft.spaces.find((s) => s.spaceId === selectedSpaceId) ?? null
   const selectedOutline =
@@ -349,6 +352,11 @@ export function ReferencePhotoPanel({
     if (!currentViewpoint) return
     setClicks([])
     setIsDrawing(false)
+    if (!isValidQuad(outline)) {
+      setErrorMsg('Those corners do not make a four-sided shape. Click four separate corners.')
+      return
+    }
+    setErrorMsg(null)
     if (!drawingSelected || !selectedSpace) {
       const { draft: next, space } = addSpaceFromOutline(draft, currentViewpoint.viewId, outline)
       commitOutlines(next)
@@ -373,7 +381,17 @@ export function ReferencePhotoPanel({
     commitOutlines({ ...draft, viewpoints: nextVps })
   }
 
+  // A box drag ends after the render it started in; it finishes with the newest draft and selection.
+  const finishOutlineRef = useRef(finishOutline)
+  useEffect(() => {
+    finishOutlineRef.current = finishOutline
+  })
+
   const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (boxClickRef.current) {
+      boxClickRef.current = false
+      return
+    }
     if (justDraggedRef.current) {
       justDraggedRef.current = false
       return
@@ -415,13 +433,11 @@ export function ReferencePhotoPanel({
     const onUp = (ev: PointerEvent) => {
       stop()
       if (!moved) return
-      // The click that follows this release must not also place a corner.
-      justDraggedRef.current = true
-      setTimeout(() => {
-        justDraggedRef.current = false
-      }, 150)
+      // A release over the photo is followed by a click there; it must not also place a corner. A
+      // release elsewhere sends none, so the flag is only raised for one over the photo.
+      boxClickRef.current = ev.target instanceof Node && svg.contains(ev.target)
       const outline = boxOutline(start, getSvgPoint(svg, ev.clientX, ev.clientY, svgWidth, svgHeight))
-      if (outline) finishOutline(outline)
+      if (outline) finishOutlineRef.current(outline)
     }
     const stop = () => {
       window.removeEventListener('pointermove', onMove)

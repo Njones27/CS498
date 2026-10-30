@@ -1,6 +1,6 @@
-import { MIN_SIDE, clearOf } from './schematic/geometry'
+import { MIN_SIDE, clearOf, medianSize } from './schematic/geometry'
 import { addSpace, addSpaceAt, fitSchematic, type Grown } from './schematic/edits'
-import { orderClockwise } from './photo/geom'
+import { isValidQuad, orderClockwise } from './photo/geom'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, Outline, Point } from './types'
 
 // Keeps the photo and the schematic in step. Each viewpoint gets a projective map between its photo
@@ -72,11 +72,38 @@ function normalizer(points: Point[]): Mat3 | null {
 }
 
 /**
+ * How far the points are from lying on one line: the smaller over the larger spread of their covariance
+ * (0 for a line, 1 for a round cloud). Hand-drawn outlines of one row are never exactly on a line, so a
+ * cut-off is needed rather than a singular solve.
+ */
+function flatness(points: Point[]): number {
+  const [cx, cy] = centroid(points)
+  let sxx = 0
+  let syy = 0
+  let sxy = 0
+  for (const [x, y] of points) {
+    sxx += (x - cx) ** 2
+    syy += (y - cy) ** 2
+    sxy += (x - cx) * (y - cy)
+  }
+  const mid = (sxx + syy) / 2
+  const r = Math.hypot((sxx - syy) / 2, sxy)
+  return mid + r > 0 ? (mid - r) / (mid + r) : 0
+}
+
+/** Below this, a point set counts as one line (spread ratio 1:30). */
+const MIN_FLATNESS = 1e-3
+/** Largest RMS miss of a fit on its own points, in normalized units (their mean spread is sqrt 2). */
+const MAX_RESIDUAL = 0.25
+
+/**
  * Least-squares map from `src` to `dst` points: a homography (perspective) when the points support one,
- * else an affine map. Null for fewer than MIN_MATCHES points or points on one line.
+ * else an affine map. Null for fewer than MIN_MATCHES points, either set (nearly) on one line, or no fit
+ * that lands near its own points.
  */
 export function fitTransform(src: Point[], dst: Point[]): Mat3 | null {
   if (src.length < MIN_MATCHES || src.length !== dst.length) return null
+  if (flatness(src) < MIN_FLATNESS || flatness(dst) < MIN_FLATNESS) return null
   const Ts = normalizer(src)
   const Td = normalizer(dst)
   if (!Ts || !Td) return null
@@ -100,10 +127,17 @@ export function fitTransform(src: Point[], dst: Point[]): Mat3 | null {
     })
     const h = solve(AtA, Atb)
     if (!h) continue
-    const m = multiply(TdInv, multiply(projective ? [...h, 1] : [...h, 0, 0, 1], Ts))
-    // A perspective fit must keep every source point in front of the horizon; a fit that flips some
-    // over (a poor fit from noisy outlines) falls back to the affine one.
-    if (src.every((p) => applyMat(m, p) !== null)) return m
+    const hn: Mat3 = projective ? [...h, 1] : [...h, 0, 0, 1]
+    // A perspective fit must keep every source point in front of the horizon and land near its own
+    // points; one that doesn't (noisy outlines) falls back to the affine one.
+    let sq = 0
+    const fits = s.every((p, i) => {
+      const q = applyMat(hn, p)
+      if (!q) return false
+      sq += (q[0] - d[i][0]) ** 2 + (q[1] - d[i][1]) ** 2
+      return true
+    })
+    if (fits && Math.sqrt(sq / s.length) <= MAX_RESIDUAL) return multiply(TdInv, multiply(hn, Ts))
   }
   return null
 }
@@ -114,11 +148,15 @@ const centroid = (pts: Point[]): Point => [
 ]
 const rectCenter = (r: DraftRect): Point => [r.x + r.w / 2, r.y + r.h / 2]
 
-/** Outlines that stand as ground truth: on active spaces, and not a proposal still waiting for review. */
-function acceptedOutlines(draft: DraftLayout, view: DraftViewpoint): [DraftSpace, Outline][] {
+/**
+ * Outlines that stand as ground truth for the fit: drawn by an admin (or seeded) on active spaces.
+ * Proposals are left out even once accepted: they came from a fit (or a detector), so they add nothing,
+ * and one pulled onto the photo edge would bend the map.
+ */
+function anchorOutlines(draft: DraftLayout, view: DraftViewpoint): [DraftSpace, Outline][] {
   return draft.spaces.flatMap((s): [DraftSpace, Outline][] => {
     const outline = view.outlines[s.spaceId]
-    if (s.retired || !outline || view.outlineReview?.[s.spaceId]?.status === 'pending') return []
+    if (s.retired || !outline || view.outlineReview?.[s.spaceId]?.source === 'proposed') return []
     return [[s, outline]]
   })
 }
@@ -136,7 +174,7 @@ const rectCorners = (r: DraftRect): Point[] => [
  * line, so then it fits corners (outlines run clockwise from top-left, like rect corners) instead.
  */
 export function photoToSchematic(draft: DraftLayout, view: DraftViewpoint): Mat3 | null {
-  const pairs = acceptedOutlines(draft, view)
+  const pairs = anchorOutlines(draft, view)
   if (pairs.length < MIN_MATCHES) return null // too few spaces to go by, even with four corners each
   return (
     fitTransform(
@@ -166,24 +204,24 @@ export function outlineToRect(m: Mat3, outline: Outline): DraftRect | null {
   }
 }
 
-const shoelace = (pts: Point[]) =>
-  Math.abs(pts.reduce((s, p, i) => s + p[0] * pts[(i + 1) % pts.length][1] - pts[(i + 1) % pts.length][0] * p[1], 0)) / 2
-
 /**
  * The photo outline of a schematic rectangle (`toPhoto` maps schematic -> photo). Corners past the
- * photo edge are pulled onto it; null when the space's middle is off the photo.
+ * photo edge are pulled onto it; null when the space's middle is off the photo, or when pulling folds
+ * the outline so publishing would reject it (bad_polygon).
  */
 export function rectToOutline(toPhoto: Mat3, rect: DraftRect): Outline | null {
   const center = applyMat(toPhoto, rectCenter(rect))
   if (!center || center[0] < 0 || center[0] > 1 || center[1] < 0 || center[1] > 1) return null
   const pts = rectCorners(rect).map((c) => applyMat(toPhoto, c))
   if (pts.some((p) => p === null)) return null
-  const clamped = pts.map((p): Point => [
-    Number(Math.min(1, Math.max(0, p![0])).toFixed(4)),
-    Number(Math.min(1, Math.max(0, p![1])).toFixed(4)),
-  ])
-  if (shoelace(clamped) < 1e-6) return null
-  return orderClockwise(clamped)
+  const clamped = orderClockwise(
+    pts.map((p): Point => [
+      Number(Math.min(1, Math.max(0, p![0])).toFixed(4)),
+      Number(Math.min(1, Math.max(0, p![1])).toFixed(4)),
+    ]),
+  )
+  // Pulling corners onto the edge can fold two together; publishing would reject that as bad_polygon.
+  return isValidQuad(clamped) ? clamped : null
 }
 
 /** Where `spaceId` would sit on `view`'s photo, projected from its schematic rect; null without a fit. */
@@ -225,31 +263,66 @@ export function proposeOutlines(draft: DraftLayout, spaceIds: string[]): DraftLa
   return changed ? { ...draft, viewpoints } : draft
 }
 
+/** The schematic -> photo map for one viewpoint, or null without a fit. */
+function schematicToPhoto(draft: DraftLayout, view: DraftViewpoint): Mat3 | null {
+  const m = photoToSchematic(draft, view)
+  return m && invert(m)
+}
+
+const sameOutline = (a: Outline, b: Outline) =>
+  a.length === b.length && a.every((p, i) => Math.abs(p[0] - b[i][0]) <= 2e-4 && Math.abs(p[1] - b[i][1]) <= 2e-4)
+
 /**
- * After `spaceIds` moved on the schematic, move their proposals still waiting for review to match
- * (drop one that no longer lands on the photo). Accepted outlines are the admin's and never move.
+ * After `spaceIds` moved or resized on the schematic (`before` -> `after`), move the proposals this
+ * editor made for them and that still wait for review. A proposal is moved only while it is exactly the
+ * projection of the old rect, so a detector's proposal or one an admin dragged stays put; one that no
+ * longer lands on the photo is dropped. Accepted outlines are the admin's and never move.
  */
-export function reprojectPending(draft: DraftLayout, spaceIds: string[]): DraftLayout {
+export function reprojectPending(before: DraftLayout, after: DraftLayout, spaceIds: string[]): DraftLayout {
   let changed = false
-  const viewpoints = draft.viewpoints.map((v) => {
+  const viewpoints = after.viewpoints.map((v) => {
     const ids = spaceIds.filter((id) => v.outlineReview?.[id]?.status === 'pending' && v.outlineReview[id].source === 'proposed')
-    if (ids.length === 0) return v
-    const m = photoToSchematic(draft, v)
-    const toPhoto = m && invert(m)
-    if (!toPhoto) return v
+    const vBefore = before.viewpoints.find((b) => b.viewId === v.viewId)
+    const oldMap = vBefore && schematicToPhoto(before, vBefore)
+    const newMap = schematicToPhoto(after, v)
+    if (ids.length === 0 || !oldMap || !newMap) return v
     const outlines = { ...v.outlines }
     const outlineReview = { ...v.outlineReview }
+    let touched = false
     for (const id of ids) {
-      const space = draft.spaces.find((s) => s.spaceId === id)
-      const outline = space && rectToOutline(toPhoto, space.rect)
+      const was = before.spaces.find((s) => s.spaceId === id)
+      const now = after.spaces.find((s) => s.spaceId === id)
+      const projected = was && rectToOutline(oldMap, was.rect)
+      if (!now || !projected || !sameOutline(projected, v.outlines[id])) continue
+      const outline = now.retired ? null : rectToOutline(newMap, now.rect)
       if (outline) {
         outlines[id] = outline
       } else {
         delete outlines[id]
         delete outlineReview[id]
       }
+      touched = true
     }
+    if (!touched) return v
     changed = true
+    return { ...v, outlines, outlineReview }
+  })
+  return changed ? { ...after, viewpoints } : after
+}
+
+/** Remove the proposals still waiting for review for `spaceIds` (a retired space should not block publishing). */
+export function dropPendingProposals(draft: DraftLayout, spaceIds: string[]): DraftLayout {
+  let changed = false
+  const viewpoints = draft.viewpoints.map((v) => {
+    const ids = spaceIds.filter((id) => v.outlineReview?.[id]?.status === 'pending')
+    if (ids.length === 0) return v
+    changed = true
+    const outlines = { ...v.outlines }
+    const outlineReview = { ...v.outlineReview }
+    for (const id of ids) {
+      delete outlines[id]
+      delete outlineReview[id]
+    }
     return { ...v, outlines, outlineReview }
   })
   return changed ? { ...draft, viewpoints } : draft
@@ -259,12 +332,24 @@ export function reprojectPending(draft: DraftLayout, spaceIds: string[]): DraftL
 function nearestOutlined(draft: DraftLayout, view: DraftViewpoint, point: Point): DraftSpace | null {
   let best: DraftSpace | null = null
   let dist = Infinity
-  for (const [s, o] of acceptedOutlines(draft, view)) {
+  for (const [s, o] of anchorOutlines(draft, view)) {
     const c = centroid(o)
     const d = Math.hypot(c[0] - point[0], c[1] - point[1])
     if (d < dist) [dist, best] = [d, s]
   }
   return best
+}
+
+/**
+ * Whether a rect mapped from the photo is believable: no bigger than a few spaces, and near the map. A box
+ * drawn where the fit extrapolates badly (towards the horizon) maps far away and huge; that would grow
+ * the map without bound.
+ */
+function plausibleRect(draft: DraftLayout, r: DraftRect): boolean {
+  const size = medianSize(draft.spaces.filter((s) => !s.retired).map((s) => s.rect))
+  const { width, height } = draft.schematic
+  if (size && (r.w > 4 * size.w || r.h > 4 * size.h)) return false
+  return r.x > -width && r.y > -height && r.x + r.w < 2 * width && r.y + r.h < 2 * height
 }
 
 /**
@@ -279,7 +364,8 @@ export function addSpaceFromOutline(
   const view = draft.viewpoints.find((v) => v.viewId === viewId)
   if (!view) throw new Error(`No viewpoint ${viewId}`)
   const m = photoToSchematic(draft, view)
-  const rect = m && outlineToRect(m, outline)
+  const mapped = m && outlineToRect(m, outline)
+  const rect = mapped && plausibleRect(draft, mapped) ? mapped : null
   const added = rect
     ? addSpaceAt(draft, clearOf(rect, draft.spaces))
     : addSpace(draft, nearestOutlined(draft, view, centroid(outline))?.spaceId ?? null)
@@ -303,7 +389,7 @@ export function addSpaceOnSchematic(draft: DraftLayout, rect: DraftRect): Grown 
   return { ...added, draft: proposeOutlines(added.draft, [added.space.spaceId]) }
 }
 
-/** After `spaceIds` moved or resized: their pending proposals follow, and the map grows to hold them. */
-export function afterRectChange(draft: DraftLayout, spaceIds: string[]): Grown {
-  return fitSchematic(reprojectPending(draft, spaceIds))
+/** After `spaceIds` moved or resized (`before` -> `after`): their proposals follow, and the map grows to hold them. */
+export function afterRectChange(before: DraftLayout, after: DraftLayout, spaceIds: string[]): Grown {
+  return fitSchematic(reprojectPending(before, after, spaceIds))
 }
