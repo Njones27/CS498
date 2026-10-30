@@ -545,6 +545,14 @@ describe('SchematicEditor', () => {
       expect(screen.getByText('Now A-01; the rest of row A moved up one to make room')).toBeInTheDocument()
     })
 
+    it('a blocked insert (a name in the way) moves nothing and says so', () => {
+      const draft = davidFixture({ spaces: [...davidFixture().spaces, space('g', 150, 40, { label: 'Gate' })] }) // Gate in A-02's cell
+      const { onChange } = setup({ draft, withGrid: true })
+      drag(spaceEl('A-03'), -330, 0)
+      expect(onChange).not.toHaveBeenCalled()
+      expect(screen.getByText(/Row A can't move up to make room/)).toBeInTheDocument()
+    })
+
     it('+ Space adds the next free cell in the selected row, or starts a new row below', async () => {
       const { last, user } = setup({ withGrid: true, selectedSpaceId: 'A-02' })
       await user.click(screen.getByRole('button', { name: '+ Space' }))

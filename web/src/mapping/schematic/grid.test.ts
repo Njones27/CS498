@@ -273,6 +273,12 @@ describe('insertAtRowStart', () => {
     expect(next.spaces.map((s) => s.label)).toEqual(['B-02', 'B-03', 'B-01', 'B-04'])
   })
 
+  it('is a no-op for the row\'s own 01, and ignores retired spaces in the way', () => {
+    const draft = davidFixture({ spaces: [at('a', 'B-01', 1, 0), at('b', 'B-02', 1, 1), { ...at('r', 'Old', 1, 2), retired: true }] })
+    expect(insertAtRowStart(draft, G, 'a', 1)).toBeNull()
+    expect(insertAtRowStart(draft, G, 'b', 1)!.spaces.map((s) => s.label)).toEqual(['B-02', 'B-01', 'Old'])
+  })
+
   it('refuses when a space that is not numbered sits where the row would move', () => {
     const draft = davidFixture({ spaces: [at('x', 'D-07', 3, 6), at('a', 'B-01', 1, 0), at('g', 'Gate', 1, 1)] })
     expect(insertAtRowStart(draft, G, 'x', 1)).toBeNull()

@@ -248,7 +248,12 @@ export function insertAtRowStart(draft: DraftLayout, g: Grid, spaceId: string, r
     const p = s.retired || s.spaceId === spaceId ? null : parseLabel(s.label)
     return p && p.row === letter && p.num < below ? p : null
   }
-  const needed = [0, ...draft.spaces.flatMap((s) => (shifting(s) ? [shifting(s)!.num] : []))]
+  const shifted = draft.spaces.flatMap((s) => {
+    const p = shifting(s)
+    return p ? [p.num] : []
+  })
+  if (own && own.row === letter && own.num === 1) return null // already the row's 01
+  const needed = [0, ...shifted]
   const blocked = draft.spaces.some((s) => {
     if (s.retired || s.spaceId === spaceId || shifting(s)) return false
     const c = cellAt(g, center(s.rect))

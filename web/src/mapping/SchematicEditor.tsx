@@ -322,19 +322,21 @@ export function SchematicEditor({
     const from = gr && was && cellAt(gr, [was.rect.x + was.rect.w / 2, was.rect.y + was.rect.h / 2])
     // Only a move renames, and only into another cell: a resize, or a drag back to the same cell, keeps the label.
     const rename = gr && isMove && to && from && (from.row !== to.row || from.col !== to.col)
-    // Moved before a row's first number (snapped there, or dropped just before it): it becomes 01 and the
-    // rest of that row moves up one to make room. A space that isn't numbered in the way blocks that.
-    const canInsert =
-      rename && to.col < 0 && to.row >= 0 && (cell !== null || to.col === -1) && was && (!was.label.trim() || parseLabel(was.label) !== null)
+    // Moved into the cell just before a row's first number: it becomes 01 and the rest of that row moves
+    // up one to make room. A space that isn't numbered in the way blocks that, and the move is undone.
+    const canInsert = rename && to.col === -1 && to.row >= 0 && was && (!was.label.trim() || parseLabel(was.label) !== null)
     const inserted = canInsert ? insertAtRowStart(current, gr, spaceId, to.row) : null
+    if (canInsert && !inserted) {
+      return setNote(
+        `Row ${rowLetter(to.row)} can't move up to make room (a space that isn't numbered, or its own 01, is in the way); nothing moved`,
+      )
+    }
     const relabel = rename && !inserted ? relabelMoved(gr, current.spaces, spaceId, to) : { labels: new Map<string, string>() }
     const edited = inserted ?? applyLabels(updateSpace(current, spaceId, { rect }), relabel.labels)
     const grown = afterRectChange(current, edited, [spaceId])
     if (inserted) {
       const label = inserted.spaces.find((s) => s.spaceId === spaceId)!.label
       relabel.note = `Now ${label}; the rest of row ${rowLetter(to.row)} moved up one to make room`
-    } else if (canInsert) {
-      relabel.note = `${relabel.note ?? ''}; row ${rowLetter(to.row)} can't move up to make room: a space that isn't numbered sits in the way`.replace(/^; /, '')
     }
     emitGrown(grown, emit)
     // followRects leaves an outline as it was when the new spot is off that photo (or would fold it).
