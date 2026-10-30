@@ -29,8 +29,10 @@ function setup({ draft = davidFixture(), selectedSpaceId = null, issues = [], pu
       <SchematicEditor
         draft={d}
         grid={withGrid ? grid : undefined}
-        onChange={(next) => {
+        onChange={(next, shift) => {
           onChange(next)
+          // As the mapping page does: an edit that shifted every space moves the grid with them.
+          if (shift) grid?.shiftBy(next, shift.dx, shift.dy)
           setD(next)
         }}
         issues={issues}
@@ -470,11 +472,20 @@ describe('SchematicEditor', () => {
       expect(screen.getByText('Now B-05')).toBeInTheDocument()
     })
 
-    it('keeps the label when the cell is named for another space', () => {
-      const { last } = setup({ withGrid: true })
+    it('refuses a move onto a cell that already has a space', () => {
+      const { onChange } = setup({ withGrid: true })
       drag(spaceEl('A-01'), 110, 0) // onto A-02
-      expect(byId(last(), 'A-01')).toMatchObject({ label: 'A-01', rect: { x: 150, y: 40 } })
-      expect(screen.getByText('A-02 is already used; kept A-01')).toBeInTheDocument()
+      expect(onChange).not.toHaveBeenCalled()
+      expect(screen.getByText('That cell already has A-02; nothing moved')).toBeInTheDocument()
+    })
+
+    it('keeps the label when another space elsewhere already uses the cell\'s label', () => {
+      // A misplaced B-05 sits in row B, column 9; the B-05 cell itself is empty.
+      const draft = davidFixture({ spaces: [...davidFixture().spaces, space('far', 920, 170, { label: 'B-05' })] })
+      const { last } = setup({ draft, withGrid: true })
+      drag(spaceEl('A-03'), 220, 130)
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'A-03', rect: { x: 480, y: 170 } })
+      expect(screen.getByText('B-05 is already used; kept A-03')).toBeInTheDocument()
     })
 
     it('arrow keys move one cell at a time', async () => {
@@ -512,6 +523,18 @@ describe('SchematicEditor', () => {
       expect(within(lines as unknown as HTMLElement).getByText('A')).toBeInTheDocument()
       await user.click(screen.getByRole('checkbox', { name: 'Show grid' }))
       expect(screen.queryByTestId('schematic-grid')).toBeNull()
+    })
+
+    it('after Align all grows the map left, the grid moves with the spaces', async () => {
+      const { last, user } = setup({ withGrid: true, selectedSpaceId: 'A-01' })
+      const gap = screen.getByRole('spinbutton', { name: 'Gap across' })
+      await user.clear(gap)
+      await user.type(gap, '60{Enter}') // pitch 160: column 1's box now starts at x -35
+      await user.click(screen.getByRole('button', { name: 'Align all to grid' }))
+      expect(byId(last(), 'A-01').rect.x).toBe(20) // everything shifted right by 55
+      spaceEl('A-01').focus()
+      await user.keyboard('{ArrowDown}')
+      expect(byId(last(), 'A-01')).toMatchObject({ label: 'B-01', rect: { x: 20 } })
     })
 
     it('a new space size and Align all resize every labeled space into its cell', async () => {

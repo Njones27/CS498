@@ -5,7 +5,7 @@ import type { LotDetail } from '../api/schemas'
 import { useFetch } from '../lib/useFetch'
 import { ReferencePhotoPanel } from './ReferencePhotoPanel'
 import { SchematicEditor } from './SchematicEditor'
-import type { DraftLayout, Issue, LayoutVersionOut, MappingSelection, ValidationReport } from './types'
+import type { DraftLayout, Issue, LayoutVersionOut, MapShift, MappingSelection, ValidationReport } from './types'
 import { draftPath, useDraftLayout } from './useDraftLayout'
 import { useSchematicGrid } from './useSchematicGrid'
 import { ValidationPanel } from './ValidationPanel'
@@ -48,6 +48,12 @@ export function LotMappingPage() {
     setAutosave,
   } = useDraftLayout(lotId)
   const grid = useSchematicGrid(lotId, draft)
+  const [photoShift, setPhotoShift] = useState({ dx: 0, dy: 0, n: 0 })
+  /** Every panel edit goes through here: one that shifted every space (map grew left or up) moves the grid too. */
+  function applyEdit(next: DraftLayout, shift?: MapShift) {
+    if (shift) grid?.shiftBy(next, shift.dx, shift.dy)
+    setDraft(next)
+  }
   const location = useLocation()
   const navigate = useNavigate()
   const restoredFrom = (location.state as MappingLocationState | null)?.restoredFrom
@@ -288,14 +294,25 @@ export function LotMappingPage() {
       {draft && (
         <>
           <div className="mapping-panels">
-            <SchematicEditor {...selection} draft={draft} onChange={setDraft} issues={issues} grid={grid} />
+            <SchematicEditor
+              {...selection}
+              draft={draft}
+              onChange={applyEdit}
+              issues={issues}
+              grid={grid}
+              externalShift={photoShift}
+            />
             <ReferencePhotoPanel
               {...selection}
               lotId={lotId}
               draft={draft}
               viewId={viewId}
               onViewChange={setPickedViewId}
-              onChange={setDraft}
+              onChange={(next, shift) => {
+                // The schematic keeps its pinned view over the same spaces when a photo edit shifts them.
+                if (shift) setPhotoShift((s) => ({ ...shift, n: s.n + 1 }))
+                applyEdit(next, shift)
+              }}
               onReferenceUploaded={(uploaded) => void refreshReferenceImages(uploaded)}
               issues={issues}
               onSave={save}

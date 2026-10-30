@@ -216,6 +216,29 @@ describe('photo <-> schematic sync', () => {
     expect(rect.h).toBeCloseTo(160, 0)
   })
 
+  it('an accepted outline stays put when its space moves off the photo; a pending one is dropped', () => {
+    const { draft, space: added } = addSpaceOnSchematic(gridDraft(), { x: 480, y: 40, w: 100, h: 120 })
+    const away = {
+      ...draft,
+      spaces: draft.spaces.map((s) =>
+        s.spaceId === added.spaceId || s.spaceId === 'A-01' ? { ...s, rect: { ...s.rect, x: 5000, y: 5000 } } : s,
+      ),
+    }
+    const v = followRects(draft, away, [added.spaceId, 'A-01']).viewpoints[0]
+    expect(v.outlines['A-01']).toBe(draft.viewpoints[0].outlines['A-01'])
+    expect(v.outlines).not.toHaveProperty(added.spaceId)
+  })
+
+  it('with snapping, a photo move onto a cell that has a space leaves the schematic alone', () => {
+    const draft = gridDraft()
+    const grid = fitGrid(draft.spaces)
+    const v = draft.viewpoints[0]
+    const after = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'B-02': outlineOf({ x: 260, y: 240, w: 100, h: 120 }) } }] }
+    const res = followOutline(draft, after, 'V1', 'B-02', grid)
+    expect(res.draft).toBe(after)
+    expect(res.note).toMatch(/already has a space/)
+  })
+
   it('a first outline does not move the space', () => {
     const draft = gridDraft()
     const v = draft.viewpoints[0]

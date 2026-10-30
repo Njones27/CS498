@@ -25,6 +25,7 @@ import {
   arrangeByLabels,
   cellAt,
   cellRect,
+  cellTaken,
   cellsIn,
   gridInView,
   gridSizes,
@@ -39,11 +40,11 @@ import {
 import { duplicateLabelIds, nextRowStart, parseLabel, type ParsedLabel } from './schematic/labels'
 import { addSpaceOnSchematic, addSpacesInCells, afterRectChange, dropPendingProposals, photoToSchematic, proposeOutlines } from './sync'
 import type { GridControls } from './useSchematicGrid'
-import type { DraftLayout, DraftRect, DraftSpace, Issue, MappingSelection, Point, SpaceType } from './types'
+import type { DraftLayout, DraftRect, DraftSpace, Issue, MapShift, MappingSelection, Point, SpaceType } from './types'
 
 export interface SchematicEditorProps extends MappingSelection {
   draft: DraftLayout
-  onChange: (next: DraftLayout) => void
+  onChange: (next: DraftLayout, shift?: MapShift) => void
   issues: Issue[] // from the last validation; affected spaces are outlined in red
   /**
    * Optional: ids of spaces in any published version, which can only be retired. Without it, the
@@ -52,6 +53,8 @@ export interface SchematicEditorProps extends MappingSelection {
   publishedSpaceIds?: ReadonlySet<string>
   /** The page's grid (useSchematicGrid). Without it there is no grid and nothing snaps. */
   grid?: GridControls | null
+  /** The last edit made elsewhere (the photo) that moved every space; `n` counts them. A pinned view follows. */
+  externalShift?: MapShift & { n: number }
 }
 
 const TYPES: { value: SpaceType; label: string; spoken: string }[] = [
@@ -120,6 +123,7 @@ export function SchematicEditor({
   issues,
   publishedSpaceIds,
   grid,
+  externalShift,
   selectedSpaceId,
   onSelectSpace,
   hoveredSpaceId,
@@ -182,9 +186,16 @@ export function SchematicEditor({
   const dragBounds = () => unionBounds(draft.schematic, cameraBounds(view))
 
   /** Send an edit that may have grown the map; a pinned view shifts with the spaces so nothing jumps. */
-  function emitGrown({ draft: next, dx, dy }: Grown, emit: (next: DraftLayout) => void = onChange) {
-    emit(next)
+  function emitGrown({ draft: next, dx, dy }: Grown, emit: SchematicEditorProps['onChange'] = onChange) {
+    emit(next, dx !== 0 || dy !== 0 ? { dx, dy } : undefined)
     if (dx !== 0 || dy !== 0) setCamera((c) => c && { ...c, x: c.x + dx, y: c.y + dy })
+  }
+
+  // An edit on the photo that grew the map left or up moved every space; a pinned view moves with them.
+  const [seenShift, setSeenShift] = useState(externalShift?.n ?? 0)
+  if (externalShift && externalShift.n !== seenShift) {
+    setSeenShift(externalShift.n)
+    setCamera((c) => c && { ...c, x: c.x + externalShift.dx, y: c.y + externalShift.dy })
   }
 
   /** Zoom by `factor` around `center` (schematic units), between MIN_ZOOM and MAX_ZOOM of the fitted view. */
@@ -282,7 +293,17 @@ export function SchematicEditor({
    * Commit a moved or resized space: its photo outlines follow and the map grows to hold it. A move with
    * snapping on also takes the label of the cell it lands in (see relabelForCell).
    */
-  function commitRect(current: DraftLayout, emit: (next: DraftLayout) => void, spaceId: string, rect: DraftRect, cell: Cell | null) {
+  function commitRect(current: DraftLayout, emit: SchematicEditorProps['onChange'], spaceId: string, rect: DraftRect, cell: Cell | null) {
+    // Never stack two spaces in one cell.
+    const g = latest.current.snapGrid
+    if (cell && g && cellTaken(g, current.spaces, cell, null, spaceId)) {
+      const there = current.spaces.find((s) => {
+        if (s.retired || s.spaceId === spaceId) return false
+        const c = cellAt(g, [s.rect.x + s.rect.w / 2, s.rect.y + s.rect.h / 2])
+        return c.row === cell.row && c.col === cell.col
+      })
+      return setNote(`That cell already has ${there?.label.trim() || 'a space'}; nothing moved`)
+    }
     const relabel = cell ? relabelForCell(current.spaces, spaceId, cell) : {}
     const patch = relabel.label ? { rect, label: relabel.label } : { rect }
     const grown = afterRectChange(current, updateSpace(current, spaceId, patch), [spaceId])

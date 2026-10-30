@@ -13,6 +13,11 @@ export interface GridControls {
   setSizes: (sizes: Partial<GridSizes>) => void
   /** Fit the grid to the spaces' labels again, at the sizes they suggest. */
   refit: () => void
+  /**
+   * An edit that grew the map left or up moved every space by (dx, dy) on its way to `next`: move the grid
+   * with them. Edits say so exactly; undo and redo, which don't, are recognised by uniformShift.
+   */
+  shiftBy: (next: DraftLayout, dx: number, dy: number) => void
 }
 
 interface Prefs {
@@ -57,13 +62,14 @@ export function uniformShift(a: DraftLayout, b: DraftLayout): { dx: number; dy: 
     const r = before.get(s.spaceId)
     if (!r) continue
     common++
-    const key = `${s.rect.x - r.x},${s.rect.y - r.y}`
+    // Rounded: (x + dx) - x is not always exactly dx in floating point.
+    const key = `${Math.round((s.rect.x - r.x) * 1000)},${Math.round((s.rect.y - r.y) * 1000)}`
     counts.set(key, (counts.get(key) ?? 0) + 1)
   }
   if (common < 2) return null
   const [key, n] = [...counts].reduce((best, e) => (e[1] > best[1] ? e : best))
   if (n * 2 <= common) return null
-  const [dx, dy] = key.split(',').map(Number)
+  const [dx, dy] = key.split(',').map((v) => Number(v) / 1000)
   return dx !== 0 || dy !== 0 ? { dx, dy } : null
 }
 
@@ -106,5 +112,6 @@ export function useSchematicGrid(lotId: string, draft: DraftLayout | null): Grid
       update({ ...current, sizes: {} })
       setState({ ...state, grid: fitGrid(draft.spaces) })
     },
+    shiftBy: (next, dx, dy) => setState({ ...state, seen: next, grid: shiftGrid(state.grid, dx, dy) }),
   }
 }

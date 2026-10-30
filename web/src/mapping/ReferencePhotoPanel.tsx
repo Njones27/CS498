@@ -211,8 +211,8 @@ export function ReferencePhotoPanel({
 
   // US-08 #3 "the change is saved to the draft": an outline change (drawn, dragged, deleted,
   // accepted or rejected) is saved as soon as it is made, not left for Save or autosave.
-  const commitOutlines = (next: DraftLayout) => {
-    onChange(next)
+  const commitOutlines = (next: DraftLayout, shift?: { dx: number; dy: number }) => {
+    onChange(next, shift && (shift.dx !== 0 || shift.dy !== 0) ? shift : undefined)
     void onSave?.()
   }
 
@@ -297,20 +297,27 @@ export function ReferencePhotoPanel({
     frame.addEventListener('wheel', onWheel, { passive: false })
     return () => frame.removeEventListener('wheel', onWheel)
   }, [hasPhoto])
+  const stopPan = useRef<(() => void) | null>(null)
+  useEffect(() => () => stopPan.current?.(), [])
   const startPhotoPan = (e: React.PointerEvent) => {
     if (e.button !== 1) return
     e.preventDefault()
+    stopPan.current?.()
     let last = [e.clientX, e.clientY]
     const onMove = (ev: PointerEvent) => {
       zoomRef.current.panPhoto(ev.clientX - last[0], ev.clientY - last[1])
       last = [ev.clientX, ev.clientY]
     }
-    const onUp = () => {
+    const stop = () => {
       window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+      stopPan.current = null
     }
     window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+    stopPan.current = stop
   }
 
   // Photo units per screen pixel. The photo is drawn far smaller than its pixel size (a 2000 px drone
@@ -346,12 +353,14 @@ export function ReferencePhotoPanel({
 
     const handlePointerUp = () => {
       const finalCorners = dragCornersRef.current
-      // A press on a handle without moving it changes nothing, so it must not mark the outline drawn.
+      // A drag that ends where it began (or pushes against the photo edge) changes nothing, so it must
+      // not mark the outline drawn or move the schematic.
+      const stored = currentViewpoint && selectedSpaceId ? currentViewpoint.outlines[selectedSpaceId] : undefined
       const moved =
         finalCorners !== null &&
         currentViewpoint !== null &&
         selectedSpaceId !== null &&
-        finalCorners.some((p, i) => p !== currentViewpoint.outlines[selectedSpaceId]?.[i])
+        finalCorners.some((p, i) => !stored?.[i] || p[0] !== stored[i][0] || p[1] !== stored[i][1])
       if (moved && !isValidQuad(finalCorners)) {
         // A corner dragged across the opposite edge: publishing would reject it, so keep the old outline.
         setDrawError('That would cross the outline over itself. Drag the corner back to its side.')
@@ -373,7 +382,7 @@ export function ReferencePhotoPanel({
         const followed = followOutline(draft, { ...draft, viewpoints: nextVps }, currentViewpoint.viewId, selectedSpaceId, snapGrid)
         if (followed.note) setStatusNotice(followed.note)
         // commitOutlines, spelled out so this effect's dependencies stay listed
-        onChange(followed.draft)
+        onChange(followed.draft, followed.dx !== 0 || followed.dy !== 0 ? { dx: followed.dx, dy: followed.dy } : undefined)
         void onSave?.()
       }
       dragSpecRef.current = null
@@ -523,8 +532,8 @@ export function ReferencePhotoPanel({
     setClicks([])
     setIsDrawing(false)
     if (!drawingSelected || !selectedSpace) {
-      const { draft: next, space } = addSpaceFromOutline(draft, currentViewpoint.viewId, outline, snapGrid)
-      commitOutlines(next)
+      const { draft: next, space, dx, dy } = addSpaceFromOutline(draft, currentViewpoint.viewId, outline, snapGrid)
+      commitOutlines(next, { dx, dy })
       onSelectSpace(space.spaceId)
       setStatusNotice(`Added ${space.label} to the schematic. Rename it there if needed.`)
       return
@@ -545,7 +554,7 @@ export function ReferencePhotoPanel({
     // A redrawn outline moves the space on the schematic the same way; a first outline moves nothing.
     const followed = followOutline(draft, { ...draft, viewpoints: nextVps }, currentViewpoint.viewId, selectedSpace.spaceId, snapGrid)
     setStatusNotice(followed.note ?? `${selectedSpace.label} outlined in ${currentViewpoint.viewId}`)
-    commitOutlines(followed.draft)
+    commitOutlines(followed.draft, followed)
   }
 
   // A box drag ends after the render it started in; it finishes with the newest draft and selection.
@@ -893,6 +902,10 @@ export function ReferencePhotoPanel({
             className="photo-view"
             style={{ aspectRatio: `${svgWidth} / ${svgHeight}` }}
             onPointerDown={startPhotoPan}
+            // The browser's middle-click autoscroll starts on mousedown, not pointerdown.
+            onMouseDown={(e) => {
+              if (e.button === 1) e.preventDefault()
+            }}
           >
             <div
               className="photo-view__stage"

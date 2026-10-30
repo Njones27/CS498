@@ -1,6 +1,6 @@
 import { MIN_SIDE, clearOf, medianSize } from './schematic/geometry'
 import { addSpace, addSpaceAt, addSpacesAt, fitSchematic, updateSpace, type Grown } from './schematic/edits'
-import { cellAt, cellLabel, cellRect, cellTaken, relabelForCell, snapMove, type Cell, type Grid } from './schematic/grid'
+import { cellAt, cellLabel, cellRect, cellTaken, labelDigits, relabelForCell, snapMove, type Cell, type Grid } from './schematic/grid'
 import { isValidQuad, orderClockwise } from './photo/geom'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, Outline, Point } from './types'
 
@@ -399,6 +399,10 @@ export function followOutline(
     const from = cellAt(grid, rectCenter(space.rect))
     const snapped = snapMove(grid, rect)
     if (snapped.cell.row === from.row && snapped.cell.col === from.col) return unchanged
+    // Never stack two spaces in one cell: the schematic stays, the outline change still stands.
+    if (cellTaken(grid, after.spaces, snapped.cell, null, spaceId)) {
+      return { ...unchanged, note: `The schematic cell there already has a space; ${space.label} stays where it is` }
+    }
     rect = snapped.rect
     const relabel = relabelForCell(after.spaces, spaceId, snapped.cell)
     patch = relabel.label ? { rect, label: relabel.label } : { rect }
@@ -463,7 +467,7 @@ export function addSpaceFromOutline(
   viewId: string,
   outline: Outline,
   grid: Grid | null = null,
-): { draft: DraftLayout; space: DraftSpace } {
+): Grown & { space: DraftSpace } {
   const view = draft.viewpoints.find((v) => v.viewId === viewId)
   if (!view) throw new Error(`No viewpoint ${viewId}`)
   const m = photoToSchematic(draft, view)
@@ -471,7 +475,7 @@ export function addSpaceFromOutline(
   const rect = mapped && plausibleRect(draft, mapped) ? mapped : null
   // Snapping on: the space fills the free cell it lands in and is named for it.
   const cell = grid && rect ? cellAt(grid, rectCenter(rect)) : null
-  const cellName = cell && cellLabel(cell)
+  const cellName = cell && cellLabel(cell, labelDigits(draft.spaces))
   const inCell = grid && cell && cellName && !cellTaken(grid, draft.spaces, cell, cellName)
   const added = inCell
     ? addSpaceAt(draft, cellRect(grid, cell), cellName)
@@ -489,7 +493,7 @@ export function addSpaceFromOutline(
       : v,
   )
   const next = proposeOutlines({ ...added.draft, viewpoints }, [id])
-  return { draft: next, space: next.spaces.find((s) => s.spaceId === id)! }
+  return { draft: next, dx: added.dx, dy: added.dy, space: next.spaces.find((s) => s.spaceId === id)! }
 }
 
 /** A space drawn on the schematic at `rect`, with proposed outlines on every photo it lands on. */
@@ -505,8 +509,9 @@ export function addSpaceOnSchematic(draft: DraftLayout, rect: DraftRect): Grown 
  */
 export function addSpacesInCells(draft: DraftLayout, grid: Grid, cells: Cell[]): Grown & { spaces: DraftSpace[] } {
   const items: { rect: DraftRect; label: string }[] = []
+  const digits = labelDigits(draft.spaces)
   for (const cell of cells) {
-    const label = cellLabel(cell)
+    const label = cellLabel(cell, digits)
     const placed = [...draft.spaces, ...items.map((it, i) => ({ spaceId: `new${i}`, label: it.label, type: 'STANDARD' as const, rect: it.rect, retired: false }))]
     if (label && !cellTaken(grid, placed, cell, label)) items.push({ rect: cellRect(grid, cell), label })
   }

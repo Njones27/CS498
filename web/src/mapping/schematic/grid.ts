@@ -121,6 +121,17 @@ export function cellRect(g: Grid, { row, col }: Cell): DraftRect {
   }
 }
 
+/** How many digits the lot's labels use (A-07 or A-007): the most common width, at least 2. */
+export function labelDigits(spaces: DraftSpace[]): number {
+  const counts = new Map<number, number>()
+  for (const s of spaces) {
+    const d = s.retired ? null : parseLabel(s.label)?.digits
+    if (d) counts.set(d, (counts.get(d) ?? 0) + 1)
+  }
+  const [digits] = [...counts].reduce((best, e) => (e[1] > best[1] ? e : best), [2, 0])
+  return Math.max(2, digits)
+}
+
 /** "C-07" for row 2, column 6; null for a cell above row A or left of column 1. */
 export function cellLabel({ row, col }: Cell, digits = 2): string | null {
   const letter = rowLetter(row)

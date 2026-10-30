@@ -10,6 +10,7 @@ import {
   fitGrid,
   gridInView,
   gridSizes,
+  labelDigits,
   relabelForCell,
   rowIndex,
   rowLetter,
@@ -130,5 +131,13 @@ describe('gridInView', () => {
     expect(v.cols).toEqual([-1, 0, 1]) // cell middles at 7.5, 52.5, 97.5
     expect(v.rows).toEqual([1, 2]) // middles at 70, 160
     expect(gridInView(G, { x: 0, y: 0, w: 100000, h: 10 }).xs).toEqual([])
+  })
+})
+
+describe('labelDigits', () => {
+  it('uses the lot\'s most common label width, at least 2', () => {
+    expect(labelDigits([space('a', 0, 0, { label: 'A-001' }), space('b', 0, 0, { label: 'A-002' }), space('c', 0, 0, { label: 'B-01' })])).toBe(3)
+    expect(labelDigits([space('a', 0, 0, { label: 'A1' })])).toBe(2)
+    expect(labelDigits([])).toBe(2)
   })
 })
