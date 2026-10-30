@@ -232,13 +232,33 @@ describe('layout sanity', () => {
     expect(photoCell(draft, draft.viewpoints[0], at(3, 0.3))).toBeNull()
   })
 
-  it('reads a photo whose rows are tilted', () => {
+  it('reads a photo whose rows are slightly tilted, and gives up on one turned steeply', () => {
     const base = lot()
     const v = base.viewpoints[0]
-    // Every outline shifted down by 0.08 per 0.4 across: rows slope, still clearly apart.
-    const tilt = (o: Outline): Outline => o.map(([x, y]) => [x, Number((y + x * 0.2).toFixed(4))])
+    const turn = (deg: number) => (o: Outline): Outline => {
+      const [c, s] = [Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180)]
+      return o.map(([x, y]) => [Number((0.5 + (x - 0.5) * c - (y - 0.5) * s).toFixed(4)), Number((0.5 + (x - 0.5) * s + (y - 0.5) * c).toFixed(4))])
+    }
+    const turned = (deg: number) => ({
+      ...base,
+      viewpoints: [{ ...v, outlines: Object.fromEntries(Object.entries(v.outlines).map(([k, o]) => [k, turn(deg)(o)])) }],
+    })
+    // Turned 10 degrees, a column drifts most of a column per row: not readable straight down.
+    expect(photoCell(turned(60), turned(60).viewpoints[0], turn(60)(at(0, ROW_Y.B)))).toBeNull()
+    expect(photoCell(turned(10), turned(10).viewpoints[0], turn(10)(at(0, ROW_Y.B)))).toBeNull()
+    const tilt = turn(1)
     const draft = { ...base, viewpoints: [{ ...v, outlines: Object.fromEntries(Object.entries(v.outlines).map(([k, o]) => [k, tilt(o)])) }] }
     expect(photoCell(draft, draft.viewpoints[0], tilt(at(0, ROW_Y.B)))).toMatchObject({ row: 1, col: 0 })
+  })
+
+  it('one stray outline in a small lot does not stop the photo being read', () => {
+    // Two rows only; C-03 outlined a whole row low.
+    const spaces = [1, 2, 3, 4, 5, 6].flatMap((n) => [space(`B-0${n}`, 0, 0), space(`C-0${n}`, 0, 0)])
+    const outlines = Object.fromEntries(
+      spaces.map((s) => [s.spaceId, at(Number(s.label.slice(2)) - 1, s.label === 'C-03' ? 0.5 : s.label[0] === 'B' ? 0.1 : 0.3)]),
+    )
+    const draft = davidFixture({ spaces, viewpoints: [{ ...davidFixture().viewpoints[0], outlines, outlineReview: {} }] })
+    expect(photoCell(draft, draft.viewpoints[0], at(6, 0.3))).toMatchObject({ row: 2, col: 6 })
   })
 
   it('a sideways drag across a column, ending a hair over a row boundary, keeps the row', () => {

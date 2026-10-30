@@ -83,26 +83,41 @@ function layout(all: Marker[]): Layout | null {
   // outlined, a mislabelled space) are outvoted, which is when renumbering is wanted.
   const against = (values: number[], sign: number) => values.filter((v) => Math.sign(v) !== sign).length * 3 > values.length
   if (against(steps, Math.sign(pitch)) || against(rowSteps, Math.sign(rowStep))) return null
-  // Rows must run across the photo: along a row, the outlines stay on a line (tilted is fine) much closer
-  // than a row step to it. A turned photo, whose rows run down it, fails this.
-  const spread = median([...byRow.values()].filter((ms) => ms.length > 2).map(offLine))
+  // Rows must run across the photo, each in its own band of height (a slight tilt is fine): rows are told
+  // apart by height (photoRow). A turned or steeply angled photo, whose rows overlap in height, fails this.
+  const spread = median([...byRow.values()].filter((ms) => ms.length > 1).map(band))
   if (byRow.size > 1 && spread !== null && spread > Math.abs(rowStep) / 2) return null
+  // Columns are read straight down the photo (photoColumn). A photo turned so far that a column drifts a
+  // third of a column from one row to the next (its rows tilt) can't be read that way.
+  const tilt = median([...byRow.values()].filter((ms) => ms.length > 2).map(slope))
+  if (tilt !== null && Math.abs(tilt * rowStep) > Math.abs(pitch) / 3) return null
   return { byRow, rowY, pitch, rowStep }
 }
 
-/** How far a row's outlines stray up or down from the straight line through them (photo fractions). */
-function offLine(ms: Marker[]): number {
-  const mx = ms.reduce((t, m) => t + m.x, 0) / ms.length
-  const my = ms.reduce((t, m) => t + m.y, 0) / ms.length
-  const sxx = ms.reduce((t, m) => t + (m.x - mx) ** 2, 0)
-  const slope = sxx > 0 ? ms.reduce((t, m) => t + (m.x - mx) * (m.y - my), 0) / sxx : 0
-  return Math.max(...ms.map((m) => Math.abs(m.y - my - slope * (m.x - mx))))
+/**
+ * How tall a band a row's outlines fill on the photo: twice their median distance from the row's median
+ * height, so one stray outline doesn't count.
+ */
+function band(ms: Marker[]): number {
+  const mid = median(ms.map((m) => m.y))!
+  return 2 * median(ms.map((m) => Math.abs(m.y - mid)))!
+}
+
+/** How a row tilts (photo y per photo x): the median slope between its outlines, so one stray doesn't count. */
+function slope(ms: Marker[]): number {
+  const slopes: number[] = []
+  for (let i = 0; i < ms.length; i++) {
+    for (let j = i + 1; j < ms.length; j++) {
+      if (ms[j].x !== ms[i].x) slopes.push((ms[j].y - ms[i].y) / (ms[j].x - ms[i].x))
+    }
+  }
+  return median(slopes) ?? 0
 }
 
 /** The (unrounded) column at photo x, counted from `row`'s marker nearest x; and how many columns away that is. */
-function columnIn(row: Marker[], x: number, pitch: number): { at: number; reach: number } {
+function columnIn(lay: Layout, row: Marker[], x: number): { at: number; reach: number } {
   const nearest = row.reduce((a, b) => (Math.abs(b.x - x) < Math.abs(a.x - x) ? b : a))
-  const offset = (x - nearest.x) / pitch
+  const offset = (x - nearest.x) / lay.pitch
   return { at: nearest.col + offset, reach: Math.abs(offset) }
 }
 
@@ -114,9 +129,9 @@ function columnIn(row: Marker[], x: number, pitch: number): { at: number; reach:
  */
 function photoColumn(lay: Layout, row: number, x: number, y: number): number {
   const others = [...lay.byRow].filter(([r]) => r !== row)
-  if (others.length === 0) return columnIn(lay.byRow.get(row)!, x, lay.pitch).at
+  if (others.length === 0) return columnIn(lay, lay.byRow.get(row)!, x).at
   const votes = others
-    .map(([r, ms]) => ({ ...columnIn(ms, x, lay.pitch), distance: Math.abs(lay.rowY.get(r)! - y) }))
+    .map(([r, ms]) => ({ ...columnIn(lay, ms, x), distance: Math.abs(lay.rowY.get(r)! - y) }))
     .sort((a, b) => a.distance - b.distance)
   const near = votes.filter((v) => v.reach <= 1.5)
   if (near.length === 0) return votes.reduce((a, b) => (b.reach < a.reach ? b : a)).at
