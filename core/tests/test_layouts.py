@@ -42,6 +42,7 @@ from parking_core.models import (
     Viewpoint,
 )
 from parking_core.settings import Settings
+from pydantic import ValidationError as PydanticValidationError
 
 NOW = datetime(2026, 10, 28, 14, 5, tzinfo=UTC)
 AWS_SETTINGS = Settings(app_env="local", queue_url="http://sqs.local/q", _env_file=None)  # type: ignore[call-arg]
@@ -796,6 +797,21 @@ def test_failed_publish_releases_the_draft(repo, store, lot_l, monkeypatch, targ
     assert repo.get_lot("L").current_layout_version == 1
     assert [v.version for v in repo.list_layout_versions("L")] == [1]
     assert publish_draft(repo, store, lot_l, 4, "a", NOW).version == 2
+
+
+def test_publish_refuses_a_snapshot_that_would_not_load(repo, store, lot_l):
+    # An infinite schematic size passes validation (every rect is inside it) but is stored
+    # as null, after which the lot's snapshot fails to load for every driver and the worker.
+    m = repo.get_draft_meta("L")
+    huge = Schematic.model_construct(width=math.inf, height=600)
+    saved = m.model_copy(update={"revision": 3, "schematic": huge})
+    assert repo.put_draft_meta(saved, expected_revision=2)
+    with pytest.raises(PydanticValidationError):
+        publish_draft(repo, store, lot_l, 3, "a", NOW)
+    assert repo.get_draft_meta("L").revision == 3
+    assert repo.get_lot("L").current_layout_version == 1
+    assert [v.version for v in repo.list_layout_versions("L")] == [1]
+    assert not store.exists(keys.layout_snapshot_key("L", 2))
 
 
 def test_failed_release_still_raises_the_publish_error(repo, store, lot_l, monkeypatch):

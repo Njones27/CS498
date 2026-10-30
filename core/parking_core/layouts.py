@@ -194,8 +194,8 @@ def _inside_photo(polygon: list[Point]) -> bool:
 
 
 def _is_valid_rect(rect: Rect) -> bool:
-    """Finite, with positive width and height. `Rect` rejects non-finite numbers, but a draft
-    stored before it did (or built in code) can still hold them."""
+    """Finite, with positive width and height. `Rect` rejects non-finite numbers, so only a
+    rect built without validation (`model_construct`) can hold them."""
     values = (rect.x, rect.y, rect.w, rect.h)
     return all(math.isfinite(v) for v in values) and rect.w > 0 and rect.h > 0
 
@@ -476,10 +476,13 @@ def publish_draft(
     """Validate the stored draft and publish it as the next version (US-09 #4).
 
     Raises StaleRevisionError when the draft is not at `expected_revision`, and
-    ValidationFailedError when it has errors. Before writing anything, the draft meta is
-    moved to the next revision with `basedOnVersion` set to the new version, as a conditional
-    write: of two publishes (or a publish and a save) racing on one revision, only one wins.
-    If writing the version then fails, the meta goes back to the version it was based on.
+    ValidationFailedError when it has errors. A snapshot that would not load back (such as a
+    value that serializes as null) raises pydantic's ValidationError with nothing written.
+
+    Before writing anything, the draft meta is moved to the next revision with
+    `basedOnVersion` set to the new version, as a conditional write: of two publishes (or a
+    publish and a save) racing on one revision, only one wins. If writing the version then
+    fails, the meta goes back to the version it was based on.
     """
     draft = load_draft(repo, lot, now)
     if draft.meta.revision != expected_revision:
@@ -489,15 +492,16 @@ def publish_draft(
         raise ValidationFailedError(report)
 
     version = next_version(repo, lot.lot_id)
+    layout = build_layout(lot.lot_id, version, draft, published_by, now)
+    # A snapshot that can't be read back would break the lot for every driver and the worker.
+    PublishedLayout.model_validate_json(layout.model_dump_json())
     claimed = draft.meta.model_copy(
         update={"revision": draft.meta.revision + 1, "based_on_version": version}
     )
     if not repo.put_draft_meta(claimed, expected_revision=draft.meta.revision):
         raise StaleRevisionError
     try:
-        return write_layout(
-            repo, store, build_layout(lot.lot_id, version, draft, published_by, now)
-        )
+        return write_layout(repo, store, layout)
     except Exception:
         # The new version does not exist, so the draft must not claim to be based on it. The
         # revision moves on rather than back, so a window that loaded the claimed revision
