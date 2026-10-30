@@ -124,6 +124,26 @@ describe('US-16 #3: lot picker on every admin page', () => {
     expect(localStorage.getItem(KEY)).toBe('north-lot')
   })
 
+  it('Upload says an unpublished picked lot has nothing to upload to', async () => {
+    localStorage.setItem(KEY, 'north-lot')
+    mockFetch({
+      ...routes,
+      'GET /admin/lots': { body: [NEW_NORTH, TEST_LOT] },
+      'GET /lots': { body: [listItem('test-lot', 'Test Lot')] },
+    })
+    renderApp('/admin/upload', ADMIN)
+    expect(await screen.findByText(/North Lot is not published yet, so there is nothing to upload to/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Publish it from the map editor' })).toHaveAttribute(
+      'href',
+      '/admin/lots/north-lot/map',
+    )
+    expect((await picker()).value).toBe('north-lot')
+    expect(screen.getByLabelText('Lot')).toHaveValue('')
+    await userEvent.setup().selectOptions(screen.getByLabelText('Lot'), 'test-lot')
+    expect(await screen.findByRole('option', { name: 'Test pole' })).toBeInTheDocument()
+    expect(screen.queryByText(/is not published yet/)).not.toBeInTheDocument()
+  })
+
   it("the Upload page's own lot select moves the picker too", async () => {
     mockFetch(routes)
     renderApp('/admin/upload', ADMIN)
