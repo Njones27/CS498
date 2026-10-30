@@ -392,9 +392,9 @@ The clock times below are examples; use times earlier than now, in the same orde
   Six services: web (5173), api (8000), worker, rustfs (9000, the S3 stand-in instead of MinIO),
   elasticmq (9324), dynamodb-local (8001). `curl localhost:8000/health` returns
   `{"status":"ok"}`.
-- [ ] **#2 Seed loads the test lot** `[compose]`. `set -a && . ./.env.ci-host && set +a && uv run python seed/seed.py --lot test-lot`
+- [ ] **#2 Seed loads the test lot** `[compose]`. `(set -a; . ./.env.ci-host; uv run python seed/seed.py --lot test-lot)`
   prints "Created table, bucket and queue" and "Loaded Test Lot with 14 spaces and 2
-  viewpoints"; Test Lot is on http://localhost:5173/. (Use `.env.ci-host`, as CI does; Gaps G2.)
+  viewpoints"; Test Lot is on http://localhost:5173/. (The seed runs on the host, so it loads `.env.ci-host`, as CI does.)
 - [ ] **#3 Upload to map, fully local** `[compose]`. Sign in as the dev admin, upload
   `eval/fixtures/test-lot.jpg`; the map updates. Automated:
   `RUN_COMPOSE_TESTS=1 uv run pytest -m compose tests/compose` (with `.env.ci-host` loaded).
@@ -462,10 +462,8 @@ during the walkthrough; strike it when fixed.
   "Lot not found" and Map opens a missing lot. Workaround: in DevTools,
   `localStorage.removeItem('parking.admin.lotId')`, or pick the lot in the header picker. Fix:
   use `useAdminLot()` on both, as Upload and Snapshots do.
-- ~~**G2 README seeds the compose stack with the wrong env.**~~ Fixed in this PR: README now loads `.env.ci-host` for the host-side seed. README "Local development" runs
-  `uv run python seed/seed.py --lot pklot-ufpr04` from the host, which reads `.env` whose
-  endpoints are compose-internal hostnames (`http://rustfs:9000`, ...). CI seeds with
-  `.env.ci-host` loaded. US-14 #2 also names `--lot test-lot`, the seed default.
+- ~~**G2 README seeded the compose stack with the wrong env.**~~ Fixed: README now seeds from
+  the host with `.env.ci-host`, as CI does (`.env` has the compose-internal hostnames).
 - **G3 Unpublished lot on Closures.** With an unpublished lot picked, Closures shows
   "Lot not found" (it loads the public lot detail) instead of saying the lot must be published
   first (the API's own message is "Publish the lot before closing spaces"). Upload shows no lot

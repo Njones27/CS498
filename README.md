@@ -22,11 +22,11 @@ Design docs live in `Docs/` (High-Level Design v0.3, Milestone 1 user stories, d
 ```bash
 cp .env.example .env
 docker compose up --build
-set -a && . ./.env.ci-host && set +a && uv run python seed/seed.py --lot pklot-ufpr04
+(set -a; . ./.env.ci-host; uv run python seed/seed.py --lot pklot-ufpr04)
 ```
 
-The seed runs on the host, so it loads `.env.ci-host` (the same stack at `localhost` ports);
-`.env` holds the compose-internal hostnames the containers use.
+The seed runs on the host, so it loads `.env.ci-host` (the same stack at `localhost` ports) in a
+subshell; `.env` holds the compose-internal hostnames the containers use.
 
 Then open http://localhost:5173 and sign in with the dev admin from `.env`.
 
