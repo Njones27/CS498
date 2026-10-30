@@ -120,10 +120,12 @@ def complete_reference_upload(
         raise error(409, "unsupported_type", "Photos must be JPEG or PNG")
     width, height = size
 
-    vp.reference_image_key = key
-    vp.image_width = width
-    vp.image_height = height
-    repo.put_viewpoint(vp)
+    # Only the photo fields: a draft save running now writes the outlines, and neither write may
+    # put back the other's old value.
+    if not repo.update_viewpoint(
+        lot_id, view_id, reference_image_key=key, image_width=width, image_height=height
+    ):
+        raise error(404, "not_found", "Viewpoint not found")
 
     url = store.presign_get(key)
     return ReferenceCompleteResponse(

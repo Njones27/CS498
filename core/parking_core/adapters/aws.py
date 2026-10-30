@@ -361,6 +361,18 @@ class DynamoRepository:
     def put_viewpoint(self, viewpoint: Viewpoint) -> None:
         self._table.put_item(Item=viewpoint_item(viewpoint))
 
+    def update_viewpoint(self, lot_id: str, view_id: str, /, **fields: object) -> bool:
+        try:
+            self._table.update_item(
+                Key={k.PK: k.lot_pk(lot_id), k.SK: k.view_sk(view_id)},
+                **viewpoint_update(fields),
+            )
+            return True
+        except ClientError as exc:
+            if is_conditional_failure(exc):
+                return False
+            raise
+
     def get_viewpoint(self, lot_id: str, view_id: str) -> Viewpoint | None:
         item = self._get(k.lot_pk(lot_id), k.view_sk(view_id))
         return item_to_model(item, Viewpoint) if item else None
@@ -596,6 +608,26 @@ def transition_update(
     return {
         "UpdateExpression": "SET " + ", ".join(sets),
         "ConditionExpression": f"attribute_exists(PK) AND #js IN ({', '.join(placeholders)})",
+        "ExpressionAttributeNames": names,
+        "ExpressionAttributeValues": values,
+    }
+
+
+def viewpoint_update(fields: dict[str, object]) -> dict[str, Any]:
+    """UpdateItem kwargs for `update_viewpoint` (pure, so it is unit-testable)."""
+    unknown = set(fields) - (set(Viewpoint.model_fields) - {"lot_id", "view_id"})
+    if not fields or unknown:
+        raise ValueError(f"not updatable viewpoint fields: {sorted(unknown) or 'none given'}")
+    names: dict[str, str] = {}
+    values: dict[str, Any] = {}
+    sets = []
+    for i, (name, value) in enumerate(sorted(fields.items())):
+        names[f"#f{i}"] = to_camel(name)
+        values[f":f{i}"] = to_dynamo(value)
+        sets.append(f"#f{i} = :f{i}")
+    return {
+        "UpdateExpression": "SET " + ", ".join(sets),
+        "ConditionExpression": "attribute_exists(PK)",
         "ExpressionAttributeNames": names,
         "ExpressionAttributeValues": values,
     }

@@ -15,6 +15,7 @@ from parking_core import keys
 from parking_core.settings import Settings
 
 from .conftest import NOW, token
+from .test_layout import as_body, get_draft, put
 
 
 def jpeg(width: int, height: int, orientation: int | None = None, fill: bytes = b"\x00") -> bytes:
@@ -371,6 +372,50 @@ def test_complete_rejects_a_file_that_is_not_an_allowed_image(
 )
 def test_image_size(data, content_type, size):
     assert image_size(data, content_type) == size
+
+
+def test_photo_completed_during_a_draft_save_is_kept(client, admin_headers, adapters, monkeypatch):
+    # The save reads the viewpoints, the photo's complete lands, then the save writes them.
+    repo = adapters.repository
+    body = as_body(get_draft(client, admin_headers))
+    sha = _stored(adapters, jpeg(1600, 900))
+    list_viewpoints = repo.list_viewpoints
+
+    def complete_lands_mid_save(lot_id):
+        views = list_viewpoints(lot_id)
+        monkeypatch.setattr(repo, "list_viewpoints", list_viewpoints)
+        assert _complete(client, admin_headers, sha).status_code == 200
+        return views
+
+    monkeypatch.setattr(repo, "list_viewpoints", complete_lands_mid_save)
+    assert put(client, admin_headers, body).status_code == 200
+    vp = repo.get_viewpoint("test-lot", "V1")
+    assert vp.reference_image_key == keys.reference_image_key("test-lot", "V1", sha)
+    assert (vp.image_width, vp.image_height) == (1600, 900)
+
+
+def test_outlines_saved_during_a_photo_complete_are_kept(
+    client, admin_headers, adapters, monkeypatch
+):
+    # complete reads the viewpoint, a draft save writes new outlines, then complete writes.
+    repo = adapters.repository
+    body = as_body(get_draft(client, admin_headers))
+    v1 = next(v for v in body["viewpoints"] if v["viewId"] == "V1")
+    v1["outlines"], v1["outlineReview"] = {}, {}
+    sha = _stored(adapters, jpeg(1600, 900))
+    get_viewpoint = repo.get_viewpoint
+
+    def save_lands_mid_complete(lot_id, view_id):
+        vp = get_viewpoint(lot_id, view_id)
+        monkeypatch.setattr(repo, "get_viewpoint", get_viewpoint)
+        assert put(client, admin_headers, body).status_code == 200
+        return vp
+
+    monkeypatch.setattr(repo, "get_viewpoint", save_lands_mid_complete)
+    assert _complete(client, admin_headers, sha).status_code == 200
+    vp = repo.get_viewpoint("test-lot", "V1")
+    assert vp.outlines == {}
+    assert vp.reference_image_key == keys.reference_image_key("test-lot", "V1", sha)
 
 
 def test_image_size_matches_a_real_encoder():
