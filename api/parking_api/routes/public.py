@@ -27,6 +27,8 @@ from ..schemas import (
 router = APIRouter(tags=["public"])
 
 # How many of the newest captures the processing note looks through for a photo in flight.
+# A heuristic window: a job never stays in flight for good, since the worker marks it FAILED
+# after MAX_ATTEMPTS receives. One small GSI query per status poll.
 RECENT_SNAPSHOTS = 20
 
 
