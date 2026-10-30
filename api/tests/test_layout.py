@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 from datetime import timedelta
 
 import pytest
@@ -720,3 +721,21 @@ def test_retired_space_leaves_driver_view_after_publish(client, admin_headers, a
     assert "A-07" in {o.space_id for o in adapters.repository.list_observations(image_id)}
     snapshot = adapters.repository.get_published_layout("test-lot")
     assert next(s for s in snapshot.spaces if s.space_id == "A-07").retired
+
+
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_corner_is_422(client, admin_headers, literal):
+    # Browsers serialize NaN as null (a 422 already), but Python's json parser accepts the bare
+    # NaN/Infinity literals a raw client can send. Stored, such a corner becomes null and the
+    # draft, and any layout published from it, no longer loads.
+    body = as_body(get_draft(client, admin_headers))
+    view(body, "V1")["outlines"]["A-01"][0] = ["__X__", 0.1]
+    raw = json.dumps(body).replace('"__X__"', literal)
+    r = client.put(
+        "/admin/lots/test-lot/layout/draft",
+        content=raw,
+        headers={**admin_headers, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 422
+    assert r.json()["error"] == "validation_error"
+    assert get_draft(client, admin_headers)["revision"] == 0

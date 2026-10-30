@@ -87,8 +87,12 @@ def reference_image_key(lot_id: str, view_id: str, sha256: str) -> str:
     published layout points at (each `PublishedLayout` snapshot stores its viewpoints'
     `reference_image_key`), and the worker's aligner can cache features by key without
     them ever going stale.
+
+    No file extension: `complete` rebuilds this key from the hash alone, and the object's
+    real type (JPEG or PNG) is the Content-Type pinned by the presigned PUT. Keys published
+    earlier end in `.jpg` and stay valid, since layouts store the full key.
     """
-    return f"reference/{lot_id}/{view_id}/{sha256[:12]}.jpg"
+    return f"reference/{lot_id}/{view_id}/{sha256[:12]}"
 
 
 def layout_snapshot_key(lot_id: str, version: int) -> str:

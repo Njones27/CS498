@@ -151,6 +151,33 @@ def test_complete_upload_success(client, admin_headers, adapters):
     assert obj_res.headers["content-type"] == "image/jpeg"
 
 
+def test_png_reference_is_not_labelled_jpg(client, admin_headers, adapters):
+    # The key has no extension; the photo's type is the Content-Type it was uploaded with.
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+    sha = hashlib.sha256(png).hexdigest()
+    r = client.post(
+        "/admin/lots/test-lot/views/V1/reference",
+        json={"contentType": "image/png", "sizeBytes": len(png), "sha256": sha},
+        headers=admin_headers,
+    )
+    assert r.status_code == 201
+    upload_url = r.json()["uploadUrl"].removeprefix("/api")
+    up = client.put(upload_url, content=png, headers={"Content-Type": "image/png"})
+    assert up.status_code == 204
+    comp = client.post(
+        "/admin/lots/test-lot/views/V1/reference/complete",
+        json={"sha256": sha, "width": 640, "height": 480},
+        headers=admin_headers,
+    )
+    assert comp.status_code == 200, comp.text
+
+    key = adapters.repository.get_viewpoint("test-lot", "V1").reference_image_key
+    assert key == f"reference/test-lot/V1/{sha[:12]}"
+    obj = client.get(comp.json()["referenceImage"]["url"].removeprefix("/api"))
+    assert obj.content == png
+    assert obj.headers["content-type"] == "image/png"
+
+
 def test_complete_missing_object(client, admin_headers):
     r = client.post(
         "/admin/lots/test-lot/views/V1/reference/complete",

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .interfaces import AuthVerifier, JobQueue, ObjectStore, Repository
@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     orb_min_inlier_ratio: float = 0.4
     """RANSAC inliers / good matches below this reject the photo (wrong spot, US-12 #1)."""
     orb_ransac_px: float = 5.0
+
+    @field_validator("acpds_input_res", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, v: object) -> object:
+        """`ACPDS_INPUT_RES=` (blank in .env, or a compose `${VAR:-}`) means native resolution."""
+        return None if isinstance(v, str) and not v.strip() else v
 
     @model_validator(mode="after")
     def _guard_production(self) -> Settings:
