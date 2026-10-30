@@ -128,7 +128,7 @@ def test_build_status_counts_and_stale():
         st("s1", SpaceState.OCCUPIED, age_min=45),
         st("s2", SpaceState.UNKNOWN),
     ]
-    out = build_status(make_lot(), make_layout(4, retired={"s3"}), statuses, [], None, NOW)
+    out = build_status(make_lot(), make_layout(4, retired={"s3"}), statuses, [], [], NOW)
     assert [s["spaceId"] for s in out["spaces"]] == ["s0", "s1", "s2"]
     assert out["counts"] == {"free": 1, "occupied": 1, "unknown": 1, "closed": 0}
     assert [s["stale"] for s in out["spaces"]] == [False, True, False]
@@ -141,7 +141,7 @@ def test_build_status_counts_and_stale():
 
 
 def test_build_status_no_observations():
-    out = build_status(make_lot(), make_layout(2), [], [], None, NOW)
+    out = build_status(make_lot(), make_layout(2), [], [], [], NOW)
     assert out["noObservations"] is True
     assert out["isStale"] is False
     assert out["lastObservedAt"] is None
@@ -155,7 +155,7 @@ def test_build_status_closure_overlay():
         closure(["s0"]),
         closure(["s1"], closure_id="old", ends_at=NOW - timedelta(minutes=1)),
     ]
-    out = build_status(make_lot(), make_layout(2), statuses, closures, None, NOW)
+    out = build_status(make_lot(), make_layout(2), statuses, closures, [], NOW)
     s0, s1 = out["spaces"]
     assert s0["state"] is SpaceState.CLOSED
     assert s0["stale"] is False
@@ -174,9 +174,9 @@ def test_overlapping_closures_pick_deterministically():
     ]
     open_ended = closure(["s0"], closure_id="z", reason=ClosureReason.CONSTRUCTION, ends_at=None)
     for order in (timed, timed[::-1]):
-        s0 = build_status(make_lot(), make_layout(1), [], order, None, NOW)["spaces"][0]
+        s0 = build_status(make_lot(), make_layout(1), [], order, [], NOW)["spaces"][0]
         assert s0["closure"] == {"reason": ClosureReason.RESERVED, "endsAt": later}
-        s0 = build_status(make_lot(), make_layout(1), [], [*order, open_ended], None, NOW)
+        s0 = build_status(make_lot(), make_layout(1), [], [*order, open_ended], [], NOW)
         assert s0["spaces"][0]["closure"] == {
             "reason": ClosureReason.CONSTRUCTION,
             "endsAt": None,
@@ -194,7 +194,7 @@ def test_overlapping_closures_pick_deterministically():
     ],
 )
 def test_build_status_processing(status, expected):
-    out = build_status(make_lot(), make_layout(1), [], [], snap(status), NOW)
+    out = build_status(make_lot(), make_layout(1), [], [], [snap(status)], NOW)
     assert out["processing"] is expected
 
 
@@ -265,8 +265,17 @@ def test_dev_users():
 def test_build_status_processing_ignores_snapshot_older_than_data():
     """A queued photo captured before the newest observation will not change the map."""
     fresh = [st("s0", SpaceState.FREE, age_min=0)]  # observed_at == NOW == capture_time
-    out = build_status(make_lot(), make_layout(1), fresh, [], snap(JobStatus.QUEUED), NOW)
+    out = build_status(make_lot(), make_layout(1), fresh, [], [snap(JobStatus.QUEUED)], NOW)
     assert out["processing"] is False
     older = [st("s0", SpaceState.FREE, age_min=5)]
-    out = build_status(make_lot(), make_layout(1), older, [], snap(JobStatus.PROCESSING), NOW)
+    out = build_status(make_lot(), make_layout(1), older, [], [snap(JobStatus.PROCESSING)], NOW)
     assert out["processing"] is True
+
+
+def test_build_status_processing_sees_past_a_newer_unfinished_photo():
+    """A newer photo that failed or was never uploaded does not hide an older one in flight."""
+    older = [st("s0", SpaceState.FREE, age_min=10)]
+    queued = snap(JobStatus.QUEUED).model_copy(update={"capture_time": NOW - timedelta(minutes=5)})
+    for newer in (JobStatus.FAILED, JobStatus.UPLOAD_PENDING):
+        out = build_status(make_lot(), make_layout(1), older, [], [snap(newer), queued], NOW)
+        assert out["processing"] is True

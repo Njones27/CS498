@@ -86,16 +86,18 @@ def build_status(
     layout: PublishedLayout,
     statuses: Iterable[SpaceStatus],
     closures: Iterable[Closure],
-    latest_snapshot: Snapshot | None,
+    recent_snapshots: Iterable[Snapshot],
     now: datetime,
 ) -> dict[str, Any]:
+    """`recent_snapshots` are the lot's newest captures (any order). Any of them still queued
+    or processing and captured after the newest observation sets `processing`, so a newer
+    photo that was abandoned or failed does not hide an older one still in flight."""
     rows = _space_rows(lot, layout, statuses, closures, now)
     observed = [r["observedAt"] for r in rows if r["observedAt"] is not None]
     last_observed = max(observed) if observed else None
-    processing = (
-        latest_snapshot is not None
-        and latest_snapshot.job_status in _IN_FLIGHT
-        and (last_observed is None or latest_snapshot.capture_time > last_observed)
+    processing = any(
+        s.job_status in _IN_FLIGHT and (last_observed is None or s.capture_time > last_observed)
+        for s in recent_snapshots
     )
     return {
         "lotId": lot.lot_id,
