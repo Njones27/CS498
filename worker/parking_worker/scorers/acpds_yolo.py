@@ -31,8 +31,6 @@ import numpy as np
 from parking_core.errors import PermanentJobError
 from parking_core.models import AlignedOutline, CarBox, Cutoffs, Point, SpaceScore
 
-from ..cpu_quota import limit_threads_to_quota
-
 if TYPE_CHECKING:
     from parking_core.settings import Settings
 
@@ -395,21 +393,6 @@ class YoloCarDetector:  # pragma: no cover - needs ultralytics and the weights
         return detections
 
 
-def load_models(  # pragma: no cover - needs torch, ultralytics and the weights
-    acpds_path: Path, yolo_path: Path, settings: Settings, seg: bool
-) -> tuple[AcpdsModel, YoloCarDetector]:
-    """Load both models on CPU, then size torch's and OpenCV's threads to the CPU quota.
-
-    The limit goes last: importing ultralytics sets OpenCV to 0 threads, and the detector's
-    warm-up predict resets torch's threads to a count of the host's cores."""
-    acpds_model = load_acpds(acpds_path)
-    car_detector = YoloCarDetector(
-        yolo_path, conf=settings.yolo_conf, seg=seg, imgsz=settings.yolo_imgsz
-    )
-    limit_threads_to_quota()
-    return acpds_model, car_detector
-
-
 # --- the scorer ------------------------------------------------------------------------------
 
 
@@ -454,12 +437,9 @@ class AcpdsYoloScorer:
         acpds_path, acpds_sha = verify_weights(models_dir, settings.acpds_weights)
         yolo_rel = settings.yolo_seg_weights if seg else settings.yolo_weights
         yolo_path, yolo_sha = verify_weights(models_dir, yolo_rel)
-        acpds_model, car_detector = load_models(  # pragma: no cover - needs torch and weights
-            acpds_path, yolo_path, settings, seg
-        )
         return cls(  # pragma: no cover - needs torch, ultralytics and the weights
-            acpds_model,
-            car_detector,
+            load_acpds(acpds_path),
+            YoloCarDetector(yolo_path, conf=settings.yolo_conf, seg=seg, imgsz=settings.yolo_imgsz),
             settings.cutoffs,
             {"acpds": acpds_sha[:12], "yolo": yolo_sha[:12]},
             yolo_conf=settings.yolo_conf,

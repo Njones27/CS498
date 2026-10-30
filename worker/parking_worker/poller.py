@@ -54,10 +54,11 @@ def run_forever(
 def build_worker(settings: Settings, adapters: Adapters) -> tuple[Aligner, SpaceScorer]:
     """The aligner and scorer the worker runs with, its threads sized to the CPU quota.
 
-    OpenCV (ORB alignment, photo decoding) is limited first, whatever the scorer; the
-    ACPDS + YOLO scorer limits again once its models are loaded, torch included."""
+    The limit goes last: importing ultralytics sets OpenCV to 0 threads, and the YOLO
+    detector's warm-up predict at load resets torch to a count of the host's cores."""
+    aligner, scorer = build_aligner(settings, adapters), build_scorer(settings)
     limit_threads_to_quota()
-    return build_aligner(settings, adapters), build_scorer(settings)
+    return aligner, scorer
 
 
 def main() -> None:

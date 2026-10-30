@@ -77,14 +77,14 @@ def test_limit_threads_to_quota_without_a_quota_keeps_defaults(tmp_path, monkeyp
     with caplog.at_level(logging.INFO, logger="parking_worker.cpu_quota"):
         assert cpu_quota.limit_threads_to_quota(tmp_path) is None
     assert applied == [None]
-    assert "torch not loaded" in caplog.text and "no cgroup CPU quota" in caplog.text
+    assert "torch not loaded" in caplog.text and "no cgroup v2 CPU quota" in caplog.text
 
 
-def test_build_worker_limits_threads_before_building(monkeypatch):
+def test_build_worker_limits_threads_after_building(monkeypatch):
     calls = []
     monkeypatch.setattr(poller, "limit_threads_to_quota", lambda: calls.append("limit"))
     monkeypatch.setattr(poller, "build_scorer", lambda s: calls.append("scorer") or StubScorer())
     settings = Settings(app_env="test", _env_file=None)
     aligner, scorer = poller.build_worker(settings, build_adapters(settings))
-    assert calls == ["limit", "scorer"]
+    assert calls == ["scorer", "limit"]
     assert isinstance(scorer, StubScorer) and hasattr(aligner, "align")

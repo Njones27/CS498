@@ -3,7 +3,8 @@
 `docker --cpus` (and an ECS task's CPU units) is a cgroup CFS quota: it limits CPU time, not
 the CPUs a process sees, so torch (OpenMP) and OpenCV size their pools from every core on the
 host and then oversubscribe the quota. The worker gives them one thread per quota CPU instead.
-Without a quota (a laptop, plain `uv run`) their defaults are left alone.
+Without a quota (a laptop, plain `uv run`) their defaults are left alone. Only cgroup v2 is
+read (Docker on current Linux hosts, GitHub runners); on cgroup v1 the defaults stay too.
 
 torch is never imported here: it is limited only when something else (the ACPDS + YOLO
 scorer) has already loaded it, so the stub worker and CI run without it.
@@ -35,7 +36,7 @@ def quota_cpus(cgroup_root: Path = CGROUP_ROOT) -> float | None:
     `cpu.max` is "<quota> <period>" in microseconds, or "max <period>" for no limit."""
     try:
         parts = (cgroup_root / "cpu.max").read_text().split()
-    except OSError:
+    except (OSError, ValueError):
         return None
     if len(parts) != 2 or parts[0] == "max":
         return None
@@ -77,6 +78,6 @@ def limit_threads_to_quota(cgroup_root: Path = CGROUP_ROOT) -> int | None:
         "Threads: torch %s, OpenCV %s (%s)",
         torch.get_num_threads() if torch is not None else "not loaded",
         cv2.getNumThreads(),
-        "no cgroup CPU quota, defaults" if threads is None else f"CPU quota: {threads}",
+        "no cgroup v2 CPU quota, defaults" if threads is None else f"CPU quota: {threads}",
     )
     return threads
