@@ -27,8 +27,8 @@ Outline = Annotated[
 
 
 class DraftSchematic(CamelModel):
-    width: float = Field(gt=0)
-    height: float = Field(gt=0)
+    width: FiniteFloat = Field(gt=0)
+    height: FiniteFloat = Field(gt=0)
 
 
 class DraftRect(CamelModel):

@@ -807,6 +807,23 @@ def test_non_finite_rect_is_422(client, admin_headers, field, literal):
     assert get_draft(client, admin_headers)["revision"] == 0
 
 
+@pytest.mark.parametrize("field", ["width", "height"])
+@pytest.mark.parametrize("literal", ["NaN", "Infinity"])
+def test_non_finite_schematic_is_422(client, admin_headers, field, literal):
+    # An infinite width puts every rect inside the map, and is stored as null in the snapshot.
+    body = as_body(get_draft(client, admin_headers))
+    body["schematic"][field] = "__X__"
+    raw = json.dumps(body).replace('"__X__"', literal)
+    r = client.put(
+        "/admin/lots/test-lot/layout/draft",
+        content=raw,
+        headers={**admin_headers, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 422
+    assert r.json()["error"] == "validation_error"
+    assert get_draft(client, admin_headers)["revision"] == 0
+
+
 def test_zero_size_rect_blocks_publishing(client, admin_headers):
     edit(
         client,

@@ -1,7 +1,7 @@
 import math
 
 import pytest
-from parking_core.models import AlignedOutline, Rect, Viewpoint
+from parking_core.models import AlignedOutline, Rect, Schematic, Viewpoint
 from pydantic import ValidationError
 
 
@@ -22,6 +22,14 @@ def test_rect_must_be_finite(field, bad):
     # Same as outline points: a NaN rect is stored as null and the snapshot no longer loads.
     with pytest.raises(ValidationError):
         Rect.model_validate({"x": 0, "y": 0, "w": 50, "h": 80, field: bad})
+
+
+@pytest.mark.parametrize("field", ["width", "height"])
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
+def test_schematic_must_be_finite(field, bad):
+    # An infinite width is stored as null in the snapshot, which then no longer loads.
+    with pytest.raises(ValidationError):
+        Schematic.model_validate({field: bad})
 
 
 def test_finite_outline_round_trips():
