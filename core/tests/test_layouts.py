@@ -835,7 +835,18 @@ def test_restore_unknown_version(repo, store, lot_l):
         restore_version(repo, store, lot_l, 9, "a", NOW)
 
 
+# Another window saved after the restore loaded the draft: the restore must not overwrite it.
 def test_restore_loses_race(repo, store, lot_l, monkeypatch):
+    repo.put_spaces([sp("A-01", "Edited", x=0), sp("draft-only", x=200)])
+    v1 = repo.get_viewpoint("L", "V1")
+    repo.put_viewpoint(v1.model_copy(update={"outlines": {"A-01": sq(3)}}))
+    before = stored(repo, lot_l)
     monkeypatch.setattr(repo, "put_draft_meta", lambda meta, expected_revision: False)
     with pytest.raises(StaleRevisionError):
         restore_version(repo, store, lot_l, 1, "a", NOW)
+    after = stored(repo, lot_l)
+    assert (after.meta, after.spaces, after.viewpoints) == (
+        before.meta,
+        before.spaces,
+        before.viewpoints,
+    )

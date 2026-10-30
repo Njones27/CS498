@@ -504,7 +504,7 @@ def restore_version(
     - `basedOnVersion` becomes the restored version.
 
     Raises LookupError for an unknown version and StaleRevisionError if the draft was saved
-    while restoring.
+    while restoring, in which case nothing is written.
     """
     lot_id = lot.lot_id
     entry = next((v for v in repo.list_layout_versions(lot_id) if v.version == version), None)
@@ -527,12 +527,8 @@ def restore_version(
         if v.view_id not in restored_views
     ]
 
-    # Items first and the meta last, like a save, so a failed restore never advances the revision.
-    repo.put_spaces(spaces)
-    for v in viewpoints:
-        repo.put_viewpoint(v)
-    for space_id in dropped:
-        repo.delete_space(lot_id, space_id)
+    # The meta first, as the claim (like a save or a publish), so a restore that loses to a save
+    # writes nothing. A failure after the claim leaves a partly restored draft; restore again.
     meta = draft.meta.model_copy(
         update={
             "revision": draft.meta.revision + 1,
@@ -544,4 +540,9 @@ def restore_version(
     )
     if not repo.put_draft_meta(meta, expected_revision=draft.meta.revision):
         raise StaleRevisionError
+    repo.put_spaces(spaces)
+    for v in viewpoints:
+        repo.put_viewpoint(v)
+    for space_id in dropped:
+        repo.delete_space(lot_id, space_id)
     return Draft(meta, spaces, viewpoints)

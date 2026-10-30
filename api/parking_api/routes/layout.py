@@ -1,7 +1,10 @@
 """Admin draft layout: load and save the editable copy of a lot's layout (brief §4.1).
 
-Saves are not one transaction: spaces and viewpoints are written first and the draft meta
-last, as a conditional write on `revision`, so a failed save never advances the revision.
+Saves are not one transaction. The draft meta is written first, as a conditional write on
+`revision` that claims the save, and the spaces and viewpoints after it. A save that loses the
+race writes nothing, so a publish (which claims the same way) can never include the items of a
+save that reported 409. A save that fails after its claim leaves the revision advanced: that
+window's next save is stale, and a reload shows what was stored.
 """
 
 from __future__ import annotations
@@ -165,6 +168,9 @@ def put_draft(
             422, "validation_error", f"Viewpoints can't be removed: {', '.join(missing_views)}"
         )
 
+    saved = _saved_meta(meta, body.schematic, admin.email, now)
+    if not repo.put_draft_meta(saved, expected_revision=meta.revision):
+        raise error(409, "stale_revision", STALE_MESSAGE)
     repo.put_spaces(
         ParkingSpace(
             lot_id=lot_id,
@@ -196,10 +202,6 @@ def put_draft(
         repo.put_viewpoint(Viewpoint.model_validate({**base, **edits}))
     for space_id in removed:
         repo.delete_space(lot_id, space_id)
-
-    saved = _saved_meta(meta, body.schematic, admin.email, now)
-    if not repo.put_draft_meta(saved, expected_revision=meta.revision):
-        raise error(409, "stale_revision", STALE_MESSAGE)
     return draft_out(saved, repo.list_spaces(lot_id), repo.list_viewpoints(lot_id), store)
 
 

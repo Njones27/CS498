@@ -177,13 +177,20 @@ def test_stale_revision_returns_409(client, admin_headers):
     assert space(d, "A-02")["label"] == "A-02"
 
 
+# A save that loses the race writes nothing, so a publish that won it can't include the
+# items of a save that reported 409.
 def test_lost_race_on_meta_write_returns_409(client, admin_headers, adapters, monkeypatch):
     body = as_body(get_draft(client, admin_headers))
+    space(body, "A-01")["label"] = "lost"
+    view(body, "V1")["outlines"].pop("A-01")
     monkeypatch.setattr(
         adapters.repository, "put_draft_meta", lambda meta, expected_revision: False
     )
     r = put(client, admin_headers, body)
     assert r.status_code == 409 and r.json()["error"] == "stale_revision"
+    d = get_draft(client, admin_headers)
+    assert space(d, "A-01")["label"] == "A-01"
+    assert "A-01" in view(d, "V1")["outlines"]
 
 
 # --- US-07 #3: the driver view does not change until publish -------------------
