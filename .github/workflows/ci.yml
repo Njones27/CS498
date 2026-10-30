@@ -61,7 +61,7 @@ jobs:
     name: Worker image with the vision extra
     runs-on: ubuntu-latest
     needs: lint-test
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -87,6 +87,54 @@ jobs:
         run: >
           docker run --rm --network none parking-worker:vision python -c
           "from parking_worker.scorers.acpds.rcnn import RCNN; RCNN(roi_res=128, pooling_type='square')"
+      # NFR-1: per-photo processing p95 <= 30 s in a 2-CPU, 4 GB container, timed through the
+      # real handler (ORB + ACPDS + YOLO26m) by scripts/worker_timing.py; see models/README.md.
+      # Restore and save are split so a failing gate still keeps the weights download cached.
+      - name: Restore model weights
+        id: weights
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            models/acpds/*.pt
+            models/yolo/*.pt
+          key: weights-${{ hashFiles('models/manifest.json') }}
+      - name: Download and verify weights (ACPDS + YOLO26m, box mode)
+        run: uv run python scripts/download_weights.py --only RCNN_128_square_gopro --only yolo26m
+      - name: Save model weights
+        if: steps.weights.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            models/acpds/*.pt
+            models/yolo/*.pt
+          key: weights-${{ hashFiles('models/manifest.json') }}
+      # --memory-swap equal to --memory: otherwise Docker allows as much swap again on top, and
+      # 4 GB would not be a real cap on a runner with a swapfile.
+      - name: NFR-1 worker timing (docker --cpus=2 --memory=4g, real models, p95 <= 30 s)
+        timeout-minutes: 25
+        run: |
+          out="$RUNNER_TEMP/nfr1"; mkdir -p "$out"
+          set +e
+          docker run --name nfr1 --cpus=2 --memory=4g --memory-swap=4g \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD:/repo:ro" -v "$PWD/models:/app/models:ro" -v "$out:/out" \
+            parking-worker:vision \
+            python /repo/scripts/worker_timing.py --jobs-per-lot 10 \
+              --json /out/nfr1.json --markdown /out/nfr1.md
+          rc=$?
+          set -e
+          oom=$(docker inspect --format '{{.State.OOMKilled}}' nfr1 || echo unknown)
+          docker rm nfr1 >/dev/null || true
+          if [ -s "$out/nfr1.md" ]; then cat "$out/nfr1.md" >> "$GITHUB_STEP_SUMMARY"
+          else echo "### NFR-1 worker timing: no report (exit $rc, OOMKilled=$oom)" >> "$GITHUB_STEP_SUMMARY"; fi
+          exit $rc
+      - name: Upload NFR-1 timing JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfr1-timing
+          path: ${{ runner.temp }}/nfr1/
+          if-no-files-found: ignore
 
   compose:
     name: Compose stack end to end

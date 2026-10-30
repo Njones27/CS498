@@ -26,6 +26,30 @@ after download; a mismatch is deleted and reported.
 `MODELS_DIR` (default `models`) points the worker at this directory. Docker Compose mounts
 `./models` read-only at `/app/models`; the image never contains weights.
 
+## NFR-1 timing (2 CPU / 4 GB)
+
+`scripts/worker_timing.py` seeds `drone-lot` (124 stalls) and `pklot-ufpr04` (27) in memory,
+runs 10 jobs per lot through the real worker path (photo fetch, ORB alignment, ACPDS + YOLO26m,
+status writes) and reports p50/p95 per job, with model load and one warm-up job per lot shown
+apart. It exits 1 when p95 is over 30 s (`--limit-s`). In the vision image, with the repo
+mounted read-only for the seed files and fixtures:
+
+```bash
+docker build --build-arg WORKER_EXTRAS=vision -f worker/Dockerfile -t parking-worker:vision .
+docker run --rm --cpus=2 --memory=4g --memory-swap=4g -v "$PWD:/repo:ro" -v "$PWD/models:/app/models:ro" parking-worker:vision python /repo/scripts/worker_timing.py
+```
+
+`--memory-swap=4g` keeps Docker from adding 4 GB of swap on top of the 4 GB limit. On the host
+(no CPU or memory cap, so only a rough number):
+
+```bash
+MODELS_DIR=models uv run python scripts/worker_timing.py --jobs-per-lot 3
+```
+
+CI runs the container version in the `worker-vision-image` job (weights cached by
+`manifest.json`) and writes the table to the job summary; the JSON is uploaded as the
+`nfr1-timing` artifact.
+
 ## Licenses
 
 The ACPDS code (vendored in `worker/parking_worker/scorers/acpds/`) and its weights are MIT.
