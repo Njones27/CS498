@@ -154,6 +154,7 @@ export function ReferencePhotoPanel({
   // When selected space or viewpoint changes, reset clicks and set drawing mode accordingly
   useEffect(() => {
     setClicks([])
+    setDrawError(null)
     if (selectedSpace && !selectedSpace.retired && !selectedOutline) {
       setIsDrawing(true)
     } else {
@@ -178,6 +179,7 @@ export function ReferencePhotoPanel({
           e.preventDefault()
           e.stopImmediatePropagation()
           setClicks([])
+          setDrawError(null)
           if (selectedOutline) setIsDrawing(false)
         } else if (
           e.key === 'Backspace' ||
@@ -220,17 +222,17 @@ export function ReferencePhotoPanel({
     const handlePointerUp = () => {
       const idx = draggingIdxRef.current
       const finalCorners = dragCornersRef.current
-      if (idx !== null && finalCorners && currentViewpoint && selectedSpaceId && !isValidQuad(finalCorners)) {
+      // A press on a handle without moving it changes nothing, so it must not mark the outline drawn.
+      const moved =
+        idx !== null &&
+        finalCorners !== null &&
+        currentViewpoint !== null &&
+        selectedSpaceId !== null &&
+        finalCorners.some((p, i) => p !== currentViewpoint.outlines[selectedSpaceId]?.[i])
+      if (moved && !isValidQuad(finalCorners)) {
         // A corner dragged across the opposite edge: publishing would reject it, so keep the old outline.
         setDrawError('That would cross the outline over itself. Drag the corner back to its side.')
-      } else if (
-        idx !== null &&
-        finalCorners &&
-        currentViewpoint &&
-        selectedSpaceId &&
-        // A press on a handle without moving it changes nothing, so it must not mark the outline drawn.
-        finalCorners.some((p, i) => p !== currentViewpoint.outlines[selectedSpaceId]?.[i])
-      ) {
+      } else if (moved && currentViewpoint && selectedSpaceId) {
         setDrawError(null)
         // Keep corner handle indices stable without reordering
         const nextOutlines = { ...currentViewpoint.outlines, [selectedSpaceId]: finalCorners }
@@ -580,9 +582,14 @@ export function ReferencePhotoPanel({
 
   const notices = (
     <>
-      {(errorMsg ?? drawError) && (
+      {errorMsg && (
         <p className="notice notice--error" role="alert">
-          {errorMsg ?? drawError}
+          {errorMsg}
+        </p>
+      )}
+      {drawError && (
+        <p className="notice notice--error" role="alert">
+          {drawError}
         </p>
       )}
       {replaceWarning && (
