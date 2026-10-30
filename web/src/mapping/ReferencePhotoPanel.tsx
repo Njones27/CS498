@@ -157,8 +157,11 @@ export function ReferencePhotoPanel({
         }
       }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    // Capture phase: this runs before the page's own Ctrl+Z (draft undo) on window, whatever order
+    // the two were registered in, so stopImmediatePropagation keeps one key press from undoing a
+    // corner and a draft edit.
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [clicks.length, isDrawing, selectedOutline, selectedSpaceId, onSelectSpace])
 
   // Global pointer listeners for dragging corner handles

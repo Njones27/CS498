@@ -583,4 +583,25 @@ describe('Reference photo panel with the real draft (US-08)', () => {
       rect.mockRestore()
     }
   })
+
+  it('Ctrl+Z while placing corners removes the last corner and leaves the draft alone', async () => {
+    const server = draftServer(draftFixture())
+    mockFetch({ 'GET /lots/test-lot': { body: detail }, ...server.routes })
+    renderApp('/admin/lots/test-lot/map', ADMIN)
+    await screen.findByText('Revision 0')
+
+    // A draft edit to undo: delete A-01's outline. A-01 is then ready to be outlined again.
+    await userEvent.click(screen.getByTestId('space-item-A-01'))
+    await userEvent.click(screen.getByRole('button', { name: 'Delete outline' }))
+    await waitFor(() => expect(server.puts).toHaveLength(1))
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
+
+    fireEvent.click(screen.getByTestId('photo-svg'), { clientX: 10, clientY: 10 })
+    expect(screen.getByText(/Click the 4 corners of A-01 \(1 of 4\)/)).toBeInTheDocument()
+    fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true })
+
+    expect(screen.getByText(/Click the 4 corners of A-01 \(0 of 4\)/)).toBeInTheDocument()
+    expect(screen.queryByTestId('space-polygon-A-01')).not.toBeInTheDocument() // still deleted
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
+  })
 })
