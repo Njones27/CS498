@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 from botocore.exceptions import ParamValidationError
-from botocore.stub import Stubber
+from botocore.stub import ANY, Stubber
 from parking_core.adapters import aws
 from parking_core.adapters.memory import (
     MemoryJobQueue,
@@ -387,6 +387,33 @@ def test_publish_layout_unknown_lot_dynamo(aws_creds):
         )
         with pytest.raises(LookupError, match="unknown lot 'nope'"):
             repo.publish_layout("nope", _version("nope"))
+
+
+def test_put_lot_if_absent_memory(repo):
+    first = Lot(lot_id="L", name="Lot", created_at=NOW, current_layout_version=2)
+    assert repo.put_lot_if_absent(first)
+    assert not repo.put_lot_if_absent(Lot(lot_id="L", name="Other", created_at=NOW))
+    assert repo.get_lot("L") == first  # the published pointer survives
+
+
+def test_put_lot_if_absent_dynamo(aws_creds):
+    repo = aws.DynamoRepository(AWS_SETTINGS)
+    lot = Lot(lot_id="L", name="Lot", created_at=NOW)
+    expected = {
+        "TableName": AWS_SETTINGS.table_name,
+        "Item": ANY,
+        "ConditionExpression": "attribute_not_exists(PK)",
+    }
+    with Stubber(repo._table.meta.client) as stub:
+        stub.add_response("put_item", {}, expected)
+        stub.add_client_error(
+            "put_item",
+            service_error_code="ConditionalCheckFailedException",
+            expected_params=expected,
+        )
+        assert repo.put_lot_if_absent(lot)
+        assert not repo.put_lot_if_absent(lot)
+        stub.assert_no_pending_responses()
 
 
 def test_release_hash_dynamo(aws_creds):

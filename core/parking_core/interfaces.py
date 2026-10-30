@@ -57,6 +57,11 @@ class JobQueue(Protocol):
 class Repository(Protocol):
     # Lots and layouts
     def put_lot(self, lot: Lot) -> None: ...
+    def put_lot_if_absent(self, lot: Lot) -> bool:
+        """Conditional create: writes the lot only if no lot with its id exists yet.
+        Returns False, writing nothing, when the id is taken."""
+        ...
+
     def get_lot(self, lot_id: str) -> Lot | None: ...
     def list_lots(self) -> list[Lot]:
         """All lots (published or not). DynamoDB: Query GSI1 with PK = keys.LOTS_INDEX_PK."""
