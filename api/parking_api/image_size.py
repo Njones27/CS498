@@ -2,7 +2,8 @@
 
 The API has no image library, and a header is all it needs: PNG puts the size in its first
 chunk (IHDR), JPEG in its frame header (SOFn). A JPEG's EXIF orientation is applied, because
-browsers and the worker's decoder (OpenCV) both show a phone photo upright.
+browsers and the worker's decoder (OpenCV) both show a phone photo upright. A PNG's rare eXIf
+chunk is not read: its size is taken as stored.
 """
 
 from __future__ import annotations
