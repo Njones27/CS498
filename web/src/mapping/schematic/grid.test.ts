@@ -277,6 +277,12 @@ describe('insertAtRowStart', () => {
     const draft = davidFixture({ spaces: [at('a', 'B-01', 1, 0), at('b', 'B-02', 1, 1), { ...at('r', 'Old', 1, 2), retired: true }] })
     expect(insertAtRowStart(draft, G, 'a', 1)).toBeNull()
     expect(insertAtRowStart(draft, G, 'b', 1)!.spaces.map((s) => s.label)).toEqual(['B-02', 'B-01', 'Old'])
+    // A 01 that sits elsewhere in the row still goes back into column 1.
+    const astray = davidFixture({ spaces: [at('a', 'B-01', 1, 5), at('b', 'B-02', 1, 1)] })
+    expect(insertAtRowStart(astray, G, 'a', 1)!.spaces.map((s) => [s.label, s.rect.x])).toEqual([
+      ['B-01', cellRect(G, { row: 1, col: 0 }).x],
+      ['B-02', cellRect(G, { row: 1, col: 1 }).x],
+    ])
   })
 
   it('refuses when a space that is not numbered sits where the row would move', () => {

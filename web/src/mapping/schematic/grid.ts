@@ -244,6 +244,9 @@ export function insertAtRowStart(draft: DraftLayout, g: Grid, spaceId: string, r
   const own = parseLabel(space.label)
   const below = own && own.row === letter ? own.num : Infinity
   const digits = Math.max(2, own?.digits ?? labelDigits(draft.spaces))
+  const sits = cellAt(g, center(space.rect))
+  // The row's 01 dragged out of its own cell: nothing to shift, it just goes back into column 1.
+  if (own && own.row === letter && own.num === 1 && sits.row === row && sits.col === 0) return null
   const shifting = (s: DraftSpace) => {
     const p = s.retired || s.spaceId === spaceId ? null : parseLabel(s.label)
     return p && p.row === letter && p.num < below ? p : null
@@ -252,7 +255,6 @@ export function insertAtRowStart(draft: DraftLayout, g: Grid, spaceId: string, r
     const p = shifting(s)
     return p ? [p.num] : []
   })
-  if (own && own.row === letter && own.num === 1) return null // already the row's 01
   const needed = [0, ...shifted]
   const blocked = draft.spaces.some((s) => {
     if (s.retired || s.spaceId === spaceId || shifting(s)) return false
