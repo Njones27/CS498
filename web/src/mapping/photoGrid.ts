@@ -19,9 +19,10 @@ interface Marker {
   h: number
 }
 
-/** A cell read off a photo; `at` is the column before rounding (how far between columns it sits). */
+/** A cell read off a photo; `at` and `rowAt` are the column and row before rounding. */
 export interface PhotoCell extends Cell {
   at: number
+  rowAt: number
 }
 
 /** Middle and size of an outline on the photo (fractions). */
@@ -71,17 +72,19 @@ function layout(all: Marker[]): Layout | null {
       if (b.col !== sorted[i].col) steps.push((b.x - sorted[i].x) / (b.col - sorted[i].col))
     })
   }
-  const width = median(all.map((m) => m.w))!
-  const pitch = median(steps) ?? width
-  // Mixed signs mean the outlines disagree about which way numbers run: don't guess.
-  if (steps.filter((s) => Math.sign(s) !== Math.sign(pitch)).length * 3 > steps.length) return null
-  if (Math.abs(pitch) < width * 0.5) return null
+  const pitch = median(steps) ?? median(all.map((m) => m.w))!
   const rows = [...rowY.keys()].sort((a, b) => a - b)
   const rowSteps = rows.slice(1).map((r, i) => (rowY.get(r)! - rowY.get(rows[i])!) / (r - rows[i]))
-  const height = median(all.map((m) => m.h))!
-  const rowStep = median(rowSteps) ?? height
-  // Rows must stack one way, each clearly apart: otherwise rows don't run across this photo.
-  if (rowSteps.some((s) => Math.sign(s) !== Math.sign(rowStep) || Math.abs(s) < height * 0.5)) return null
+  const rowStep = median(rowSteps) ?? median(all.map((m) => m.h))!
+  if (pitch === 0 || rowStep === 0) return null
+  // Most neighbouring numbers and rows must agree on which way they run; a few stray ones (a row half
+  // outlined, a mislabelled space) are outvoted, which is when renumbering is wanted.
+  const against = (values: number[], sign: number) => values.filter((v) => Math.sign(v) !== sign).length * 3 > values.length
+  if (against(steps, Math.sign(pitch)) || against(rowSteps, Math.sign(rowStep))) return null
+  // Rows must run across the photo: within a row, the outlines stay closer together up and down than a
+  // row's height apart. A turned photo, whose rows run down it, fails this.
+  const spread = median([...byRow.values()].map((ms) => Math.max(...ms.map((m) => m.y)) - Math.min(...ms.map((m) => m.y))))!
+  if (byRow.size > 1 && spread > Math.abs(rowStep)) return null
   return { byRow, rowY, pitch, rowStep }
 }
 
@@ -112,11 +115,14 @@ function photoColumn(lay: Layout, row: number, x: number, y: number): number {
   return near.find((v) => counts.get(Math.round(v.at)) === most)!.at
 }
 
-/** The row at photo y: the row whose middle is within half a row of it, else counted on from the nearest. */
-function photoRow(lay: Layout, y: number): number {
+/**
+ * The row at photo y, counted from the nearest row's middle (`at` before rounding): within half a row of
+ * it, that row; further out (past the outermost row), rows on by the row step.
+ */
+function photoRow(lay: Layout, y: number): { row: number; at: number } {
   const [row, rowY] = [...lay.rowY].reduce((a, b) => (Math.abs(b[1] - y) < Math.abs(a[1] - y) ? b : a))
   const off = (y - rowY) / lay.rowStep
-  return row + (Math.abs(off) < 0.5 ? 0 : Math.round(off))
+  return { row: row + Math.sign(off) * Math.round(Math.abs(off)), at: row + off }
 }
 
 /**
@@ -127,9 +133,9 @@ export function photoCell(draft: DraftLayout, view: DraftViewpoint, outline: Out
   const lay = layout(markers(draft, view, exceptId))
   if (!lay) return null
   const me = box(outline)
-  const row = photoRow(lay, me.y)
+  const { row, at: rowAt } = photoRow(lay, me.y)
   const at = photoColumn(lay, row, me.x, me.y)
-  return { row, col: Math.round(at), at }
+  return { row, col: Math.round(at), at, rowAt }
 }
 
 /**

@@ -427,15 +427,14 @@ export function followOutline(
     const photoTo = photoCell(after, vAfter, now, spaceId)
     const [from, to] =
       photoFrom && photoTo ? [photoFrom, photoTo] : [cellAt(grid, rectCenter(space.rect)), cellAt(grid, rectCenter(rect))]
-    // A nudge that only tips the outline over a column boundary on the photo (less than half a column)
-    // is not a move to another cell; nor is a move into the cell the space's label already names.
+    // A nudge that only tips the outline over a boundary on the photo (less than half a column or row)
+    // is not a move to another cell.
+    const farEnough =
+      !(photoFrom && photoTo) || Math.abs(photoTo.at - photoFrom.at) >= 0.5 || Math.abs(photoTo.rowAt - photoFrom.rowAt) >= 0.5
+    const changedCell = farEnough && (to.row !== from.row || to.col !== from.col)
+    // Moving into the cell the space's label already names puts the rect there but renames nothing.
     const named = parseLabel(space.label)
-    const labelCell = named && { row: rowIndex(named.row), col: named.num - 1 }
-    const farEnough = !(photoFrom && photoTo) || photoTo.row !== photoFrom.row || Math.abs(photoTo.at - photoFrom.at) >= 0.5
-    const changedCell =
-      farEnough &&
-      (to.row !== from.row || to.col !== from.col) &&
-      !(labelCell && labelCell.row === to.row && labelCell.col === to.col)
+    const intoOwnCell = named !== null && rowIndex(named.row) === to.row && named.num - 1 === to.col
     if (snap) {
       if (!changedCell) return unchanged
       // Never stack two spaces in one cell: the schematic stays, the outline change still stands.
@@ -445,7 +444,7 @@ export function followOutline(
       rect = cellRect(grid, to)
     }
     // Landing in another cell renames the space for it (row letter, column number).
-    if (changedCell) ({ labels, note } = relabelMoved(grid, after.spaces, spaceId, to))
+    if (changedCell && !intoOwnCell) ({ labels, note } = relabelMoved(grid, after.spaces, spaceId, to))
   }
   if (sameRect(rect, space.rect) && labels.size === 0) return unchanged
   const moved = applyLabels(updateSpace(after, spaceId, { rect }), labels)

@@ -178,3 +178,46 @@ describe('photo nudges', () => {
     expect(res.draft.spaces.find((s) => s.spaceId === 'C-03')!.label).toBe('C-03')
   })
 })
+
+describe('a stray row', () => {
+  it('a half-outlined, mislabelled row does not stop the photo being read', () => {
+    const base = lot()
+    // One space labelled F-01 but outlined in row C's band: row F's middle sits on top of row C.
+    const f = space('F-01', 0, 0, { rect: { x: 20, y: 394, w: 40, h: 72 } })
+    const draft = {
+      ...base,
+      spaces: [...base.spaces, f],
+      viewpoints: [{ ...base.viewpoints[0], outlines: { ...base.viewpoints[0].outlines, 'F-01': at(7, ROW_Y.C + 0.01) } }],
+    }
+    expect(photoCell(draft, draft.viewpoints[0], at(0, ROW_Y.B))).toMatchObject({ row: 1, col: 0 })
+  })
+})
+
+describe('photo moves', () => {
+  it('a move of half a column or more renames; one into the label\'s own cell snaps without renaming', () => {
+    const draft = lot()
+    const grid = fitGrid(draft.spaces)
+    const v = draft.viewpoints[0]
+    const withC03 = (o: Outline) => ({ ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'C-03': o } }] })
+    const moved = followOutline(draft, withC03(at(5, ROW_Y.C)), 'V1', 'C-03', grid, true).draft
+    expect(moved.spaces.find((s) => s.spaceId === 'C-03')!.label).toBe('C-06')
+
+    // C-03's box drawn in the wrong schematic cell; its outline dragged back onto column 3.
+    const misdrawn = {
+      ...withC03(at(6, ROW_Y.C)),
+      spaces: draft.spaces.map((s) => (s.spaceId === 'C-03' ? { ...s, rect: cellRect(grid, { row: 2, col: 6 }) } : s)),
+    }
+    const back = followOutline(misdrawn, { ...misdrawn, viewpoints: withC03(at(2, ROW_Y.C)).viewpoints }, 'V1', 'C-03', grid, true).draft
+    expect(back.spaces.find((s) => s.spaceId === 'C-03')).toMatchObject({ label: 'C-03', rect: cellRect(grid, { row: 2, col: 2 }) })
+  })
+
+  it('a small vertical nudge over the halfway line between rows does not rename', () => {
+    const draft = lot()
+    const grid = fitGrid(draft.spaces)
+    const v = draft.viewpoints[0]
+    // Rows are 0.2 apart; C-03 drawn 0.09 low, then nudged to 0.11 low.
+    const before = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'C-03': at(2, ROW_Y.C + 0.09) } }] }
+    const after = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'C-03': at(2, ROW_Y.C + 0.11) } }] }
+    expect(followOutline(before, after, 'V1', 'C-03', grid, false).draft.spaces.find((s) => s.spaceId === 'C-03')!.label).toBe('C-03')
+  })
+})
