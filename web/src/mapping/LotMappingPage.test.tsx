@@ -2,10 +2,13 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LotDetail, LotListItem } from '../api/schemas'
+import { putFile } from '../lib/putFile'
 import { ADMIN, mockFetch, renderApp } from '../test/helpers'
 import { draftFixture } from './fixtures/kevin'
-import type { ValidationReport } from './types'
+import type { DraftLayout, DraftLayoutUpdate, ValidationReport } from './types'
 import { toDraftUpdate } from './useDraftLayout'
+
+vi.mock('../lib/putFile', () => ({ putFile: vi.fn() }))
 
 const URL = '/admin/lots/test-lot/layout/draft'
 const STALE = 'This draft changed in another window. Reload to see the latest.'
@@ -469,5 +472,70 @@ describe('Publish (US-09 #2, #4)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Publish' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid request')
     expect(calls(fetchMock)).not.toContain(PUBLISH)
+  })
+})
+
+const REF = '/admin/lots/test-lot/views/V1/reference'
+const NEW_PHOTO = { url: '/api/_test/objects/reference/test-lot/V1/new', width: 640, height: 360 }
+
+/** A server holding one draft: a PUT stores the body and bumps the revision, as the API does. */
+function draftServer(initial: DraftLayout) {
+  let stored = initial
+  const puts: DraftLayoutUpdate[] = []
+  const routes = {
+    [`GET ${URL}`]: () => ({ body: stored }),
+    [`PUT ${URL}`]: (init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as DraftLayoutUpdate
+      puts.push(body)
+      if (body.revision !== stored.revision) return { status: 409, body: { error: 'stale_revision', message: STALE } }
+      const photo = (viewId: string) => stored.viewpoints.find((v) => v.viewId === viewId)?.referenceImage ?? null
+      stored = {
+        ...stored,
+        revision: stored.revision + 1,
+        schematic: body.schematic,
+        spaces: body.spaces,
+        viewpoints: body.viewpoints.map((v) => ({
+          viewId: v.viewId,
+          name: v.name,
+          referenceImage: photo(v.viewId),
+          outlines: v.outlines ?? {},
+          outlineReview: v.outlineReview ?? {},
+        })),
+      }
+      return { body: stored }
+    },
+    // Completing an upload changes the photo but not the revision (brief §4.2).
+    [`POST ${REF}/complete`]: () => {
+      stored = {
+        ...stored,
+        viewpoints: stored.viewpoints.map((v) => (v.viewId === 'V1' ? { ...v, referenceImage: NEW_PHOTO } : v)),
+      }
+      return { body: { viewId: 'V1', referenceImage: NEW_PHOTO } }
+    },
+    [`POST ${REF}`]: { status: 201, body: { uploadUrl: '/api/_test/uploads/slot', expiresAt: '2099-01-01T00:00:00Z' } },
+  }
+  return { routes, puts, stored: () => stored }
+}
+
+describe('Reference photo panel with the real draft (US-08)', () => {
+  it('uploading a photo keeps the revision the pre-upload save returned, so the next Save is not stale', async () => {
+    vi.mocked(putFile).mockResolvedValue()
+    const server = draftServer(draftFixture())
+    mockFetch({ 'GET /lots/test-lot': { body: detail }, ...server.routes })
+    renderApp('/admin/lots/test-lot/map', ADMIN)
+    await screen.findByText('Revision 0')
+
+    const photo = new File(['new photo'], 'new.jpg', { type: 'image/jpeg' })
+    await userEvent.upload(screen.getByTestId('reference-file-input'), photo)
+    await waitFor(() =>
+      expect(screen.getByRole('img', { name: 'Reference for North corner' })).toHaveAttribute('src', NEW_PHOTO.url),
+    )
+    expect(server.puts.map((p) => p.revision)).toEqual([0]) // the save before the upload
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(server.puts).toHaveLength(2))
+    expect(server.puts[1].revision).toBe(1)
+    expect(await screen.findByText('Draft saved')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
