@@ -20,7 +20,7 @@ RESULT = re.compile(r'<pre id="selftest-result"[^>]*>(.*?)</pre>', re.S)
 
 def _chrome() -> str | None:
     if os.environ.get("CHROME_BIN"):
-        return os.environ["CHROME_BIN"]
+        return os.environ["CHROME_BIN"] if Path(os.environ["CHROME_BIN"]).is_file() else None
     for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
         if found := shutil.which(name):
             return found
@@ -39,13 +39,18 @@ def test_self_contained():
 def test_selftest_in_headless_chrome(benchmark, tmp_path):
     chrome = _chrome()
     if chrome is None:
-        pytest.skip("no Chrome or Chromium found (set CHROME_BIN)")
+        pytest.skip("no Chrome or Chromium found (set CHROME_BIN to its executable)")
     cmd = [
         chrome,
         "--headless",
         "--disable-gpu",
         "--no-first-run",
         "--no-default-browser-check",
+        # CI runners: /dev/shm is small in containers, and nothing should reach the network.
+        "--disable-dev-shm-usage",
+        "--disable-extensions",
+        "--disable-crash-reporter",
+        "--disable-background-networking",
         f"--user-data-dir={tmp_path / 'profile'}",
         *(["--no-sandbox"] if sys.platform.startswith("linux") else []),
         "--dump-dom",
@@ -56,7 +61,11 @@ def test_selftest_in_headless_chrome(benchmark, tmp_path):
     except subprocess.TimeoutExpired:
         pytest.fail("headless Chrome did not finish within 90 s")
     match = RESULT.search(proc.stdout)
-    assert match and match.group(1).strip(), f"no self-test result; stderr:\n{proc.stderr[-2000:]}"
+    if not (match and match.group(1).strip()):
+        pytest.fail(
+            f"headless Chrome (exit {proc.returncode}) produced no self-test result; "
+            f"stderr:\n{proc.stderr[-2000:]}"
+        )
     result = json.loads(html.unescape(match.group(1)))
     failed = [f"{c['name']}: {c['detail']}" for c in result["checks"] if not c["ok"]]
     assert result["ok"] and not failed, failed

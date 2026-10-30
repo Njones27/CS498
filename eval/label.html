@@ -3,7 +3,8 @@
   Pilot photo labeler: open a drone photo and its PKLot-format .xml (written by
   eval/prefill_labels.py), click each stall to mark it occupied / empty / unset, and save the
   .xml back. Unset stalls carry no `occupied` attribute, so eval/benchmark.py does not score
-  them. One self-contained file: no build step, no network, works from file://.
+  them. One self-contained file: no build step, no network (its CSP allows none), works
+  from file://.
 
   Only the `occupied` attribute of each <space> is changed; ids, rotatedRect and contours are
   written back as they were read. Self-test (used by tests/eval/test_label_html.py):
@@ -12,6 +13,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src blob: data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pilot Labeler</title>
 <style>
@@ -436,13 +438,15 @@
     }
   }
 
-  /** What a keydown means, or null. Stall keys act on the stall under the mouse. */
+  /** What a keydown means, or null. Stall keys act on the stall under the mouse. Letters are
+   *  matched lowercased and the bulk keys by e.shiftKey, so Caps Lock changes nothing. */
   function keyAction(e) {
     if (e.altKey) return null;
-    if (e.ctrlKey || e.metaKey) return e.key.toLowerCase() === "s" ? { type: "save" } : null;
-    if (e.shiftKey && e.key === "E") return { type: "setAll", state: "empty" };
-    if (e.shiftKey && e.key === "O") return { type: "setAll", state: "occupied" };
-    switch (e.key) {
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (e.ctrlKey || e.metaKey) return key === "s" ? { type: "save" } : null;
+    if (e.shiftKey && key === "e") return { type: "setAll", state: "empty" };
+    if (e.shiftKey && key === "o") return { type: "setAll", state: "occupied" };
+    switch (key) {
       case "o": case "1": return { type: "set", state: "occupied" };
       case "e": case "0": return { type: "set", state: "empty" };
       case "u": case "Backspace": return { type: "set", state: "unset" };
@@ -509,8 +513,9 @@
     if (p && p.labels) renderCounts(ui.counts, countStates(p.labels.spaces));
   }
 
-  function changed() {
-    const p = current();
+  /** Marks `pair` (by default the shown one) as having unsaved changes. */
+  function changed(pair) {
+    const p = pair || current();
     if (p) p.dirty = true;
     refreshCounts();
     refreshList();
@@ -538,6 +543,7 @@
     const token = ++app.loading;
     app.index = index;
     app.hovered = null;
+    ui.svg.hidden = true; // the old photo's stalls are not clickable while the new one loads
     const pair = current();
     clearMessages();
     unpairedWarnings();
@@ -554,7 +560,7 @@
       app.imageUrl = url;
       const w = img.naturalWidth, h = img.naturalHeight;
       const { spaces, skipped, source } = pair.labels;
-      renderOverlay(ui.svg, spaces, w, h, changed, url);
+      renderOverlay(ui.svg, spaces, w, h, () => changed(pair), url);
       for (const s of spaces) {
         s.poly.addEventListener("mouseenter", () => { app.hovered = s; });
         s.poly.addEventListener("mouseleave", () => { if (app.hovered === s) app.hovered = null; });
@@ -676,16 +682,23 @@
       case "set":
         if (spaces && app.hovered && app.hovered.state !== action.state) {
           setState(app.hovered, action.state);
-          changed();
+          changed(pair);
         }
         if (e.key === "Backspace") e.preventDefault();
         break;
-      case "setAll":
-        if (spaces && setAllUnset(spaces, action.state)) changed();
+      case "setAll": {
+        const n = spaces ? countStates(spaces).unset : 0;
+        if (n && confirm(`Mark ${n} unset stalls ${action.state}?`)) {
+          setAllUnset(spaces, action.state);
+          changed(pair);
+        }
         break;
+      }
       case "toggle":
-        if (action.what === "outlines") ui.svg.classList.toggle("hide-outlines");
-        else if (action.what === "labels") toggleLabels();
+        if (action.what === "outlines") {
+          // hidden stalls get no mouseleave: forget the hovered one so o / e cannot edit it
+          if (ui.svg.classList.toggle("hide-outlines")) app.hovered = null;
+        } else if (action.what === "labels") toggleLabels();
         else toggleZoom();
         break;
       case "nav": show(app.index + action.delta); break;
@@ -814,6 +827,53 @@
         { type: "set", state: "occupied" }, { type: "set", state: "empty" },
         { type: "set", state: "unset" }, { type: "setAll", state: "empty" },
         { type: "save" }, { type: "nav", delta: 1 }, null]));
+      // Caps Lock on: letters arrive uppercase without Shift, and lowercase with it.
+      check("keys with Caps Lock", JSON.stringify([k("E"), k("O"), k("H"),
+        k("e", { shiftKey: true }), k("o", { shiftKey: true }), k("S", { ctrlKey: true })]) ===
+        JSON.stringify([{ type: "set", state: "empty" }, { type: "set", state: "occupied" },
+          { type: "toggle", what: "outlines" }, { type: "setAll", state: "empty" },
+          { type: "setAll", state: "occupied" }, { type: "save" }]));
+
+      // Bulk keys and h through the app's own keydown handler, with window.confirm stubbed.
+      const bulk = parseLabels(SAMPLE);
+      const asked = [];
+      let answer = false;
+      const realConfirm = window.confirm;
+      const saved = { pairs: app.pairs, index: app.index };
+      const press = (key, shiftKey) =>
+        document.dispatchEvent(new KeyboardEvent("keydown", { key, shiftKey: Boolean(shiftKey) }));
+      window.confirm = (question) => { asked.push(question); return answer; };
+      try {
+        app.pairs = [{ stem: "selftest", labels: bulk, dirty: false }];
+        app.index = 0;
+        press("E", true);
+        check("bulk asks first; answering no changes nothing",
+          asked.join() === "Mark 1 unset stalls empty?" && bulk.spaces[2].state === "unset" &&
+          !app.pairs[0].dirty, asked.join(" | "));
+        answer = true;
+        press("o", true); // Shift with Caps Lock on
+        check("bulk after yes", asked[1] === "Mark 1 unset stalls occupied?" &&
+          bulk.spaces.map((s) => s.state).join() === "occupied,empty,occupied" &&
+          bulk.spaces[2].el.getAttribute("occupied") === "1" && app.pairs[0].dirty,
+          asked.join(" | ") + " " + bulk.spaces.map((s) => s.state).join());
+        press("E", true);
+        check("bulk with nothing unset does not ask", asked.length === 2, asked.length);
+
+        app.hovered = bulk.spaces[0];
+        press("h");
+        press("e");
+        check("hiding outlines forgets the hovered stall", app.hovered === null &&
+          ui.svg.classList.contains("hide-outlines") && bulk.spaces[0].state === "occupied",
+          bulk.spaces[0].state);
+        press("h");
+        check("h shows outlines again", !ui.svg.classList.contains("hide-outlines"));
+      } finally {
+        window.confirm = realConfirm;
+        Object.assign(app, saved, { hovered: null });
+        ui.svg.classList.remove("hide-outlines");
+        while (ui.counts.firstChild) ui.counts.removeChild(ui.counts.firstChild);
+        refreshList();
+      }
 
       xml = serializeLabels(parsed.doc);
       check("declaration", xml.startsWith('<?xml version="1.0"?>\n<parking id="selftest-V1">') &&

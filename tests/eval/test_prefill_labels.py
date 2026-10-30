@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import cv2
 import numpy as np
 import pytest
 from parking_seed.pklot import parse_xml
+from PIL import Image
 
 TOL_PX = 3.0
 ROTATE_DEG, SHIFT = 4.0, (60.0, -40.0)
@@ -104,6 +106,29 @@ def test_shifted_rotated_copy(prefill, drone, tmp_path):
     assert set(result.out_of_frame) >= outside
     assert result.spaces + len(result.out_of_frame) == 124
     assert result.out_of_frame
+
+
+def test_exif_rotated_copy(prefill, drone, tmp_path):
+    # Phones and drones often store pixels sideways with an EXIF Orientation tag (6: rotate 90
+    # degrees clockwise to display). The labeler shows the photo upright, so the prefill must
+    # place stalls in upright pixels too.
+    stored = Image.open(io.BytesIO(drone["reference"])).transpose(Image.Transpose.ROTATE_90)
+    exif = Image.Exif()
+    exif[0x0112] = 6  # Orientation
+    buf = io.BytesIO()
+    stored.save(buf, "JPEG", quality=95, exif=exif)
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    (photos / "sideways.jpg").write_bytes(buf.getvalue())
+    assert stored.size == drone["size"][::-1]
+    assert prefill.photo_size(buf.getvalue()) == drone["size"]
+
+    [result] = prefill.prefill_dir(photos)
+    assert result.status == "written"
+    assert result.spaces == 124 and result.out_of_frame == []
+    for sid, pts in _spaces(photos / "sideways.xml").items():
+        expected = _expected_px(drone["outlines"][sid], drone["size"])
+        assert np.abs(np.array(pts) - expected).max() <= TOL_PX, sid
 
 
 def test_output_parses_with_benchmark_reader(prefill, benchmark, drone, tmp_path):
