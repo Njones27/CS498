@@ -328,7 +328,7 @@ export function SchematicEditor({
     const inserted = canInsert ? insertAtRowStart(current, gr, spaceId, to.row) : null
     if (canInsert && !inserted) {
       return setNote(
-        `Row ${rowLetter(to.row)} can't move up to make room: a space that isn't numbered is in the way (or this is its 01 already); nothing moved`,
+        `Row ${rowLetter(to.row)} can't move up to make room: a space is in the way of column 1 (or this is already its 01); nothing moved`,
       )
     }
     const relabel = rename && !inserted ? relabelMoved(gr, current.spaces, spaceId, to) : { labels: new Map<string, string>() }
