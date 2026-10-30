@@ -91,6 +91,8 @@ export function ReferencePhotoPanel({
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  // A refused outline or corner drag; the next one that works clears it (upload errors stay in errorMsg).
+  const [drawError, setDrawError] = useState<string | null>(null)
   const [replaceWarning, setReplaceWarning] = useTransientNotice(8000)
   const [statusNotice, setStatusNotice] = useTransientNotice(4000)
 
@@ -220,8 +222,16 @@ export function ReferencePhotoPanel({
       const finalCorners = dragCornersRef.current
       if (idx !== null && finalCorners && currentViewpoint && selectedSpaceId && !isValidQuad(finalCorners)) {
         // A corner dragged across the opposite edge: publishing would reject it, so keep the old outline.
-        setErrorMsg('That would cross the outline over itself. Drag the corner back to its side.')
-      } else if (idx !== null && finalCorners && currentViewpoint && selectedSpaceId) {
+        setDrawError('That would cross the outline over itself. Drag the corner back to its side.')
+      } else if (
+        idx !== null &&
+        finalCorners &&
+        currentViewpoint &&
+        selectedSpaceId &&
+        // A press on a handle without moving it changes nothing, so it must not mark the outline drawn.
+        finalCorners.some((p, i) => p !== currentViewpoint.outlines[selectedSpaceId]?.[i])
+      ) {
+        setDrawError(null)
         // Keep corner handle indices stable without reordering
         const nextOutlines = { ...currentViewpoint.outlines, [selectedSpaceId]: finalCorners }
         // An accepted outline the admin has corrected by hand is theirs: it now anchors the photo <-> schematic
@@ -365,9 +375,10 @@ export function ReferencePhotoPanel({
     if (!currentViewpoint) return
     if (!isValidQuad(outline)) {
       // The first three clicks stay; only the fourth is refused.
-      setErrorMsg('Those corners do not make a four-sided shape. Click a different fourth corner.')
+      setDrawError('Those corners do not make a four-sided shape. Click a different fourth corner.')
       return
     }
+    setDrawError(null)
     setClicks([])
     setIsDrawing(false)
     if (!drawingSelected || !selectedSpace) {
@@ -569,9 +580,9 @@ export function ReferencePhotoPanel({
 
   const notices = (
     <>
-      {errorMsg && (
+      {(errorMsg ?? drawError) && (
         <p className="notice notice--error" role="alert">
-          {errorMsg}
+          {errorMsg ?? drawError}
         </p>
       )}
       {replaceWarning && (

@@ -342,10 +342,9 @@ function nearestOutlined(draft: DraftLayout, view: DraftViewpoint, point: Point)
 }
 
 /**
- * Whether a rect mapped from the photo is believable: no bigger than a few spaces, and within a few rows of
- * the map. A box
- * drawn where the fit extrapolates badly (towards the horizon) maps far away and huge; that would grow
- * the map without bound.
+ * Whether a rect mapped from the photo is believable: no bigger than a few spaces, and within a few rows
+ * of the map. A box drawn where the fit extrapolates badly (towards the horizon) maps far away and huge;
+ * that would grow the map without bound.
  */
 function plausibleRect(draft: DraftLayout, r: DraftRect): boolean {
   const size = medianSize(draft.spaces.filter((s) => !s.retired).map((s) => s.rect))

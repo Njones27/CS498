@@ -706,9 +706,24 @@ describe('ReferencePhotoPanel (US-08)', () => {
     it('four corners that fold onto each other are refused, not saved', () => {
       const { onChange } = renderPanel({ draft: syncedDraft() })
       const svg = screen.getByTestId('photo-svg')
-      for (const x of [100, 200, 200, 100]) fireEvent.click(svg, { clientX: x, clientY: 100 })
+      // The fourth click lands on the second corner again: a repeated corner.
+      for (const [x, y] of [[100, 100], [200, 100], [200, 200], [200, 100]]) fireEvent.click(svg, { clientX: x, clientY: y })
       expect(onChange).not.toHaveBeenCalled()
       expect(screen.getByRole('alert')).toHaveTextContent('Those corners do not make a four-sided shape')
+      // The first three corners are kept; a good fourth adds the space and clears the message.
+      fireEvent.click(svg, { clientX: 100, clientY: 200 })
+      expect(onChange).toHaveBeenCalledTimes(1)
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('pressing a corner handle without moving it changes nothing', () => {
+      const draft = syncedDraft()
+      draft.viewpoints[0].outlineReview['sp_a01'] = { source: 'proposed', status: 'accepted' }
+      const { onChange, onSave } = renderPanel({ draft, selectedSpaceId: 'sp_a01' })
+      fireEvent.pointerDown(screen.getByTestId('corner-handle-0'), { clientX: 25, clientY: 42 })
+      fireEvent.pointerUp(window)
+      expect(onChange).not.toHaveBeenCalled()
+      expect(onSave).not.toHaveBeenCalled()
     })
 
     it('a corner dragged across the opposite edge is refused; a hand-corrected outline becomes drawn', () => {
