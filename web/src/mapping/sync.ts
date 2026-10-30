@@ -1,6 +1,7 @@
 import { MIN_SIDE, clearOf, medianSize } from './schematic/geometry'
 import { addSpace, addSpaceAt, addSpacesAt, fitSchematic, updateSpace, type Grown } from './schematic/edits'
-import { applyLabels, cellAt, cellLabel, cellRect, cellTaken, labelDigits, relabelMoved, type Cell, type Grid } from './schematic/grid'
+import { applyLabels, cellAt, cellLabel, cellRect, cellTaken, labelDigits, relabelMoved, rowIndex, type Cell, type Grid } from './schematic/grid'
+import { parseLabel } from './schematic/labels'
 import { photoCell, placeFromPhoto } from './photoGrid'
 import { isValidQuad, orderClockwise } from './photo/geom'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, Outline, Point } from './types'
@@ -426,7 +427,15 @@ export function followOutline(
     const photoTo = photoCell(after, vAfter, now, spaceId)
     const [from, to] =
       photoFrom && photoTo ? [photoFrom, photoTo] : [cellAt(grid, rectCenter(space.rect)), cellAt(grid, rectCenter(rect))]
-    const changedCell = to.row !== from.row || to.col !== from.col
+    // A nudge that only tips the outline over a column boundary on the photo (less than half a column)
+    // is not a move to another cell; nor is a move into the cell the space's label already names.
+    const named = parseLabel(space.label)
+    const labelCell = named && { row: rowIndex(named.row), col: named.num - 1 }
+    const farEnough = !(photoFrom && photoTo) || photoTo.row !== photoFrom.row || Math.abs(photoTo.at - photoFrom.at) >= 0.5
+    const changedCell =
+      farEnough &&
+      (to.row !== from.row || to.col !== from.col) &&
+      !(labelCell && labelCell.row === to.row && labelCell.col === to.col)
     if (snap) {
       if (!changedCell) return unchanged
       // Never stack two spaces in one cell: the schematic stays, the outline change still stands.
@@ -497,7 +506,7 @@ export function addSpaceFromOutline(
   viewId: string,
   outline: Outline,
   grid: Grid | null = null,
-): Grown & { space: DraftSpace; note?: string } {
+): Grown & { space: DraftSpace; note?: string; renumbered?: boolean } {
   const view = draft.viewpoints.find((v) => v.viewId === viewId)
   if (!view) throw new Error(`No viewpoint ${viewId}`)
   // With a grid, the photo itself says which cell the box is in (its row from the outlines beside it,
@@ -507,7 +516,9 @@ export function addSpaceFromOutline(
     const added = addSpaceAt(draft, cellRect(grid, fromPhoto))
     const id = added.space.spaceId
     const outlined = withOutline(added.draft, viewId, id, outline)
-    const placed = placeFromPhoto(outlined, viewId, id, grid)
+    // addSpaceAt may have grown the map left or up, moving every space: the grid moves with them.
+    const shifted = { ...grid, x0: grid.x0 + added.dx, y0: grid.y0 + added.dy }
+    const placed = placeFromPhoto(outlined, viewId, id, shifted)
     const next = proposeOutlines(placed.draft, [id])
     return {
       draft: next,
@@ -515,6 +526,7 @@ export function addSpaceFromOutline(
       dy: added.dy + placed.dy,
       space: next.spaces.find((s) => s.spaceId === id)!,
       note: placed.note,
+      renumbered: placed.renumbered,
     }
   }
   const m = photoToSchematic(draft, view)

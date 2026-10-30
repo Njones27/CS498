@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { davidFixture, space } from './fixtures/david'
-import { placeFromPhoto, photoCell } from './photoGrid'
+import { matchRowToPhoto, placeFromPhoto, photoCell } from './photoGrid'
 import { cellRect, fitGrid } from './schematic/grid'
-import { addSpaceFromOutline } from './sync'
+import { addSpaceFromOutline, followOutline } from './sync'
 import type { DraftLayout, Outline } from './types'
 
 // A photo of rows B to E, columns at x 0.10 + 0.04c. Rows C to E are numbered from column 0 (C-01
@@ -38,10 +38,10 @@ function lot(): DraftLayout {
 describe('photoCell', () => {
   it('reads the row off the outlines beside it and the column off the row below', () => {
     const draft = lot()
-    expect(photoCell(draft, draft.viewpoints[0], at(0, ROW_Y.B))).toEqual({ row: 1, col: 0 })
-    expect(photoCell(draft, draft.viewpoints[0], at(3, ROW_Y.C))).toEqual({ row: 2, col: 3 })
+    expect(photoCell(draft, draft.viewpoints[0], at(0, ROW_Y.B))).toMatchObject({ row: 1, col: 0 })
+    expect(photoCell(draft, draft.viewpoints[0], at(3, ROW_Y.C))).toMatchObject({ row: 2, col: 3 })
     // A new row below E.
-    expect(photoCell(draft, draft.viewpoints[0], at(2, 0.9))).toEqual({ row: 5, col: 2 })
+    expect(photoCell(draft, draft.viewpoints[0], at(2, 0.9))).toMatchObject({ row: 5, col: 2 })
   })
 })
 
@@ -90,6 +90,91 @@ describe('placeFromPhoto', () => {
 
   it('needs something outlined to go by', () => {
     const draft = davidFixture({ viewpoints: [{ ...davidFixture().viewpoints[0], outlines: { 'A-01': at(0, 0.1) } }] })
-    expect(placeFromPhoto(draft, 'V1', 'A-01', fitGrid(draft.spaces)).note).toMatch(/Outline a few spaces/)
+    expect(placeFromPhoto(draft, 'V1', 'A-01', fitGrid(draft.spaces)).note).toMatch(/Outline more spaces/)
+  })
+})
+
+/** The same lot photographed from the other side: numbers run right to left and row B is at the bottom. */
+function mirrored(): DraftLayout {
+  const base = lot()
+  const flip = (o: Outline): Outline => o.map(([x, y]) => [Number((1 - x).toFixed(4)), Number((1 - y).toFixed(4))])
+  const v = base.viewpoints[0]
+  return { ...base, viewpoints: [{ ...v, outlines: Object.fromEntries(Object.entries(v.outlines).map(([k, o]) => [k, flip(o)])) }] }
+}
+
+describe('photos taken from other sides', () => {
+  it('reads cells the same when numbers run right to left and rows bottom to top', () => {
+    const draft = mirrored()
+    const flipped = (o: Outline): Outline => o.map(([x, y]) => [Number((1 - x).toFixed(4)), Number((1 - y).toFixed(4))])
+    expect(photoCell(draft, draft.viewpoints[0], flipped(at(0, ROW_Y.B)))).toMatchObject({ row: 1, col: 0 })
+    expect(photoCell(draft, draft.viewpoints[0], flipped(at(5, ROW_Y.C)))).toMatchObject({ row: 2, col: 5 })
+    expect(photoCell(draft, draft.viewpoints[0], flipped(at(2, 0.9)))).toMatchObject({ row: 5, col: 2 })
+  })
+
+  it('gives up when rows don\'t run across the photo', () => {
+    const base = lot()
+    const v = base.viewpoints[0]
+    // Turned a quarter: rows run down the photo.
+    const turned = Object.fromEntries(Object.entries(v.outlines).map(([k, o]) => [k, o.map(([x, y]) => [y, x] as [number, number])]))
+    const draft = { ...base, viewpoints: [{ ...v, outlines: turned }] }
+    expect(photoCell(draft, draft.viewpoints[0], at(0, 0.1))).toBeNull()
+  })
+})
+
+describe('short rows and far columns', () => {
+  it('a row with one outlined space uses the lot\'s column pitch, not its own width', () => {
+    const base = lot()
+    // Row F has a single space, F-01, at column 0; a box 4 columns along is F-05.
+    const f = space('F-01', 0, 0, { rect: { x: 20, y: 394, w: 40, h: 72 } })
+    const draft = {
+      ...base,
+      spaces: [...base.spaces, f],
+      viewpoints: [{ ...base.viewpoints[0], outlines: { ...base.viewpoints[0].outlines, 'F-01': at(0, 0.9) } }],
+    }
+    expect(photoCell(draft, draft.viewpoints[0], at(4, 0.9))).toMatchObject({ row: 5, col: 4 })
+  })
+})
+
+describe('matchRowToPhoto', () => {
+  it('counts outlines it could not number (two in one column) as clashes', () => {
+    const base = lot()
+    const v = base.viewpoints[0]
+    // B-04 outlined over B-03's spot: two outlines in column 3.
+    const draft = { ...base, viewpoints: [{ ...v, outlines: { ...v.outlines, 'B-04': at(3, ROW_Y.B) } }] }
+    const { clashes } = matchRowToPhoto(draft, draft.viewpoints[0], 1, fitGrid(draft.spaces))
+    expect(clashes).toBe(1)
+  })
+})
+
+describe('a new space before the first column when the map has to grow left', () => {
+  it('the grid moves with the shifted spaces, so the new space and its row land in their cells', () => {
+    // Rows C to E have no column-1 space, and C-02 sits at the map's left edge: column 1's cell is left
+    // of the map, so adding B-01 there grows the map left and shifts every space.
+    const base = lot()
+    const drop = new Set(['C-01', 'D-01', 'E-01'])
+    const spaces = base.spaces.filter((s) => !drop.has(s.spaceId)).map((s) => ({ ...s, rect: { ...s.rect, x: s.rect.x - 65 } }))
+    const outlines = Object.fromEntries(Object.entries(base.viewpoints[0].outlines).filter(([k]) => !drop.has(k)))
+    const draft = { ...base, spaces, viewpoints: [{ ...base.viewpoints[0], outlines }] }
+    const grid = fitGrid(draft.spaces)
+    const { draft: next, space: added, dx } = addSpaceFromOutline(draft, 'V1', at(0, ROW_Y.B), grid)
+    const shifted = { ...grid, x0: grid.x0 + dx }
+    expect(dx).toBeGreaterThan(0)
+    expect(added).toMatchObject({ label: 'B-01', rect: cellRect(shifted, { row: 1, col: 0 }) })
+    expect(next.spaces.find((s) => s.spaceId === 'B-01')!.rect).toEqual(cellRect(shifted, { row: 1, col: 1 }))
+    expect(next.spaces.find((s) => s.spaceId === 'C-02')!.rect.x).toBeCloseTo(cellRect(shifted, { row: 2, col: 1 }).x, 0)
+  })
+})
+
+describe('photo nudges', () => {
+  it('a small nudge on the photo that tips over a column boundary does not rename', () => {
+    const draft = lot()
+    const grid = fitGrid(draft.spaces)
+    const v = draft.viewpoints[0]
+    // C-03 drawn a little right of its spot (0.45 of a column), then nudged a little more (to 0.55).
+    const drawn = at(2.45, ROW_Y.C)
+    const before = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'C-03': drawn } }] }
+    const after = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'C-03': at(2.55, ROW_Y.C) } }] }
+    const res = followOutline(before, after, 'V1', 'C-03', grid, false)
+    expect(res.draft.spaces.find((s) => s.spaceId === 'C-03')!.label).toBe('C-03')
   })
 })

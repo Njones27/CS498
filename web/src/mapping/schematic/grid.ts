@@ -212,8 +212,10 @@ export function relabelMoved(g: Grid, spaces: DraftSpace[], spaceId: string, cel
   const notes = [`Now ${target}`]
   const others = spaces.filter((s) => !s.retired && s.spaceId !== spaceId && normalizeLabel(s.label) === key)
   // Labels in use once the move is done: the moved space's old label is free, its new one is taken, and
-  // so is each label given out below. Retired spaces' labels count as used (their history keeps them).
-  const used = new Set(spaces.filter((s) => s.spaceId !== spaceId && !others.includes(s)).map((s) => normalizeLabel(s.label)))
+  // so is each label given out below. A retired space's label may be reused, as the server allows.
+  const used = new Set(
+    spaces.filter((s) => !s.retired && s.spaceId !== spaceId && !others.includes(s)).map((s) => normalizeLabel(s.label)),
+  )
   used.add(key)
   for (const other of others) {
     const own = cellLabel(cellAt(g, center(other.rect)), Math.max(2, parseLabel(other.label)?.digits ?? digits))

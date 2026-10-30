@@ -194,13 +194,14 @@ describe('alignToCells', () => {
     expect(next.map((x) => x.label)).toEqual(['B-02', 'B-01']) // q, further left, takes column 1
   })
 
-  it('keeps retired labels out of what relabelMoved hands out', () => {
+  it('relabelMoved may hand out a retired space\'s label, as the server allows', () => {
     const at = (id: string, label: string, row: number, col: number, retired = false) =>
       space(id, 0, 0, { label, retired, rect: cellRect(G, { row, col }) })
     const spaces = [at('a', 'B-01', 1, 0), at('m', 'C-07', 2, 8), at('r', 'C-09', 4, 4, true)]
-    const { labels, note } = relabelMoved(G, spaces, 'a', { row: 2, col: 6 })
-    expect([...labels]).toEqual([['a', 'C-07']])
-    expect(note).toMatch(/another space is also C-07/)
+    expect([...relabelMoved(G, spaces, 'a', { row: 2, col: 6 }).labels]).toEqual([
+      ['a', 'C-07'],
+      ['m', 'C-09'],
+    ])
   })
 
   it('leaves a draft already on the grid alone', () => {

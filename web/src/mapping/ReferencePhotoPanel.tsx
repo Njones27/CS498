@@ -537,7 +537,8 @@ export function ReferencePhotoPanel({
       const { draft: next, space, dx, dy, note } = addSpaceFromOutline(draft, currentViewpoint.viewId, outline, grid)
       commitOutlines(next, { dx, dy })
       onSelectSpace(space.spaceId)
-      setStatusNotice(note && !note.startsWith('Now') ? `Added ${space.label}. ${note}` : `Added ${space.label} to the schematic`)
+      // A bare "Now C-06" adds nothing to "Added C-06"; anything more (a renumbered row, a duplicate) is shown.
+      setStatusNotice(note && !/^Now \S+$/.test(note) ? `Added ${space.label}. ${note}` : `Added ${space.label} to the schematic`)
       return
     }
     const nextOutlines = {

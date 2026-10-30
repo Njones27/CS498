@@ -5,7 +5,8 @@ import { putFile } from '../lib/putFile'
 import { mockFetch } from '../test/helpers'
 import { rylanDraftFixture } from './fixtures/rylan'
 import { ReferencePhotoPanel } from './ReferencePhotoPanel'
-import type { DraftLayout, ReferencePhotoPanelProps } from './types'
+import { cellRect, fitGrid } from './schematic/grid'
+import type { DraftLayout, DraftSpace, ReferencePhotoPanelProps } from './types'
 
 vi.mock('../lib/putFile', () => ({ putFile: vi.fn() }))
 
@@ -71,6 +72,8 @@ describe('ReferencePhotoPanel (US-08)', () => {
         hoveredSpaceId={props.hoveredSpaceId ?? null}
         onHoverSpace={onHoverSpace}
         onSave={onSave}
+        grid={props.grid}
+        snap={props.snap}
       />,
     )
     return {
@@ -688,6 +691,23 @@ describe('ReferencePhotoPanel (US-08)', () => {
       expect(onSelectSpace).toHaveBeenLastCalledWith(added.spaceId)
       expect(screen.getByText('Added A-06 to the schematic')).toBeInTheDocument()
       expect(screen.queryByTestId('partial-clicks')).not.toBeInTheDocument()
+    })
+
+    it('Match schematic to photo moves the selected space into its photo cell', async () => {
+      // A-05 is drawn on the photo in column 5 (right after A-04) but sits far away on the schematic.
+      const draft = syncedDraft()
+      draft.spaces[4] = { ...draft.spaces[4], rect: { x: 50, y: 400, w: 100, h: 180 } }
+      draft.viewpoints[0].outlines['sp_a05'] = [
+        [0.53, 50 / 600],
+        [0.63, 50 / 600],
+        [0.63, 230 / 600],
+        [0.53, 230 / 600],
+      ]
+      const grid = fitGrid(draft.spaces.slice(0, 4))
+      const { onChange, user } = renderPanel({ draft, selectedSpaceId: 'sp_a05', grid })
+      await user.click(screen.getByTestId('match-photo-btn'))
+      const moved = onChange.mock.calls[0][0].spaces.find((s: DraftSpace) => s.spaceId === 'sp_a05')
+      expect(moved).toMatchObject({ label: 'A-05', rect: cellRect(grid, { row: 0, col: 4 }) })
     })
 
     it('with nothing selected, 4 clicks on empty photo add a new space', () => {
