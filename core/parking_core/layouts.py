@@ -7,6 +7,7 @@ read published snapshots, so draft edits never reach them until a publish.
 
 from __future__ import annotations
 
+import contextlib
 import math
 from collections import defaultdict
 from collections.abc import Iterable
@@ -466,6 +467,7 @@ def publish_draft(
     ValidationFailedError when it has errors. Before writing anything, the draft meta is
     moved to the next revision with `basedOnVersion` set to the new version, as a conditional
     write: of two publishes (or a publish and a save) racing on one revision, only one wins.
+    If writing the version then fails, the meta goes back to the version it was based on.
     """
     draft = load_draft(repo, lot, now)
     if draft.meta.revision != expected_revision:
@@ -480,7 +482,18 @@ def publish_draft(
     )
     if not repo.put_draft_meta(claimed, expected_revision=draft.meta.revision):
         raise StaleRevisionError
-    return write_layout(repo, store, build_layout(lot.lot_id, version, draft, published_by, now))
+    try:
+        return write_layout(
+            repo, store, build_layout(lot.lot_id, version, draft, published_by, now)
+        )
+    except Exception:
+        # The new version does not exist, so the draft must not claim to be based on it. The
+        # revision moves on rather than back, so a window that loaded the claimed revision
+        # can't save over a newer one. Best effort: the write's own error is what is raised.
+        released = draft.meta.model_copy(update={"revision": claimed.revision + 1})
+        with contextlib.suppress(Exception):
+            repo.put_draft_meta(released, expected_revision=claimed.revision)
+        raise
 
 
 def list_versions(repo: Repository, lot_id: str) -> list[LayoutVersion]:

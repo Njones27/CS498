@@ -776,6 +776,38 @@ def test_publish_loses_race_on_the_draft_meta(repo, store, lot_l, monkeypatch):
     assert not store.exists(keys.layout_snapshot_key("L", 2))
 
 
+def _fail(*args, **kwargs):
+    raise RuntimeError("storage is down")
+
+
+# A publish that fails after claiming the draft must not leave it based on a version that was
+# never written (the next publish would reuse that number).
+@pytest.mark.parametrize("target", ["store.put", "repo.publish_layout"])
+def test_failed_publish_releases_the_draft(repo, store, lot_l, monkeypatch, target):
+    obj, name = (store, "put") if target == "store.put" else (repo, "publish_layout")
+    with monkeypatch.context() as patch:
+        patch.setattr(obj, name, _fail)
+        with pytest.raises(RuntimeError, match="storage is down"):
+            publish_draft(repo, store, lot_l, 2, "a", NOW)
+    m = repo.get_draft_meta("L")
+    # The revision moves on (not back), so a window that loaded the claim can't save over it.
+    assert (m.revision, m.based_on_version) == (4, 1)
+    assert repo.get_lot("L").current_layout_version == 1
+    assert [v.version for v in repo.list_layout_versions("L")] == [1]
+    assert publish_draft(repo, store, lot_l, 4, "a", NOW).version == 2
+
+
+def test_failed_release_still_raises_the_publish_error(repo, store, lot_l, monkeypatch):
+    def release_fails(*args, **kwargs):
+        raise ConnectionError("meta write failed")
+
+    metas = iter([repo.put_draft_meta, release_fails])
+    monkeypatch.setattr(repo, "put_draft_meta", lambda *a, **kw: next(metas)(*a, **kw))
+    monkeypatch.setattr(store, "put", _fail)
+    with pytest.raises(RuntimeError, match="storage is down"):
+        publish_draft(repo, store, lot_l, 2, "a", NOW)
+
+
 def test_versions_newest_first(repo, store, lot_l):
     publish_draft(repo, store, lot_l, 2, "b@x", NOW)
     publish_draft(repo, store, lot_l, 3, "c@x", NOW + timedelta(hours=1))
