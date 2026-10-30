@@ -1,5 +1,5 @@
 import { fitSchematic, updateSpace, type Grown } from './schematic/edits'
-import { cellLabel, cellRect, cellTaken, labelDigits, rowIndex, rowLetter, type Cell, type Grid } from './schematic/grid'
+import { cellLabel, cellRect, cellTaken, insertAtRowStart, labelDigits, rowIndex, rowLetter, type Cell, type Grid } from './schematic/grid'
 import { formatLabel, normalizeLabel, parseLabel } from './schematic/labels'
 import type { DraftLayout, DraftViewpoint, Outline } from './types'
 
@@ -75,6 +75,8 @@ function markers(draft: DraftLayout, view: DraftViewpoint, exceptId?: string): M
  */
 interface Layout {
   level: (o: Outline) => Outline
+  /** Back from levelled, in-proportion coordinates to the fractions outlines are stored in. */
+  unlevel: (o: Outline, view: DraftViewpoint) => Outline
   byRow: Map<number, Marker[]>
   rowY: Map<number, number> // median photo y of each row
   pitch: number // signed photo x per column: negative when numbers run right to left
@@ -113,6 +115,11 @@ function layout(raw: Marker[]): Layout | null {
   const angle = rowAngle(raw)
   const [c, s] = [Math.cos(angle), Math.sin(angle)]
   const level = (o: Outline): Outline => o.map(([x, y]) => [x * c + y * s, -x * s + y * c])
+  const unlevel = (o: Outline, view: DraftViewpoint): Outline => {
+    const img = view.referenceImage
+    const aspect = img && img.width > 0 && img.height > 0 ? img.width / img.height : 1
+    return o.map(([x, y]) => [(x * c - y * s) / aspect, x * s + y * c])
+  }
   const all = raw.map((m) => ({ ...m, ...box(level(m.outline)) }))
   const byRow = new Map<number, Marker[]>()
   for (const m of all) byRow.set(m.row, [...(byRow.get(m.row) ?? []), m])
@@ -145,7 +152,7 @@ function layout(raw: Marker[]): Layout | null {
   // perspective: rows converging), a column would drift a third of a column per row: don't read it.
   const tilts = [...byRow.values()].filter((ms) => ms.length > 2).map(slope)
   if (tilts.filter((t) => Math.abs(t * rowStep) > Math.abs(pitch) / 3).length * 3 > tilts.length) return null
-  return { level, byRow, rowY, pitch, rowStep }
+  return { level, unlevel, byRow, rowY, pitch, rowStep }
 }
 
 /** How a row tilts (y per x): the median slope between its outlines, so one stray doesn't count. */
@@ -239,6 +246,37 @@ export function photoCell(draft: DraftLayout, view: DraftViewpoint, outline: Out
 }
 
 /**
+ * An outline for the space numbered `named` + 1 in `row`, shaped like its neighbours: the nearest
+ * outlined space of that row (by number) copied along the row by the columns between them. With nothing
+ * in the row, the nearest other row's nearest space, carried across the rows too. Null with nothing to
+ * copy, or when the copy would sit off the photo.
+ */
+export function outlineLike(draft: DraftLayout, view: DraftViewpoint, row: number, named: number): Outline | null {
+  const lay = layout(markers(draft, view))
+  if (!lay) return null
+  const near = (ms: Marker[]) => ms.reduce((a, b) => (Math.abs(b.col - named) < Math.abs(a.col - named) ? b : a))
+  const own = lay.byRow.get(row)
+  let from: Marker
+  let rows = 0
+  if (own?.length) {
+    from = near(own)
+  } else {
+    const [r, ms] = [...lay.byRow].reduce((a, b) => (Math.abs(b[0] - row) < Math.abs(a[0] - row) ? b : a))
+    from = near(ms)
+    rows = row - r
+  }
+  const dx = (named - from.col) * lay.pitch
+  const dy = rows * lay.rowStep
+  const moved = lay.unlevel(
+    lay.level(from.outline).map(([x, y]) => [x + dx, y + dy]),
+    view,
+  )
+  const mid = box(moved)
+  if (mid.x < 0 || mid.x > 1 || mid.y < 0 || mid.y > 1) return null
+  return moved.map(([x, y]) => [Number(Math.min(1, Math.max(0, x)).toFixed(4)), Number(Math.min(1, Math.max(0, y)).toFixed(4))])
+}
+
+/**
  * Renumber `row` to match the photo: each of its outlined spaces is named for the column the photo puts
  * it in and moved into that cell on the schematic. Spaces with no outline here keep their label unless a
  * renumbered space now has it; then they take their own cell's label if free. `clashes` counts spaces
@@ -323,13 +361,8 @@ export function placeFromPhoto(
   if (cell.named < 0 && !custom) {
     // Before the row's first number: it becomes 01, and every other space in the row moves up one
     // number and one cell on the schematic to make room.
-    const shifted = draft.spaces.map((s) => {
-      const p = s.retired || s.spaceId === spaceId ? null : parseLabel(s.label)
-      if (!p || p.row !== letter) return s
-      return { ...s, label: formatLabel(letter, p.num + 1, p.digits), rect: cellRect(grid, { row: cell.row, col: p.num }) }
-    })
+    const next = insertAtRowStart(draft, grid, spaceId, cell.row)
     const first = formatLabel(letter, 1, digits)
-    const next = updateSpace({ ...draft, spaces: shifted }, spaceId, { label: first, rect: cellRect(grid, { row: cell.row, col: 0 }) })
     return { ...fitSchematic(next), note: `Now ${first}; the rest of row ${letter} moved up one to make room`, renumbered: true }
   }
   const target = { row: cell.row, col: Math.max(0, cell.named) }

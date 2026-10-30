@@ -132,17 +132,30 @@ describe('photo <-> schematic sync', () => {
     expect(added.label).toBe('A-06')
   })
 
-  it('a space added on the schematic gets a pending proposed outline on the photo', () => {
+  it('a space added on the schematic gets a pending proposed outline shaped like its row neighbour', () => {
     const draft = gridDraft()
     const rect = { x: 480, y: 40, w: 100, h: 120 }
     const { draft: next, space: added } = addSpaceOnSchematic(draft, rect)
     expect(added.label).toBe('A-05')
-    const outline = next.viewpoints[0].outlines[added.spaceId]
-    expect(next.viewpoints[0].outlineReview[added.spaceId]).toEqual({ source: 'proposed', status: 'pending' })
+    const v = next.viewpoints[0]
+    const outline = v.outlines[added.spaceId]
+    expect(v.outlineReview[added.spaceId]).toEqual({ source: 'proposed', status: 'pending' })
+    // A-04's outline copied one column along: same shape, moved by the A-03 -> A-04 step.
+    const [a3, a4] = [v.outlines['A-03'], v.outlines['A-04']]
     outline.forEach((p, i) => {
-      expect(p[0]).toBeCloseTo(outlineOf(rect)[i][0], 3)
-      expect(p[1]).toBeCloseTo(outlineOf(rect)[i][1], 3)
+      expect(p[0]).toBeCloseTo(a4[i][0] + (a4[i][0] - a3[i][0]), 2)
+      expect(p[1]).toBeCloseTo(a4[i][1] + (a4[i][1] - a3[i][1]), 2)
     })
+  })
+
+  it('without any outline to copy, a proposal is projected from the schematic', () => {
+    // Only row A outlined; B-05 added: copied from B's nearest... there is none, so from row A, one row down.
+    const draft = gridDraft()
+    const v = draft.viewpoints[0]
+    const onlyA = { ...draft, viewpoints: [{ ...v, outlines: Object.fromEntries(Object.entries(v.outlines).filter(([k]) => k.startsWith('A-'))) }] }
+    const { draft: next, space: added } = addSpaceOnSchematic(onlyA, { x: 480, y: 240, w: 100, h: 120 })
+    expect(added.label).toBe('B-05')
+    expect(next.viewpoints[0].outlines[added.spaceId]).toBeDefined()
   })
 
   it('proposals skip spaces already outlined, retired spaces and spaces off the photo', () => {
@@ -394,11 +407,16 @@ describe('photo <-> schematic sync', () => {
     )
   })
 
-  it('suggests where an unoutlined space sits on the photo', () => {
+  it('suggests where an unoutlined space sits on the photo, shaped like its row neighbour', () => {
     const draft = gridDraft()
     const extra = { ...draft, spaces: [...draft.spaces, space('B-05', 480, 240)] }
-    const s = suggestOutline(extra, extra.viewpoints[0], 'B-05')!
-    expect(s[0][0]).toBeCloseTo(outlineOf({ x: 480, y: 240, w: 100, h: 120 })[0][0], 3)
+    const v = extra.viewpoints[0]
+    const s = suggestOutline(extra, v, 'B-05')!
+    const [b3, b4] = [v.outlines['B-03'], v.outlines['B-04']]
+    s.forEach((p, i) => {
+      expect(p[0]).toBeCloseTo(b4[i][0] + (b4[i][0] - b3[i][0]), 2)
+      expect(p[1]).toBeCloseTo(b4[i][1] + (b4[i][1] - b3[i][1]), 2)
+    })
     expect(photoToSchematic(davidFixture(), davidFixture().viewpoints[0])).toBeNull()
   })
 })

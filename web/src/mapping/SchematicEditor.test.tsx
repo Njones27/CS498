@@ -534,6 +534,26 @@ describe('SchematicEditor', () => {
       expect(byId(last(), 'A-03')).toMatchObject({ label: 'Q-01', rect: { x: 260, y: 40 } })
     })
 
+    it('a space moved before a row\'s first number becomes 01 and the row moves up one', () => {
+      const { last } = setup({ withGrid: true })
+      drag(spaceEl('A-03'), -330, 0) // left of A-01, into the cell before column 1
+      const labels = (ids: string[]) => ids.map((id) => byId(last(), id).label)
+      expect(labels(['A-03', 'A-01', 'A-02', 'A-04'])).toEqual(['A-01', 'A-02', 'A-03', 'A-05'])
+      expect(byId(last(), 'A-03').rect).toMatchObject({ x: 40, y: 40 })
+      expect(byId(last(), 'A-01').rect).toMatchObject({ x: 150, y: 40 })
+      expect(screen.getByText('Now A-01; the rest of row A moved up one to make room')).toBeInTheDocument()
+    })
+
+    it('+ Space adds the next free cell in the selected row, or starts a new row below', async () => {
+      const { last, user } = setup({ withGrid: true, selectedSpaceId: 'A-02' })
+      await user.click(screen.getByRole('button', { name: '+ Space' }))
+      // A-03 and A-04 fill the cells right of A-02 (A-05 is retired, its cell free): the first free is column 5.
+      expect(last().spaces.at(-1)).toMatchObject({ label: 'A-05', rect: { x: 480, y: 40 } })
+      await user.keyboard('{Escape}')
+      await user.click(screen.getByRole('button', { name: '+ Space' }))
+      expect(last().spaces.at(-1)).toMatchObject({ label: 'B-01', rect: { x: 40, y: 170 } })
+    })
+
     it('Fit grid with a space selected lines the grid up with that space', async () => {
       const spaces = davidFixture().spaces.map((s) => (s.spaceId === 'A-03' ? { ...s, rect: { x: 265, y: 45, w: 90, h: 110 } } : s))
       const { last, user } = setup({ draft: davidFixture({ spaces }), withGrid: true, selectedSpaceId: 'A-03' })

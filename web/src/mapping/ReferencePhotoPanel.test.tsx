@@ -840,8 +840,14 @@ describe('ReferencePhotoPanel (US-08)', () => {
       expect(v1.outlineReview['sp_a05']).toEqual({ source: 'proposed', status: 'accepted' })
     })
 
-    it('no suggestion without enough outlined spaces to go by', () => {
-      renderPanel({ selectedSpaceId: 'sp_a03' }) // V1 has two accepted outlines
+    it('a suggestion from just a couple of outlined neighbours, none with nothing outlined', () => {
+      const { unmount } = renderPanel({ selectedSpaceId: 'sp_a03' }) // V1 has outlines for A-01, A-02 and A-05
+      expect(screen.getByTestId('suggested-outline')).toBeInTheDocument()
+      unmount()
+      const bare = structuredClone(rylanDraftFixture)
+      bare.viewpoints[0].outlines = {}
+      bare.viewpoints[0].outlineReview = {}
+      renderPanel({ draft: bare, selectedSpaceId: 'sp_a03' })
       expect(screen.queryByTestId('suggested-outline')).not.toBeInTheDocument()
     })
   })

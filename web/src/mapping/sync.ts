@@ -2,7 +2,7 @@ import { MIN_SIDE, clearOf, medianSize } from './schematic/geometry'
 import { addSpace, addSpaceAt, addSpacesAt, fitSchematic, updateSpace, type Grown } from './schematic/edits'
 import { applyLabels, cellAt, cellLabel, cellRect, cellTaken, labelDigits, relabelMoved, rowIndex, type Cell, type Grid } from './schematic/grid'
 import { parseLabel } from './schematic/labels'
-import { photoCell, placeFromPhoto } from './photoGrid'
+import { outlineLike, photoCell, placeFromPhoto } from './photoGrid'
 import { isValidQuad, orderClockwise } from './photo/geom'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, Outline, Point } from './types'
 
@@ -232,26 +232,41 @@ export function rectToOutline(toPhoto: Mat3, rect: DraftRect): Outline | null {
 export function suggestOutline(draft: DraftLayout, view: DraftViewpoint, spaceId: string): Outline | null {
   const space = draft.spaces.find((s) => s.spaceId === spaceId)
   if (!space || !view.referenceImage) return null
+  const like = outlineByLabel(draft, view, space)
+  if (like) return like
   const toPhoto = schematicToPhoto(draft, view)
   return toPhoto ? rectToOutline(toPhoto, space.rect) : null
 }
 
 /**
- * Proposed outlines (pending review) for `spaceIds` on every photo they don't have an outline in yet,
- * projected from their schematic rects. Views without a photo or a fit are left alone.
+ * Where a space belongs on the photo by its label (row letter, number): shaped like the outlines beside
+ * it in that row (outlineLike). Null for a name like "Gate" or a photo with nothing outlined to go by.
+ */
+function outlineByLabel(draft: DraftLayout, view: DraftViewpoint, space: DraftSpace): Outline | null {
+  const p = parseLabel(space.label)
+  if (!p) return null
+  const like = outlineLike(draft, view, rowIndex(p.row), p.num - 1)
+  return like && isValidQuad(like) ? like : null
+}
+
+/**
+ * Proposed outlines (pending review) for `spaceIds` on every photo they don't have an outline in yet:
+ * shaped like the outlines beside them in their row, else projected from their schematic rects. Views
+ * without a photo, or with nothing to go by, are left alone.
  */
 export function proposeOutlines(draft: DraftLayout, spaceIds: string[]): DraftLayout {
   let changed = false
   const viewpoints = draft.viewpoints.map((v) => {
-    const toPhoto = v.referenceImage ? schematicToPhoto(draft, v) : null
-    if (!toPhoto) return v
+    if (!v.referenceImage) return v
+    const toPhoto = schematicToPhoto(draft, v)
     const outlines = { ...v.outlines }
     const outlineReview = { ...v.outlineReview }
     let touched = false
     for (const id of spaceIds) {
       const space = draft.spaces.find((s) => s.spaceId === id)
       if (!space || space.retired || outlines[id]) continue
-      const outline = rectToOutline(toPhoto, space.rect)
+      // Shaped like the row's other outlines where the photo has them; else projected from the schematic.
+      const outline = outlineByLabel(draft, v, space) ?? (toPhoto && rectToOutline(toPhoto, space.rect))
       if (!outline) continue
       outlines[id] = outline
       outlineReview[id] = { source: 'proposed', status: 'pending' }

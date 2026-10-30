@@ -230,6 +230,25 @@ export function relabelMoved(g: Grid, spaces: DraftSpace[], spaceId: string, cel
   return { labels, note: notes.join('; ') }
 }
 
+/**
+ * `spaceId` becomes 01 of `row`, in its first cell, and every other active row-number space of that row
+ * moves up one number and one cell to make room (names like "Gate" stay). For a space put before the
+ * row's first number. Returns the input when the row has no letter.
+ */
+export function insertAtRowStart(draft: DraftLayout, g: Grid, spaceId: string, row: number): DraftLayout {
+  const letter = rowLetter(row)
+  if (!letter) return draft
+  const space = draft.spaces.find((s) => s.spaceId === spaceId)
+  const digits = Math.max(2, (space && parseLabel(space.label)?.digits) ?? labelDigits(draft.spaces))
+  const spaces = draft.spaces.map((s) => {
+    if (s.spaceId === spaceId) return { ...s, label: formatLabel(letter, 1, digits), rect: cellRect(g, { row, col: 0 }) }
+    const p = s.retired ? null : parseLabel(s.label)
+    if (!p || p.row !== letter) return s
+    return { ...s, label: formatLabel(p.row, p.num + 1, p.digits), rect: cellRect(g, { row, col: p.num }) }
+  })
+  return { ...draft, spaces }
+}
+
 /** The draft with `labels` (space id -> label) applied. */
 export function applyLabels(draft: DraftLayout, labels: Map<string, string>): DraftLayout {
   if (labels.size === 0) return draft
