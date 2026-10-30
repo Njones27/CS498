@@ -286,7 +286,7 @@ export function ReferencePhotoPanel({
       await putFile(slot.uploadUrl, file, (fraction) => setUploadProgress(fraction))
 
       // 3. Complete upload; the server reads the photo's size from the file
-      await api.post<ReferenceCompleteResponse>(
+      const completed = await api.post<ReferenceCompleteResponse>(
         `/admin/lots/${lotId}/views/${currentViewpoint.viewId}/reference/complete`,
         { sha256 },
       )
@@ -295,9 +295,9 @@ export function ReferencePhotoPanel({
         setReplaceWarning('Check outlines: the photo changed.')
       }
 
-      // The page refetches the reference photos into its latest draft. Do not rebuild the draft
-      // here: `draft` is from before the save above, so its revision is stale by now.
-      onReferenceUploaded()
+      // The page applies the stored photo to its latest draft and refetches the rest. Do not rebuild
+      // the draft here: `draft` is from before the save above, so its revision is stale by now.
+      onReferenceUploaded({ lotId, viewId: completed.viewId, referenceImage: completed.referenceImage })
     } catch (err) {
       setErrorMsg(errorMessage(err))
     } finally {

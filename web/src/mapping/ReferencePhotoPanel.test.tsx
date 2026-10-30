@@ -5,7 +5,7 @@ import { putFile } from '../lib/putFile'
 import { mockFetch } from '../test/helpers'
 import { rylanDraftFixture } from './fixtures/rylan'
 import { ReferencePhotoPanel } from './ReferencePhotoPanel'
-import type { DraftLayout } from './types'
+import type { DraftLayout, ReferencePhotoPanelProps } from './types'
 
 vi.mock('../lib/putFile', () => ({ putFile: vi.fn() }))
 
@@ -40,7 +40,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
     if (props.onViewChange) {
       onViewChange.mockImplementation(props.onViewChange)
     }
-    const onReferenceUploaded = vi.fn<() => void>()
+    const onReferenceUploaded = vi.fn<ReferencePhotoPanelProps['onReferenceUploaded']>()
     if (props.onReferenceUploaded) {
       onReferenceUploaded.mockImplementation(props.onReferenceUploaded)
     }
@@ -112,8 +112,13 @@ describe('ReferencePhotoPanel (US-08)', () => {
     await vi.waitFor(() => {
       expect(putFile).toHaveBeenCalled()
     })
+    // The stored photo goes to the page, so it shows even if the refetch that follows fails.
     await vi.waitFor(() => {
-      expect(onReferenceUploaded).toHaveBeenCalled()
+      expect(onReferenceUploaded).toHaveBeenCalledWith({
+        lotId: 'test-lot',
+        viewId: 'V3',
+        referenceImage: { url: '/api/_test/objects/ref-v3.jpg', width: 1000, height: 750 },
+      })
     })
     // The server reads the photo's size from the file; the panel sends only the hash.
     const complete = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/reference/complete'))

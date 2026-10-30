@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, errorMessage } from '../api/client'
-import type { DraftLayout, DraftLayoutUpdate } from './types'
+import type { DraftLayout, DraftLayoutUpdate, ReferenceImage, UploadedReference } from './types'
 
 export interface DraftLayoutState {
   /** The page's in-memory draft: the last load or save, plus any local edits. */
@@ -25,9 +25,10 @@ export interface DraftLayoutState {
   reload: () => void
   /**
    * Pick up reference photos uploaded since the last load, keeping local edits. Reference uploads
-   * never bump the revision (brief §4.2), so the local revision stays valid.
+   * never bump the revision (brief §4.2), so the local revision stays valid. A just-uploaded photo
+   * is applied at once, so it shows even when the refetch fails.
    */
-  refreshReferenceImages: () => Promise<void>
+  refreshReferenceImages: (uploaded?: UploadedReference) => Promise<void>
   /** Whether there are prior states to undo. */
   canUndo: boolean
   /** Whether there are undone states to redo. */
@@ -67,6 +68,16 @@ export function toDraftUpdate(draft: DraftLayout): DraftLayoutUpdate {
 export const draftPath = (lotId: string) => `/admin/lots/${encodeURIComponent(lotId)}/layout/draft`
 
 const MAX_HISTORY = 50
+
+const referenceImagesOf = (d: DraftLayout) => new Map(d.viewpoints.map((v) => [v.viewId, v.referenceImage]))
+
+/** `d` with the reference photos in `refs`; viewpoints not in `refs` keep theirs. */
+function withReferenceImages(d: DraftLayout, refs: Map<string, ReferenceImage | null>): DraftLayout {
+  return {
+    ...d,
+    viewpoints: d.viewpoints.map((v) => (refs.has(v.viewId) ? { ...v, referenceImage: refs.get(v.viewId) ?? null } : v)),
+  }
+}
 
 /** One page holds one draft (brief §4.1 "Saving model"): load, local edits, save(), reload(). */
 export function useDraftLayout(lotId: string, options?: UseDraftLayoutOptions): DraftLayoutState {
@@ -125,6 +136,8 @@ export function useDraftLayout(lotId: string, options?: UseDraftLayoutOptions): 
     future: [],
   })
   const editsRef = useRef(0)
+  /** Bumped whenever reference photos are applied locally, so an older save response cannot undo it. */
+  const refsRef = useRef(0)
   const inFlight = useRef<Promise<DraftLayout | null> | null>(null)
   /** editsRef when the in-flight save started: the edits it carries. */
   const inFlightEdits = useRef(0)
@@ -246,6 +259,7 @@ export function useDraftLayout(lotId: string, options?: UseDraftLayoutOptions): 
     if (!current) return Promise.resolve(null)
     const savedLot = lotRef.current
     const editsAtStart = editsRef.current
+    const refsAtStart = refsRef.current
     inFlightEdits.current = editsAtStart
     setSaving(true)
     setSaveError(null)
@@ -254,7 +268,9 @@ export function useDraftLayout(lotId: string, options?: UseDraftLayoutOptions): 
       .then((saved) => {
         if (lotRef.current !== savedLot) return null
         if (editsRef.current === editsAtStart) {
-          replace(saved)
+          // Photos picked up during the save are newer than the ones this response carries.
+          const local = draftRef.current
+          replace(refsRef.current === refsAtStart || !local ? saved : withReferenceImages(saved, referenceImagesOf(local)))
           setDirtyTracked(false)
         } else {
           // Edits made during the save stay local and dirty; they go out with the new revision.
@@ -297,8 +313,25 @@ export function useDraftLayout(lotId: string, options?: UseDraftLayoutOptions): 
     setTick((t) => t + 1)
   }, [])
 
-  const refreshReferenceImages = useCallback(async () => {
+  /** Apply reference photos to the draft and its history, leaving every other field as it is. */
+  const applyReferenceImages = (refs: Map<string, ReferenceImage | null>) => {
+    const local = draftRef.current
+    if (!local) return
+    refsRef.current += 1
+    replace(withReferenceImages(local, refs))
+    const nextHistory = {
+      past: historyRef.current.past.map((d) => withReferenceImages(d, refs)),
+      future: historyRef.current.future.map((d) => withReferenceImages(d, refs)),
+    }
+    historyRef.current = nextHistory
+    setHistory(nextHistory)
+  }
+
+  const refreshReferenceImages = useCallback(async (uploaded?: UploadedReference) => {
     const requestedLot = lotRef.current
+    if (uploaded && uploaded.lotId === requestedLot && draftRef.current?.lotId === requestedLot) {
+      applyReferenceImages(new Map([[uploaded.viewId, uploaded.referenceImage]]))
+    }
     let fresh: DraftLayout
     try {
       fresh = await api.get<DraftLayout>(draftPath(requestedLot))
@@ -308,18 +341,7 @@ export function useDraftLayout(lotId: string, options?: UseDraftLayoutOptions): 
     }
     const local = draftRef.current
     if (lotRef.current !== requestedLot || !local || local.lotId !== fresh.lotId) return
-    const refs = new Map(fresh.viewpoints.map((v) => [v.viewId, v.referenceImage]))
-    const updateRefs = (d: DraftLayout): DraftLayout => ({
-      ...d,
-      viewpoints: d.viewpoints.map((v) => (refs.has(v.viewId) ? { ...v, referenceImage: refs.get(v.viewId) ?? null } : v)),
-    })
-    replace(updateRefs(local))
-    const nextHistory = {
-      past: historyRef.current.past.map(updateRefs),
-      future: historyRef.current.future.map(updateRefs),
-    }
-    historyRef.current = nextHistory
-    setHistory(nextHistory)
+    applyReferenceImages(referenceImagesOf(fresh))
   }, [])
 
   const debounceMs = options?.debounceMs ?? 1500

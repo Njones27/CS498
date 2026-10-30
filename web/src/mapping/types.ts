@@ -15,6 +15,13 @@ export type SpaceType = S['SpaceType']
 export type ReferenceUploadSlot = S['ReferenceUploadSlot']
 export type ReferenceCompleteResponse = S['ReferenceCompleteResponse']
 
+/** A reference photo the client just stored: the `complete` response, plus the lot it belongs to. */
+export interface UploadedReference {
+  lotId: string
+  viewId: string
+  referenceImage: ReferenceImage
+}
+
 export type Point = [number, number]
 export type Outline = Point[]
 
@@ -38,8 +45,8 @@ export interface ReferencePhotoPanelProps extends MappingSelection {
   onViewChange: (viewId: string) => void
   onChange: (next: DraftLayout) => void
   /** Refetch the reference photos (with fresh signed URLs) into the page's latest draft: after an
-   * upload, and to retry a photo that did not load. */
-  onReferenceUploaded: () => void
+   * upload, which passes the stored photo so it shows at once, and to retry a photo that did not load. */
+  onReferenceUploaded: (uploaded?: UploadedReference) => void
   issues: Issue[]
   onSave?: () => Promise<DraftLayout | null>
 }
