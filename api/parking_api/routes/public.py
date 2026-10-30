@@ -26,6 +26,9 @@ from ..schemas import (
 
 router = APIRouter(tags=["public"])
 
+# How many of the newest captures the processing note looks through for a photo in flight.
+RECENT_SNAPSHOTS = 20
+
 
 def find_published(repo: Repository, lot_id: str) -> tuple[Lot, PublishedLayout] | None:
     """The lot and its current layout, or None when unknown or unpublished."""
@@ -124,7 +127,7 @@ def get_status(lot_id: str, adapters: AdaptersDep, now: NowDep) -> LotStatusOut:
         layout,
         repo.get_statuses(lot_id),
         repo.list_closures(lot_id),
-        repo.get_latest_snapshot(lot_id),
+        repo.list_snapshots(lot_id, limit=RECENT_SNAPSHOTS),
         now,
     )
     return LotStatusOut.model_validate(out)

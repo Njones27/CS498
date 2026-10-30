@@ -190,13 +190,6 @@ def test_processing_note_keeps_previous_results(client, admin_headers, adapters,
     assert at(st["lastObservedAt"]) == NOW - timedelta(minutes=5)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "status.processing only checks the newest-captured snapshot, so a newer "
-        "abandoned/failed upload hides an older queued job (US-11 #5), owner Nathan Jones"
-    ),
-)
 @pytest.mark.parametrize("newer", ["abandoned", "failed"])
 def test_processing_note_survives_a_newer_unfinished_upload(
     client, admin_headers, adapters, settings, clock, newer
