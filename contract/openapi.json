@@ -6,11 +6,13 @@
           "location": {
             "default": "",
             "description": "Free text, trimmed",
+            "maxLength": 200,
             "title": "Location",
             "type": "string"
           },
           "name": {
             "description": "Trimmed; must not be blank or match another lot's name",
+            "maxLength": 120,
             "title": "Name",
             "type": "string"
           },

@@ -9,8 +9,10 @@ from pydantic import Field, field_validator
 
 
 class AdminLotCreate(CamelModel):
-    name: str = Field(description="Trimmed; must not be blank or match another lot's name")
-    location: str = Field(default="", description="Free text, trimmed")
+    name: str = Field(
+        max_length=120, description="Trimmed; must not be blank or match another lot's name"
+    )
+    location: str = Field(default="", max_length=200, description="Free text, trimmed")
     stale_after_minutes: int = Field(
         default=30, ge=1, le=1440, description="Allowed data age before drivers see a stale banner"
     )

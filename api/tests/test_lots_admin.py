@@ -129,6 +129,26 @@ def test_lot_id_slug_gets_a_suffix_when_taken(client, admin_headers, adapters):
     assert create(client, admin_headers, name="North-Lot!").json()["lotId"] == "north-lot-3"
 
 
+def test_lot_named_new_does_not_take_the_new_lot_route(client, admin_headers):
+    """`/admin/lots/new` is the New Lot page, so `new` is never a lot id."""
+    assert create(client, admin_headers, name="New").json()["lotId"] == "new-2"
+    assert create(client, admin_headers, name="New!").json()["lotId"] == "new-3"
+
+
+def test_concurrent_create_never_overwrites_a_lot(client, admin_headers, adapters, monkeypatch):
+    """Another admin's create of the same id lands after this request looked: the conditional
+    create moves this lot to the next suffix and leaves the other lot, published, untouched."""
+    repo = adapters.repository
+    theirs = Lot(lot_id="north-lot", name="North-Lot", created_at=NOW, current_layout_version=3)
+    repo.put_lot(theirs)
+    monkeypatch.setattr(repo, "get_lot", lambda lot_id: None)  # every lookup raced the create
+    r = create(client, admin_headers, name="North Lot")
+    assert r.status_code == 201, r.text
+    assert r.json()["lotId"] == "north-lot-2"
+    monkeypatch.undo()
+    assert repo.get_lot("north-lot") == theirs
+
+
 @pytest.mark.parametrize(
     ("name", "slug"),
     [
@@ -151,6 +171,8 @@ def test_slugify(name, slug):
         {"name": "X", "staleAfterMinutes": 1441},
         {"name": "X", "staleAfterMinutes": 2.5},
         {"name": "X", "staleAfterMinutes": "soon"},
+        {"name": "N" * 121},
+        {"name": "X", "location": "L" * 201},
     ],
 )
 def test_create_lot_validation(client, admin_headers, adapters, payload):
@@ -158,6 +180,11 @@ def test_create_lot_validation(client, admin_headers, adapters, payload):
     r = client.post(URL, json=payload, headers=admin_headers)
     assert r.status_code == 422 and r.json()["error"] == "validation_error"
     assert len(adapters.repository.list_lots()) == before
+
+
+def test_longest_name_and_location_are_accepted(client, admin_headers):
+    r = create(client, admin_headers, name="N" * 120, location="L" * 200)
+    assert r.status_code == 201, r.text
 
 
 @pytest.mark.parametrize("stale", [1, 1440])
