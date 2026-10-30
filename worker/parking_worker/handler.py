@@ -26,6 +26,7 @@ from parking_core.models import (
 )
 from parking_core.settings import Adapters
 from parking_core.state_rules import decide_state
+from pydantic import ValidationError
 
 log = logging.getLogger(__name__)
 
@@ -238,15 +239,20 @@ def _run(
 
 
 def _load_layout(adapters: Adapters, snapshot: Snapshot) -> PublishedLayout:
-    """The layout pinned on the snapshot (a retry keeps its version), else the current one."""
-    if snapshot.layout_version is not None:
-        key = layout_snapshot_key(snapshot.lot_id, snapshot.layout_version)
-        if adapters.object_store.exists(key):
-            return PublishedLayout.model_validate_json(adapters.object_store.get(key))
+    """The layout pinned on the snapshot (a retry keeps its version), else the current one.
+
+    A stored layout that fails validation (e.g. a corner saved as null) is permanent:
+    every retry would read the same bytes."""
     try:
+        if snapshot.layout_version is not None:
+            key = layout_snapshot_key(snapshot.lot_id, snapshot.layout_version)
+            if adapters.object_store.exists(key):
+                return PublishedLayout.model_validate_json(adapters.object_store.get(key))
         layout = adapters.repository.get_published_layout(snapshot.lot_id)
     except NotPublishedError:
         layout = None
+    except ValidationError as exc:
+        raise PermanentJobError("Published layout is invalid") from exc
     if layout is None:
         raise PermanentJobError("Lot has no published layout")
     return layout

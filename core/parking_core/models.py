@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 from pydantic.alias_generators import to_camel
 
-Point = tuple[float, float]
-"""(x, y) as fractions of the image size, 0..1 (what ACPDS expects)."""
+Point = tuple[FiniteFloat, FiniteFloat]
+"""(x, y) as fractions of the image size, 0..1 (what ACPDS expects). Finite only: a NaN is
+stored as JSON null, after which the layout or observation holding it no longer loads."""
 Polygon = list[Point]
 
 UPLOAD_EXPIRY = timedelta(minutes=15)

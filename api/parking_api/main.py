@@ -59,12 +59,15 @@ def create_app(settings: Settings | None = None, adapters: Adapters | None = Non
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # Leave out the rejected `input`: a NaN there is not valid JSON and would turn the 422
+        # into a 500, and echoing request bodies back helps nobody.
+        details = [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]
         return JSONResponse(
             status_code=422,
             content={
                 "error": "validation_error",
                 "message": "Invalid request",
-                "details": jsonable_encoder(exc.errors()),
+                "details": jsonable_encoder(details),
             },
         )
 

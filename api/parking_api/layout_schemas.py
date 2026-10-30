@@ -11,11 +11,11 @@ from typing import Annotated
 
 from parking_core.layouts import ValidationReport
 from parking_core.models import CamelModel, OutlineSource, OutlineStatus, SpaceType
-from pydantic import Field, model_validator
+from pydantic import Field, FiniteFloat, model_validator
 
 from .schemas import ErrorResponse
 
-Corner = tuple[float, float]
+Corner = tuple[FiniteFloat, FiniteFloat]  # NaN/inf would be stored as null (models.Point)
 Outline = Annotated[
     list[Corner],
     Field(

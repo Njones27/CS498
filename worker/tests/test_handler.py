@@ -7,6 +7,7 @@ from datetime import timedelta
 import pytest
 from conftest import LOT, T0, V1_SPACES, World
 from parking_core.errors import AlignmentError, PermanentJobError, RetryableJobError
+from parking_core.keys import layout_snapshot_key
 from parking_core.models import (
     CarBox,
     Cutoffs,
@@ -118,6 +119,24 @@ def test_alignment_error_is_permanent(world: World):
     assert snap.finished is True
     assert len(world.queue) == 0
     assert world.repo.get_statuses(LOT) == []
+
+
+def test_unreadable_layout_is_permanent(world: World):
+    # A corner stored as null (how a NaN serializes) fails validation on every read, so
+    # retrying cannot help.
+    key = layout_snapshot_key(LOT, 1)
+    doc = json.loads(world.adapters.object_store.get(key))
+    doc["viewpoints"][0]["outlines"]["A-01"][0][0] = None
+    world.adapters.object_store.put(key, json.dumps(doc).encode(), "application/json")
+    world.add_snapshot("img-1")
+
+    result = step(world)
+
+    assert result.outcome == "failed_permanent"
+    snap = world.repo.get_snapshot("img-1")
+    assert snap.error == "Published layout is invalid"
+    assert snap.finished is True
+    assert len(world.queue) == 0
 
 
 @pytest.mark.parametrize(
