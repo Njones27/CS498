@@ -159,7 +159,7 @@
     justify-content: center;
     padding: 16px;
   }
-  .help[hidden] { display: none; }
+  .help[hidden], svg[hidden] { display: none; }
   .help-card {
     background: var(--panel);
     color: var(--text);
@@ -543,7 +543,7 @@
     const token = ++app.loading;
     app.index = index;
     app.hovered = null;
-    ui.svg.hidden = true; // the old photo's stalls are not clickable while the new one loads
+    ui.svg.toggleAttribute("hidden", true); // the old photo's stalls are not clickable while the new one loads
     const pair = current();
     clearMessages();
     unpairedWarnings();
@@ -565,7 +565,7 @@
         s.poly.addEventListener("mouseenter", () => { app.hovered = s; });
         s.poly.addEventListener("mouseleave", () => { if (app.hovered === s) app.hovered = null; });
       }
-      ui.svg.hidden = false;
+      ui.svg.toggleAttribute("hidden", false);
       ui.empty.hidden = true;
       applyZoom();
       const bad = outOfBounds(spaces, w, h);
@@ -578,7 +578,7 @@
       document.title = `${pair.stem} (${source}) - Pilot Labeler`;
     } catch (err) {
       if (token !== app.loading) return;
-      ui.svg.hidden = true;
+      ui.svg.toggleAttribute("hidden", true);
       message(`${pair.stem}: ${err.message}`, "error");
     }
     refreshCounts();
@@ -631,7 +631,7 @@
     app.index = -1;
     clearMessages();
     if (!pairs.length) {
-      ui.svg.hidden = true;
+      ui.svg.toggleAttribute("hidden", true);
       ui.empty.hidden = false;
       while (ui.counts.firstChild) ui.counts.removeChild(ui.counts.firstChild);
       message("No .jpg + .xml pairs among the opened files.", "error");
