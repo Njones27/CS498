@@ -2,6 +2,7 @@
 item, `Viewpoint.outline_review`, and the helpers in `parking_core.layouts`. Then validation
 (§8.4), publish (§8.3), versions and restore (§4.3)."""
 
+import math
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -12,6 +13,7 @@ from parking_core.adapters import aws
 from parking_core.adapters.memory import MemoryObjectStore, MemoryRepository
 from parking_core.layouts import (
     Draft,
+    SnapshotMissingError,
     StaleRevisionError,
     ValidationFailedError,
     diff_draft,
@@ -40,6 +42,7 @@ from parking_core.models import (
     Viewpoint,
 )
 from parking_core.settings import Settings
+from pydantic import ValidationError as PydanticValidationError
 
 NOW = datetime(2026, 10, 28, 14, 5, tzinfo=UTC)
 AWS_SETTINGS = Settings(app_env="local", queue_url="http://sqs.local/q", _env_file=None)  # type: ignore[call-arg]
@@ -279,7 +282,7 @@ def test_published_space_ids_refuses_missing_snapshot(repo, store):
             lot_id="L", version=1, published_by="a", published_at=NOW, snapshot_key="gone"
         ),
     )
-    with pytest.raises(KeyError):
+    with pytest.raises(SnapshotMissingError, match="Snapshot of L v1 is missing: gone"):
         published_space_ids(repo, store, "L")
 
 
@@ -542,6 +545,39 @@ def test_rect_on_the_schematic_edge_and_retired_rects_are_fine():
     assert validate_draft(d, None).ok
 
 
+# A NaN rect compares False everywhere, so it looked inside the map and published a snapshot
+# that no longer loads. `Rect` now rejects it; this covers drafts stored before it did.
+@pytest.mark.parametrize(
+    "rect",
+    [
+        Rect(x=0, y=0, w=0, h=80),
+        Rect(x=0, y=0, w=50, h=0),
+        Rect(x=100, y=100, w=-50, h=80),
+        Rect(x=100, y=100, w=50, h=-80),
+        Rect.model_construct(x=math.nan, y=0, w=50, h=80),
+        Rect.model_construct(x=0, y=0, w=math.inf, h=80),
+    ],
+    ids=["zero-width", "zero-height", "negative-width", "negative-height", "nan", "inf"],
+)
+def test_bad_rect(rect):
+    d = clean()
+    d.spaces.append(sp("B-10", rect=rect))
+    d.viewpoints[0].outlines["B-10"] = sq(5)
+    report = validate_draft(d, None)
+    assert codes(report.errors) == ["bad_rect"]
+    issue = report.errors[0]
+    assert (issue.message, issue.space_ids) == (
+        "B-10 is not a valid rectangle on the map",
+        ["B-10"],
+    )
+
+
+def test_retired_bad_rect_is_fine():
+    d = clean()
+    d.spaces.append(sp("gone", rect=Rect(x=0, y=0, w=0, h=0), retired=True))
+    assert validate_draft(d, None).ok
+
+
 def test_no_active_spaces():
     d = mk([sp("A-01", retired=True)], [vp("V1")])
     issue = only(validate_draft(d, None).errors, "no_active_spaces")
@@ -742,6 +778,53 @@ def test_publish_loses_race_on_the_draft_meta(repo, store, lot_l, monkeypatch):
     assert not store.exists(keys.layout_snapshot_key("L", 2))
 
 
+def _fail(*args, **kwargs):
+    raise RuntimeError("storage is down")
+
+
+# A publish that fails after claiming the draft must not leave it based on a version that was
+# never written (the next publish would reuse that number).
+@pytest.mark.parametrize("target", ["store.put", "repo.publish_layout"])
+def test_failed_publish_releases_the_draft(repo, store, lot_l, monkeypatch, target):
+    obj, name = (store, "put") if target == "store.put" else (repo, "publish_layout")
+    with monkeypatch.context() as patch:
+        patch.setattr(obj, name, _fail)
+        with pytest.raises(RuntimeError, match="storage is down"):
+            publish_draft(repo, store, lot_l, 2, "a", NOW)
+    m = repo.get_draft_meta("L")
+    # The revision moves on (not back), so a window that loaded the claim can't save over it.
+    assert (m.revision, m.based_on_version) == (4, 1)
+    assert repo.get_lot("L").current_layout_version == 1
+    assert [v.version for v in repo.list_layout_versions("L")] == [1]
+    assert publish_draft(repo, store, lot_l, 4, "a", NOW).version == 2
+
+
+def test_publish_refuses_a_snapshot_that_would_not_load(repo, store, lot_l):
+    # An infinite schematic size passes validation (every rect is inside it) but is stored
+    # as null, after which the lot's snapshot fails to load for every driver and the worker.
+    m = repo.get_draft_meta("L")
+    huge = Schematic.model_construct(width=math.inf, height=600)
+    saved = m.model_copy(update={"revision": 3, "schematic": huge})
+    assert repo.put_draft_meta(saved, expected_revision=2)
+    with pytest.raises(PydanticValidationError):
+        publish_draft(repo, store, lot_l, 3, "a", NOW)
+    assert repo.get_draft_meta("L").revision == 3
+    assert repo.get_lot("L").current_layout_version == 1
+    assert [v.version for v in repo.list_layout_versions("L")] == [1]
+    assert not store.exists(keys.layout_snapshot_key("L", 2))
+
+
+def test_failed_release_still_raises_the_publish_error(repo, store, lot_l, monkeypatch):
+    def release_fails(*args, **kwargs):
+        raise ConnectionError("meta write failed")
+
+    metas = iter([repo.put_draft_meta, release_fails])
+    monkeypatch.setattr(repo, "put_draft_meta", lambda *a, **kw: next(metas)(*a, **kw))
+    monkeypatch.setattr(store, "put", _fail)
+    with pytest.raises(RuntimeError, match="storage is down"):
+        publish_draft(repo, store, lot_l, 2, "a", NOW)
+
+
 def test_versions_newest_first(repo, store, lot_l):
     publish_draft(repo, store, lot_l, 2, "b@x", NOW)
     publish_draft(repo, store, lot_l, 3, "c@x", NOW + timedelta(hours=1))
@@ -801,7 +884,18 @@ def test_restore_unknown_version(repo, store, lot_l):
         restore_version(repo, store, lot_l, 9, "a", NOW)
 
 
+# Another window saved after the restore loaded the draft: the restore must not overwrite it.
 def test_restore_loses_race(repo, store, lot_l, monkeypatch):
+    repo.put_spaces([sp("A-01", "Edited", x=0), sp("draft-only", x=200)])
+    v1 = repo.get_viewpoint("L", "V1")
+    repo.put_viewpoint(v1.model_copy(update={"outlines": {"A-01": sq(3)}}))
+    before = stored(repo, lot_l)
     monkeypatch.setattr(repo, "put_draft_meta", lambda meta, expected_revision: False)
     with pytest.raises(StaleRevisionError):
         restore_version(repo, store, lot_l, 1, "a", NOW)
+    after = stored(repo, lot_l)
+    assert (after.meta, after.spaces, after.viewpoints) == (
+        before.meta,
+        before.spaces,
+        before.viewpoints,
+    )

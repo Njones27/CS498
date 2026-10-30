@@ -402,6 +402,30 @@ describe('Publish (US-09 #2, #4)', () => {
     expect(screen.getByTestId('schematic-space-A-02')).not.toHaveClass('schematic-space--error')
   })
 
+  // The report describes the revision it checked, so an edit (which may fix the error) clears it.
+  it('an edit clears the last report, so it no longer blocks Publish', async () => {
+    mockFetch({
+      'GET /lots/test-lot': { body: detail },
+      [`GET ${URL}`]: { body: draftFixture() },
+      [`PUT ${URL}`]: { body: savedDraft(1) },
+      [VALIDATE]: { body: report() },
+    })
+    renderApp('/admin/lots/test-lot/map', ADMIN)
+    await screen.findByText('Revision 0')
+    await userEvent.click(screen.getByRole('button', { name: 'Validate' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Two spaces share the label B-04/ }))
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled()
+    expect(screen.getByTestId('schematic-space-A-02')).toHaveClass('schematic-space--error')
+
+    const label = within(screen.getByRole('group', { name: 'Selected space' })).getByLabelText('Label')
+    await userEvent.clear(label)
+    await userEvent.type(label, 'B-05')
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled()
+    expect(screen.getByTestId('schematic-space-A-02')).not.toHaveClass('schematic-space--error')
+    expect(validationPanel()).toHaveTextContent('Press Validate')
+  })
+
   it('saves first, publishes that revision, then shows the new version', async () => {
     let gets = 0
     const fetchMock = mockFetch({

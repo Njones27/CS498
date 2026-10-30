@@ -27,17 +27,18 @@ Outline = Annotated[
 
 
 class DraftSchematic(CamelModel):
-    width: float = Field(gt=0)
-    height: float = Field(gt=0)
+    width: FiniteFloat = Field(gt=0)
+    height: FiniteFloat = Field(gt=0)
 
 
 class DraftRect(CamelModel):
     """Schematic rectangle in schematic units."""
 
-    x: float
-    y: float
-    w: float
-    h: float
+    # Finite only, like `Corner`: a NaN would be stored as null (models.Rect).
+    x: FiniteFloat
+    y: FiniteFloat
+    w: FiniteFloat
+    h: FiniteFloat
 
 
 class DraftSpace(CamelModel):

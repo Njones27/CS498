@@ -1,7 +1,13 @@
 """Admin draft layout: load and save the editable copy of a lot's layout (brief §4.1).
 
-Saves are not one transaction: spaces and viewpoints are written first and the draft meta
-last, as a conditional write on `revision`, so a failed save never advances the revision.
+Saves are not one transaction. The draft meta is written first, as a conditional write on
+`revision` that claims the save, and the spaces and viewpoints after it. A save that loses the
+race writes nothing, so a publish (which claims the same way) can never include the items of a
+save that reported 409. A save that fails after its claim leaves the revision advanced: that
+window's next save is stale, and a reload shows what was stored. Known gap: a window that
+loads the draft between a save's claim and its item writes sees the new revision with some
+old items, and could publish that mix. It needs a load within milliseconds of a save, by
+another admin.
 """
 
 from __future__ import annotations
@@ -11,6 +17,7 @@ from datetime import datetime
 from fastapi import APIRouter
 from parking_core.interfaces import ObjectStore
 from parking_core.layouts import (
+    SnapshotMissingError,
     StaleRevisionError,
     ValidationFailedError,
     ValidationReport,
@@ -57,6 +64,10 @@ _AUTH = {401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}}
 
 STALE_MESSAGE = "This draft changed in another window. Reload to see the latest."
 VALIDATION_FAILED_MESSAGE = "Fix the errors in the validation report before publishing."
+SNAPSHOT_MISSING_MESSAGE = (
+    "A published version of this lot is missing from storage, so the draft can't be changed "
+    "safely. Ask an operator to restore it."
+)
 
 
 def _space_out(s: ParkingSpace) -> DraftSpace:
@@ -137,6 +148,7 @@ def get_draft(lot_id: str, admin: AdminDep, adapters: AdaptersDep, now: NowDep) 
             "model": DraftErrorResponse,
             "description": "cannot_delete_published_space or validation_error",
         },
+        500: {"model": ErrorResponse, "description": "snapshot_missing"},
     },
     summary="Save the draft layout; drivers see nothing until it is published",
 )
@@ -150,7 +162,10 @@ def put_draft(
 
     stored_spaces = {s.space_id for s in repo.list_spaces(lot_id)}
     removed = stored_spaces - {s.space_id for s in body.spaces}
-    locked = sorted(removed & published_space_ids(repo, store, lot_id)) if removed else []
+    try:
+        locked = sorted(removed & published_space_ids(repo, store, lot_id)) if removed else []
+    except SnapshotMissingError:
+        raise error(500, "snapshot_missing", SNAPSHOT_MISSING_MESSAGE) from None
     if locked:
         raise error(
             422,
@@ -165,6 +180,9 @@ def put_draft(
             422, "validation_error", f"Viewpoints can't be removed: {', '.join(missing_views)}"
         )
 
+    saved = _saved_meta(meta, body.schematic, admin.email, now)
+    if not repo.put_draft_meta(saved, expected_revision=meta.revision):
+        raise error(409, "stale_revision", STALE_MESSAGE)
     repo.put_spaces(
         ParkingSpace(
             lot_id=lot_id,
@@ -194,10 +212,6 @@ def put_draft(
         )
     for space_id in removed:
         repo.delete_space(lot_id, space_id)
-
-    saved = _saved_meta(meta, body.schematic, admin.email, now)
-    if not repo.put_draft_meta(saved, expected_revision=meta.revision):
-        raise error(409, "stale_revision", STALE_MESSAGE)
     return draft_out(saved, repo.list_spaces(lot_id), repo.list_viewpoints(lot_id), store)
 
 
@@ -282,6 +296,7 @@ def versions(lot_id: str, admin: AdminDep, adapters: AdaptersDep) -> list[Layout
         **_AUTH,
         404: {"model": ErrorResponse},
         409: {"model": ErrorResponse, "description": "stale_revision"},
+        500: {"model": ErrorResponse, "description": "snapshot_missing"},
     },
     summary="Replace the draft with a published version's contents; publish to make it live",
 )
@@ -292,6 +307,8 @@ def restore(
     lot = _require_lot(adapters, lot_id)
     try:
         draft = restore_version(repo, store, lot, version, admin.email, now)
+    except SnapshotMissingError:
+        raise error(500, "snapshot_missing", SNAPSHOT_MISSING_MESSAGE) from None
     except LookupError:
         raise error(404, "not_found", "Version not found") from None
     except StaleRevisionError:
