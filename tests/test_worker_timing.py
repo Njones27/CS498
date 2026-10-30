@@ -14,7 +14,6 @@ import random
 import subprocess
 import sys
 import sysconfig
-import types
 from pathlib import Path
 
 import cv2
@@ -24,6 +23,7 @@ from parking_core.adapters.memory import MemoryJobQueue, MemoryObjectStore, Memo
 from parking_core.errors import PermanentJobError
 from parking_core.models import JobStatus
 from parking_core.settings import build_adapters
+from parking_worker import cpu_quota, poller
 from parking_worker.aligners import OrbAligner, build_aligner
 from parking_worker.scorers import StubScorer
 
@@ -454,7 +454,7 @@ def test_main_returns_2_when_the_scorer_cannot_be_built(tmp_path, monkeypatch):
     def no_weights(settings):
         raise RuntimeError("Model weights missing: models/yolo/yolo26m.pt")
 
-    monkeypatch.setattr(wt, "build_scorer", no_weights)
+    monkeypatch.setattr(poller, "build_scorer", no_weights)
     rc, js, md = _main(tmp_path, "--lots", "pklot-ufpr04")
     assert rc == wt.EXIT_ERROR
     assert not js.exists()
@@ -511,53 +511,6 @@ def test_environment_without_limits(tmp_path):
     assert env["cgroup_memory_peak"] is None  # file missing
 
 
-@pytest.mark.parametrize(
-    "cpu_max, affinity, threads",
-    [
-        ("200000 100000", None, 2),
-        ("200000 100000", 2, 2),
-        ("150000 100000", None, 2),
-        ("50000 100000", None, 1),
-        ("400000 100000", 2, 2),
-        ("100000 100000", 8, 1),
-        ("max 100000", 2, None),
-        (None, 2, None),
-    ],
-)
-def test_quota_threads_from_the_cgroup_quota(tmp_path, cpu_max, affinity, threads):
-    if cpu_max is not None:
-        (tmp_path / "cpu.max").write_text(cpu_max + "\n")
-    assert wt.quota_threads(tmp_path, affinity=affinity) == threads
-
-
-def test_apply_thread_limit_sets_torch_and_opencv(monkeypatch):
-    torch_calls, cv2_calls = [], []
-    monkeypatch.setitem(
-        sys.modules, "torch", types.SimpleNamespace(set_num_threads=torch_calls.append)
-    )
-    monkeypatch.setattr(cv2, "setNumThreads", cv2_calls.append)  # macOS reports GCD's count
-    wt.apply_thread_limit(None)
-    assert torch_calls == cv2_calls == []
-    wt.apply_thread_limit(2)
-    assert torch_calls == cv2_calls == [2]
-
-
-def test_time_jobs_calls_after_warmup_between_warmup_and_timed_jobs(world):
-    settings, adapters, lots = world
-    aligner = RecordingAligner(build_aligner(settings, adapters))
-    seen = []
-    wt.time_jobs(
-        adapters,
-        aligner,
-        StubScorer(),
-        settings.cutoffs,
-        lots,
-        1,
-        after_warmup=lambda: seen.append(len(aligner.calls)),
-    )
-    assert seen == [len(lots)] and len(aligner.calls) == 2 * len(lots)
-
-
 # --- the script as CI runs it ----------------------------------------------------------------
 
 
@@ -604,3 +557,19 @@ def test_an_import_failure_exits_2_with_an_error_report(tmp_path):
     text = md.read_text()
     assert text.startswith("### NFR-1 worker timing: ERROR")
     assert "No module named" in text
+
+
+def test_main_uses_the_workers_thread_limit_and_sets_none_itself(tmp_path, monkeypatch):
+    applied = []
+    monkeypatch.setattr(cpu_quota, "quota_cpus", lambda root=None: 2.0)
+    monkeypatch.setattr(wt, "quota_cpus", lambda root=None: 2.0)
+    monkeypatch.setattr(cpu_quota, "cpu_affinity", lambda: None)
+    monkeypatch.setattr(wt, "cpu_affinity", lambda: None)
+    monkeypatch.setattr(cpu_quota, "apply_thread_limit", applied.append)
+    rc, js, _ = _main(
+        tmp_path, "--lots", "pklot-ufpr04", "--jobs-per-lot", "1", "--photo-long-edge", "0"
+    )
+    assert rc == wt.EXIT_OK
+    assert applied == [2]  # once, by poller.build_worker; the stub scorer adds none
+    env = json.loads(js.read_text())["env"]
+    assert env["quota_threads"] == 2 and env["cgroup_cpus"] == 2.0

@@ -20,12 +20,14 @@ edge is --photo-long-edge (default 4032, a 12 MP phone photo's long edge, well i
 resolution, so large photos are the expensive case; the stored reference stays fixture-size,
 as it would after an admin uploads a smaller reference. --photo-long-edge 0 skips them.
 
-Model load (SHA-256 check + load) and one untimed warm-up job per lot (first forward pass,
-ORB reference features) are reported apart from the per-job numbers, which is what a
-long-running worker pays per photo. The gate is the p95 of per-job wall time over all jobs,
-both photo sizes. Storage, queue and DB are in memory, so S3/SQS/DynamoDB round trips are not
-included. Under a cgroup CPU quota (`docker --cpus`) torch and OpenCV get one thread per CPU of
-the quota; without one their defaults are left alone.
+The aligner and scorer come from `parking_worker.poller.build_worker`, as in the shipped
+worker: that is also where torch's and OpenCV's threads are sized to a cgroup CPU quota
+(`docker --cpus`), so the timing runs the worker's own thread settings and sets none itself.
+Worker startup (SHA-256 check, model load, the scorer's warm-up predict) and one untimed
+warm-up job per lot (ORB reference features, first full-size forward pass) are reported apart
+from the per-job numbers, which is what a long-running worker pays per photo. The gate is the
+p95 of per-job wall time over all jobs, both photo sizes. Storage, queue and DB are in memory,
+so S3/SQS/DynamoDB round trips are not included.
 
 --check-setup seeds the lots and runs one job per lot and photo size with the stub scorer
 (no models, no weights), then exits: a quick check that the imports, the seed files and the
@@ -78,8 +80,9 @@ try:
     from parking_core.settings import Adapters, Settings, build_adapters
     from parking_seed.loader import FIXTURES_DIR, load_lot_file, seed_lot
     from parking_worker.aligners import build_aligner
-    from parking_worker.poller import run_once
-    from parking_worker.scorers import StubScorer, build_scorer
+    from parking_worker.cpu_quota import CGROUP_ROOT, cpu_affinity, quota_cpus, quota_threads
+    from parking_worker.poller import build_worker, run_once
+    from parking_worker.scorers import StubScorer
     from parking_worker.scorers.acpds_yolo import header_size, missing_vision_packages
 except Exception as _exc:  # any import failure, e.g. an OSError from a native library
     IMPORT_ERROR: Exception | None = _exc
@@ -92,7 +95,6 @@ DEFAULT_JOBS_PER_LOT = 10
 DEFAULT_PHOTO_LONG_EDGE = 4032
 """A 12 MP phone photo is 4032 x 3024 and fits the 15 MB upload limit; the fixtures are
 1-4 MP. ACPDS runs at the photo's native resolution, so this is the expensive allowed input."""
-CGROUP_ROOT = Path("/sys/fs/cgroup")
 T0 = datetime(2026, 11, 1, tzinfo=UTC)
 UPLOADED_BY = "nfr1-timing"
 
@@ -357,11 +359,10 @@ def time_jobs(
     jobs_per_lot: int,
     scopes: Sequence[Scope] | None = None,
     max_photo_bytes: int | None = None,
-    after_warmup: Callable[[], None] | None = None,
     clock: Callable[[], float] = time.perf_counter,
 ) -> tuple[dict[str, float], list[JobTiming]]:
-    """One untimed warm-up job per lot (fixture size), `after_warmup`, then `jobs_per_lot`
-    rounds over the scopes (default: every lot at fixture size).
+    """One untimed warm-up job per lot (fixture size), then `jobs_per_lot` rounds over the
+    scopes (default: every lot at fixture size).
 
     Capture times strictly increase, so every job's status writes go through. A photo over
     `max_photo_bytes` (the upload limit) is not an input the worker can get, so it stops the
@@ -399,8 +400,6 @@ def time_jobs(
 
     scopes = list(scopes) if scopes is not None else [Scope(lot) for lot in lots]
     warmup = {lot: job(Scope(lot), f"nfr1-{lot}-warmup", 0).wall_s for lot in lots}
-    if after_warmup is not None:
-        after_warmup()
     timings = [
         job(scope, image_id(scope, n), n) for n in range(1, jobs_per_lot + 1) for scope in scopes
     ]
@@ -417,17 +416,6 @@ def read_cgroup(path: Path) -> str | None:
         return None
 
 
-def _cgroup_cpus(raw: str | None) -> float | None:
-    """cgroup v2 `cpu.max` is "<quota> <period>" in µs, or "max <period>" for no limit."""
-    parts = (raw or "").split()
-    if len(parts) != 2 or parts[0] == "max":
-        return None
-    try:
-        return int(parts[0]) / int(parts[1])
-    except (ValueError, ZeroDivisionError):
-        return None
-
-
 def _cgroup_bytes(raw: str | None) -> int | None:
     return int(raw) if raw and raw.isdigit() else None
 
@@ -437,47 +425,22 @@ def peak_rss_bytes() -> int:
     return rss if sys.platform == "darwin" else rss * 1024  # macOS: bytes, Linux: KiB
 
 
-def cpu_affinity() -> int | None:
-    return len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None
-
-
-def quota_threads(cgroup_root: Path = CGROUP_ROOT, affinity: int | None = None) -> int | None:
-    """Threads for torch and OpenCV under a cgroup CPU quota, or None when there is none.
-
-    `docker --cpus` is a CFS quota: it limits CPU time, not the CPUs a process sees, so torch
-    (OpenMP) and OpenCV size their pools from every core on the host and then oversubscribe
-    the quota. One thread per quota CPU, rounded up (1.5 CPUs -> 2), and never more than the
-    CPUs the process may run on (`--cpuset-cpus`)."""
-    cpus = _cgroup_cpus(read_cgroup(cgroup_root / "cpu.max"))
-    if cpus is None:
-        return None
-    threads = max(1, math.ceil(cpus))
-    return min(threads, affinity) if affinity else threads
-
-
-def apply_thread_limit(threads: int | None) -> None:
-    """Set OpenCV's and (when loaded) torch's intra-op threads; None leaves their defaults."""
-    if threads is None:
-        return
-    cv2.setNumThreads(threads)
-    torch = sys.modules.get("torch")
-    if torch is not None:
-        torch.set_num_threads(threads)
-
-
 def environment(
     settings: Settings,
     scorer: SpaceScorer,
-    cgroup_root: Path = CGROUP_ROOT,
+    cgroup_root: Path | None = None,
     threads: int | None = None,
 ) -> dict:
-    """Where and how the run happened; `threads` is what `quota_threads` gave, if anything."""
+    """Where and how the run happened. `threads` is the limit `quota_threads` gives (what the
+    worker applied at startup, if anything); torch and OpenCV threads are read back as they
+    are after the timed jobs. `cgroup_root` defaults to the worker's CGROUP_ROOT."""
+    cgroup_root = CGROUP_ROOT if cgroup_root is None else cgroup_root
     env: dict[str, object] = {
         "platform": platform.platform(),
         "python": platform.python_version(),
         "cpu_count": os.cpu_count(),
         "cpu_affinity": cpu_affinity(),
-        "cgroup_cpus": _cgroup_cpus(read_cgroup(cgroup_root / "cpu.max")),
+        "cgroup_cpus": quota_cpus(cgroup_root),
         "cgroup_memory_max": _cgroup_bytes(read_cgroup(cgroup_root / "memory.max")),
         "cgroup_memory_peak": _cgroup_bytes(read_cgroup(cgroup_root / "memory.peak")),
         "peak_rss": peak_rss_bytes(),
@@ -544,7 +507,8 @@ def render_markdown(report: Report) -> str:
         _row("handler `processingMs`: all", report.handler()),
         *(_row(f"handler `processingMs`: {s}", report.handler(s)) for s in scopes),
         "",
-        f"- Startup (not in per-job stats): model load {report.model_load_s:.1f} s; warm-up "
+        f"- Startup (not in per-job stats): model load {report.model_load_s:.1f} s (worker "
+        "startup: SHA-256 check, load, the scorer's warm-up predict); warm-up job "
         + ", ".join(f"{lot} {s:.1f} s" for lot, s in report.warmup_s.items()),
         f"- Container: CPUs {_na(env.get('cgroup_cpus'))} (cgroup `cpu.max`), "
         f"{_na(env.get('cpu_affinity'))} usable (affinity), `os.cpu_count()` "
@@ -616,13 +580,8 @@ def run(args: argparse.Namespace) -> Report:
     adapters = build_adapters(settings)
     lots = seed_lots(adapters, args.lots)
     t0 = time.perf_counter()
-    scorer = build_scorer(settings)
+    aligner, scorer = build_worker(settings, adapters)  # the worker's startup, thread limit too
     model_load_s = time.perf_counter() - t0
-    threads = quota_threads(affinity=cpu_affinity())
-    apply_thread_limit(threads)  # after the scorer, which is what imports torch
-    aligner = build_aligner(settings, adapters)
-    # ...and again after the warm-up: ultralytics' first predict (select_device) resets torch
-    # to min(8, os.cpu_count() - 1) threads, counting the host's cores, not the quota.
     warmup, jobs = time_jobs(
         adapters,
         aligner,
@@ -632,7 +591,6 @@ def run(args: argparse.Namespace) -> Report:
         args.jobs_per_lot,
         build_scopes(args.lots, args.photo_long_edge or None),
         settings.max_upload_bytes,
-        after_warmup=lambda: apply_thread_limit(threads),
     )
     return Report(
         jobs=jobs,
@@ -640,7 +598,7 @@ def run(args: argparse.Namespace) -> Report:
         warmup_s=warmup,
         stalls={lot: info[3] for lot, info in lots.items()},
         limit_s=args.limit_s,
-        env=environment(settings, scorer, threads=threads),
+        env=environment(settings, scorer, threads=quota_threads(affinity=cpu_affinity())),
     )
 
 

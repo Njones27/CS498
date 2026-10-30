@@ -46,11 +46,12 @@ What is gated, so the number is not flattering:
   reference stays fixture-size; ORB matches at the reference's working size and outlines
   map as fractions, so the large photo aligns like the small one. Upscaled photos are
   smoother than real ones, so their JPEGs are smaller (1-2 MB) and may decode a bit faster.
-- Under a cgroup CPU quota the script sets torch and OpenCV to one thread per quota CPU
-  (after the warm-up too: ultralytics' first predict resets torch to
-  `min(8, os.cpu_count() - 1)`, counting the host's cores). It sets `YOLO_OFFLINE=1`, so
-  ultralytics never checks connectivity or sends usage events; CI runs it with
-  `--network none`.
+- The worker's own thread settings, none of the script's: under a cgroup CPU quota the
+  worker (`parking_worker/cpu_quota.py`) gives torch and OpenCV one thread per quota CPU at
+  startup, after the scorer's warm-up predict (ultralytics' first predict resets torch to
+  `min(8, os.cpu_count() - 1)`, counting the host's cores; later predicts do not). The script
+  sets `YOLO_OFFLINE=1`, so ultralytics never checks connectivity or sends usage events; CI
+  runs it with `--network none`.
 
 In the vision image, with the repo mounted read-only for the seed files and fixtures:
 

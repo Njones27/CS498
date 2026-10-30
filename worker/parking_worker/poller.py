@@ -7,9 +7,10 @@ import threading
 
 from parking_core.interfaces import Aligner, SpaceScorer
 from parking_core.models import Cutoffs
-from parking_core.settings import Adapters, build_adapters, get_settings
+from parking_core.settings import Adapters, Settings, build_adapters, get_settings
 
 from .aligners import build_aligner
+from .cpu_quota import limit_threads_to_quota
 from .handler import ProcessResult, process_message
 from .scorers import build_scorer
 
@@ -50,13 +51,21 @@ def run_forever(
             stop.wait(0.2)  # the memory queue does not block; avoid a busy loop
 
 
+def build_worker(settings: Settings, adapters: Adapters) -> tuple[Aligner, SpaceScorer]:
+    """The aligner and scorer the worker runs with, its threads sized to the CPU quota.
+
+    OpenCV (ORB alignment, photo decoding) is limited first, whatever the scorer; the
+    ACPDS + YOLO scorer limits again once its models are loaded, torch included."""
+    limit_threads_to_quota()
+    return build_aligner(settings, adapters), build_scorer(settings)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     settings = get_settings()
     adapters = build_adapters(settings)
-    run_forever(
-        adapters, build_aligner(settings, adapters), build_scorer(settings), settings.cutoffs
-    )
+    aligner, scorer = build_worker(settings, adapters)
+    run_forever(adapters, aligner, scorer, settings.cutoffs)
 
 
 if __name__ == "__main__":

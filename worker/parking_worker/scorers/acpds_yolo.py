@@ -31,6 +31,8 @@ import numpy as np
 from parking_core.errors import PermanentJobError
 from parking_core.models import AlignedOutline, CarBox, Cutoffs, Point, SpaceScore
 
+from ..cpu_quota import limit_threads_to_quota
+
 if TYPE_CHECKING:
     from parking_core.settings import Settings
 
@@ -51,6 +53,8 @@ YOLO_MAX_DET = 600
 so a busy lot's misread non-car boxes must not push real cars out of the cap."""
 MAX_PIXELS = 100_000_000
 """Photos above 100 MP are refused (a drone frame is ~12-50 MP); checked from the header."""
+WARMUP_PX = 64
+"""Side of the blank image YoloCarDetector predicts on at load (letterboxed to imgsz)."""
 _MAX_COORD = 1e6  # px; keeps absurd outline coordinates inside int32 for cv2.fillPoly
 _SUBPIXEL_SHIFT = 4  # cv2.fillPoly fixed-point bits: vertices at 1/16 pixel
 
@@ -346,6 +350,12 @@ class YoloCarDetector:  # pragma: no cover - needs ultralytics and the weights
             if classes is None
             else [i for i, name in self.model.names.items() if name in classes]
         )
+        # The first predict builds ultralytics' predictor, whose setup (select_device) sets
+        # torch to min(8, os.cpu_count() - 1) threads: the host's cores, not a container's
+        # quota. Later predicts reuse that predictor (it is rebuilt only when a setup argument
+        # such as `device` changes, and __call__ always passes the same ones), so doing it
+        # here, at load, means a thread limit applied afterwards holds for every photo.
+        self(np.zeros((WARMUP_PX, WARMUP_PX, 3), dtype=np.uint8))
 
     def __call__(self, bgr: np.ndarray) -> list[Detection]:
         height, width = bgr.shape[:2]
@@ -383,6 +393,21 @@ class YoloCarDetector:  # pragma: no cover - needs ultralytics and the weights
                 )
             )
         return detections
+
+
+def load_models(  # pragma: no cover - needs torch, ultralytics and the weights
+    acpds_path: Path, yolo_path: Path, settings: Settings, seg: bool
+) -> tuple[AcpdsModel, YoloCarDetector]:
+    """Load both models on CPU, then size torch's and OpenCV's threads to the CPU quota.
+
+    The limit goes last: importing ultralytics sets OpenCV to 0 threads, and the detector's
+    warm-up predict resets torch's threads to a count of the host's cores."""
+    acpds_model = load_acpds(acpds_path)
+    car_detector = YoloCarDetector(
+        yolo_path, conf=settings.yolo_conf, seg=seg, imgsz=settings.yolo_imgsz
+    )
+    limit_threads_to_quota()
+    return acpds_model, car_detector
 
 
 # --- the scorer ------------------------------------------------------------------------------
@@ -429,9 +454,12 @@ class AcpdsYoloScorer:
         acpds_path, acpds_sha = verify_weights(models_dir, settings.acpds_weights)
         yolo_rel = settings.yolo_seg_weights if seg else settings.yolo_weights
         yolo_path, yolo_sha = verify_weights(models_dir, yolo_rel)
+        acpds_model, car_detector = load_models(  # pragma: no cover - needs torch and weights
+            acpds_path, yolo_path, settings, seg
+        )
         return cls(  # pragma: no cover - needs torch, ultralytics and the weights
-            load_acpds(acpds_path),
-            YoloCarDetector(yolo_path, conf=settings.yolo_conf, seg=seg, imgsz=settings.yolo_imgsz),
+            acpds_model,
+            car_detector,
             settings.cutoffs,
             {"acpds": acpds_sha[:12], "yolo": yolo_sha[:12]},
             yolo_conf=settings.yolo_conf,

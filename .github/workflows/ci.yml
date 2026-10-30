@@ -117,7 +117,7 @@ jobs:
       # --memory-swap equal to --memory: otherwise Docker allows as much swap again on top, and
       # 4 GB would not be a real cap on a runner with a swapfile. --cpus is a CFS quota, so the
       # container would still see every runner core: --cpuset-cpus pins it to two, the OMP/MKL
-      # variables size torch's pool, and the script sets torch/OpenCV threads from the quota.
+      # variables size torch's pool, and the worker sets torch/OpenCV threads from the quota.
       # --photo-long-edge 4032 (the default, spelled out) also times every lot at 12 MP size.
       # `timeout` stops a hang early enough for this step to still write the summary.
       - name: NFR-1 worker timing (docker --cpus=2 --memory=4g, real models, p95 <= 30 s)
