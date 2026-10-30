@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { LotDetail, LotListItem } from '../api/schemas'
+import type { LotDetail } from '../api/schemas'
 import { putFile } from '../lib/putFile'
 import { ADMIN, mockFetch, renderApp } from '../test/helpers'
 import { draftFixture } from './fixtures/kevin'
@@ -18,15 +18,6 @@ const detail: LotDetail = {
   viewpoints: [{ viewId: 'V1', name: 'North corner' }],
   layout: { version: 1, schematic: { width: 1000, height: 600 }, spaces: [] },
 }
-
-const lotItem = (lotId: string): LotListItem => ({
-  lotId,
-  name: lotId,
-  location: '',
-  staleAfterMinutes: 30,
-  layoutVersion: 1,
-  summary: { free: 0, occupied: 0, unknown: 0, closed: 0, total: 0, openPercent: null, hasRecentData: false, isStale: false },
-})
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -227,27 +218,8 @@ describe('LotMappingPage', () => {
   })
 })
 
+// Which lot the link picks is tested with the lot picker (admin/lotPicker.test.tsx).
 describe('Admin home Map link', () => {
-  it('points at the picked lot', async () => {
-    localStorage.setItem('parking.admin.lotId', 'north-lot')
-    mockFetch({})
-    renderApp('/admin', ADMIN)
-    expect(await screen.findByRole('link', { name: 'Map' })).toHaveAttribute('href', '/admin/lots/north-lot/map')
-  })
-
-  it('falls back to the first lot', async () => {
-    mockFetch({ 'GET /lots': { body: [lotItem('test-lot'), lotItem('zeta')] } })
-    renderApp('/admin', ADMIN)
-    expect(await screen.findByRole('link', { name: 'Map' })).toHaveAttribute('href', '/admin/lots/test-lot/map')
-  })
-
-  it('is disabled when there are no lots', async () => {
-    mockFetch({ 'GET /lots': { body: [] } })
-    renderApp('/admin', ADMIN)
-    expect(await screen.findByText('(no lots yet)')).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Map' })).not.toBeInTheDocument()
-  })
-
   it('opens the mapping page', async () => {
     localStorage.setItem('parking.admin.lotId', 'test-lot')
     mockFetch({ 'GET /lots/test-lot': { body: detail }, [`GET ${URL}`]: { body: draftFixture() } })

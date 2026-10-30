@@ -6,7 +6,7 @@ import type { LotDetail, LotListItem, LotStatusOut } from '../api/schemas'
 import { draftFixture } from '../mapping/fixtures/kevin'
 import { AGE_RANGE, NAME_REQUIRED } from '../pages/NewLotPage'
 import { ADMIN, mockFetch, renderApp } from '../test/helpers'
-import { resolveLotId } from './adminLot'
+import { ADMIN_LOT_KEY, resolveLotId } from './adminLot'
 
 const KEY = 'parking.admin.lotId'
 
@@ -90,6 +90,10 @@ describe('lot picker', () => {
     expect((await picker()).value).toBe('test-lot')
   })
 
+  it('remembers the lot under the key the admin pages share, defined in adminLot (no import cycle)', () => {
+    expect(ADMIN_LOT_KEY).toBe(KEY)
+  })
+
   it('resolveLotId keeps a known lot, else the first published, else the first lot', () => {
     const unpublished = adminLot('a', 'A', false)
     expect(resolveLotId('test-lot', null)).toBe('test-lot')
@@ -120,6 +124,26 @@ describe('US-16 #3: lot picker on every admin page', () => {
     expect(localStorage.getItem(KEY)).toBe('north-lot')
   })
 
+  it('Upload says an unpublished picked lot has nothing to upload to', async () => {
+    localStorage.setItem(KEY, 'north-lot')
+    mockFetch({
+      ...routes,
+      'GET /admin/lots': { body: [NEW_NORTH, TEST_LOT] },
+      'GET /lots': { body: [listItem('test-lot', 'Test Lot')] },
+    })
+    renderApp('/admin/upload', ADMIN)
+    expect(await screen.findByText(/North Lot is not published yet, so there is nothing to upload to/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Publish it from the map editor' })).toHaveAttribute(
+      'href',
+      '/admin/lots/north-lot/map',
+    )
+    expect((await picker()).value).toBe('north-lot')
+    expect(screen.getByLabelText('Lot')).toHaveValue('')
+    await userEvent.setup().selectOptions(screen.getByLabelText('Lot'), 'test-lot')
+    expect(await screen.findByRole('option', { name: 'Test pole' })).toBeInTheDocument()
+    expect(screen.queryByText(/is not published yet/)).not.toBeInTheDocument()
+  })
+
   it("the Upload page's own lot select moves the picker too", async () => {
     mockFetch(routes)
     renderApp('/admin/upload', ADMIN)
@@ -143,22 +167,47 @@ describe('US-16 #3: lot picker on every admin page', () => {
     expect(calls(fetchMock, 'GET', '/admin/snapshots?lotId=north-lot')).toHaveLength(1)
   })
 
+  const status = (lotId: string): LotStatusOut => ({
+    lotId, layoutVersion: 1, isStale: false, processing: false, noObservations: true, lastObservedAt: null,
+    counts: { free: 0, occupied: 0, unknown: 0, closed: 0 }, spaces: [],
+  })
+  const closuresRoutes = {
+    'GET /lots/test-lot/status': { body: status('test-lot') },
+    'GET /lots/north-lot/status': { body: status('north-lot') },
+    'GET /admin/lots/test-lot/closures': { body: [] },
+    'GET /admin/lots/north-lot/closures': { body: [] },
+  }
+
   it('switching lots reloads the Closures page for the new lot', async () => {
-    const status = (lotId: string): LotStatusOut => ({
-      lotId, layoutVersion: 1, isStale: false, processing: false, noObservations: true, lastObservedAt: null,
-      counts: { free: 0, occupied: 0, unknown: 0, closed: 0 }, spaces: [],
-    })
-    const fetchMock = mockFetch({
-      ...routes,
-      'GET /lots/test-lot/status': { body: status('test-lot') },
-      'GET /lots/north-lot/status': { body: status('north-lot') },
-      'GET /admin/lots/test-lot/closures': { body: [] },
-      'GET /admin/lots/north-lot/closures': { body: [] },
-    })
+    const fetchMock = mockFetch({ ...routes, ...closuresRoutes })
     renderApp('/admin/closures', ADMIN)
     await waitFor(() => expect(calls(fetchMock, 'GET', '/admin/lots/test-lot/closures')).toHaveLength(1))
     await userEvent.setup().selectOptions(await picker(), 'north-lot')
     await waitFor(() => expect(calls(fetchMock, 'GET', '/admin/lots/north-lot/closures')).toHaveLength(1))
+  })
+
+  it('a remembered lot that no longer exists: Closures uses the picked lot, then follows a switch', async () => {
+    localStorage.setItem(KEY, 'deleted-lot')
+    const fetchMock = mockFetch({ ...routes, ...closuresRoutes })
+    renderApp('/admin/closures', ADMIN)
+    expect(await screen.findByRole('heading', { name: 'Closures: North Lot' })).toBeInTheDocument()
+    expect((await picker()).value).toBe('north-lot')
+    await userEvent.setup().selectOptions(await picker(), 'test-lot')
+    expect(await screen.findByRole('heading', { name: 'Closures: Test Lot' })).toBeInTheDocument()
+    expect(calls(fetchMock, 'GET', '/admin/lots/test-lot/closures')).toHaveLength(1)
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('deleted-lot'))).toBe(false)
+  })
+
+  it('B1: picking an unpublished lot and opening Closures says to publish it first', async () => {
+    const fetchMock = mockFetch({ ...routes, 'GET /admin/lots': { body: [NEW_NORTH, TEST_LOT] }, ...closuresRoutes })
+    renderApp('/admin', ADMIN)
+    const user = userEvent.setup()
+    await user.selectOptions(await picker(), 'north-lot')
+    await user.click(screen.getByRole('link', { name: 'Closures' }))
+    expect(await screen.findByText(/Publish the lot before closing spaces/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Closures: North Lot' })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(calls(fetchMock, 'GET', '/lots/north-lot')).toHaveLength(0)
   })
 
   it('switching lots on the mapping page opens the same page for the new lot', async () => {
@@ -177,6 +226,33 @@ describe('US-16 #3: lot picker on every admin page', () => {
     renderApp('/admin/lots/north-lot/map', ADMIN)
     await waitFor(async () => expect((await picker()).value).toBe('north-lot'))
     expect(localStorage.getItem(KEY)).toBe('north-lot')
+  })
+})
+
+describe('Admin home Map link', () => {
+  const mapLink = () => screen.findByRole('link', { name: 'Map' })
+
+  it('points at the picked lot, published or not', async () => {
+    localStorage.setItem(KEY, 'north-lot')
+    mockFetch({ 'GET /admin/lots': { body: [NEW_NORTH, TEST_LOT] } })
+    renderApp('/admin', ADMIN)
+    await waitFor(async () => expect(await mapLink()).toHaveAttribute('href', '/admin/lots/north-lot/map'))
+  })
+
+  it("follows the picker's fallback when the remembered lot is gone", async () => {
+    localStorage.setItem(KEY, 'deleted-lot')
+    mockFetch({ 'GET /admin/lots': { body: [NEW_NORTH, TEST_LOT] } })
+    renderApp('/admin', ADMIN)
+    expect((await picker()).value).toBe('test-lot')
+    expect(await mapLink()).toHaveAttribute('href', '/admin/lots/test-lot/map')
+  })
+
+  it('is disabled when there are no lots', async () => {
+    localStorage.clear()
+    mockFetch({ 'GET /admin/lots': { body: [] } })
+    renderApp('/admin', ADMIN)
+    expect(await screen.findByText('(no lots yet)')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Map' })).not.toBeInTheDocument()
   })
 })
 

@@ -332,6 +332,15 @@ class DynamoRepository:
     def put_lot(self, lot: Lot) -> None:
         self._table.put_item(Item=lot_item(lot))
 
+    def put_lot_if_absent(self, lot: Lot) -> bool:
+        try:
+            self._table.put_item(Item=lot_item(lot), ConditionExpression="attribute_not_exists(PK)")
+            return True
+        except ClientError as exc:
+            if is_conditional_failure(exc):
+                return False
+            raise
+
     def get_lot(self, lot_id: str) -> Lot | None:
         item = self._get(k.lot_pk(lot_id), k.META)
         return item_to_model(item, Lot) if item else None

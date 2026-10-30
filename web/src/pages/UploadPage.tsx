@@ -21,9 +21,6 @@ import {
 } from '../lib/uploadValidation'
 import { useFetch } from '../lib/useFetch'
 
-/** localStorage key shared with the admin lot picker (US-16 #3). */
-export const ADMIN_LOT_KEY = 'parking.admin.lotId'
-
 type Outcome =
   | { kind: 'success'; imageId: string }
   | { kind: 'duplicate'; uploadedAt: string | null | undefined; imageId: string | null | undefined }
@@ -32,8 +29,10 @@ type Outcome =
 /** US-04 / US-05: upload a lot photo with its capture time. */
 export function UploadPage() {
   const lots = useFetch(() => api.get<LotListItem[]>('/lots'), 'lots')
-  const { lotId: storedLotId, setLotId } = useAdminLot()
+  const { lotId: storedLotId, setLotId, lots: adminLots } = useAdminLot()
   const lotId = lots.data && !lots.data.some((l) => l.lotId === storedLotId) ? '' : storedLotId
+  // Uploads need a published layout, so an unpublished picked lot is not in the select.
+  const unpublished = adminLots?.find((l) => l.lotId === storedLotId && !l.published)
   const detail = useFetch<LotDetail | null>(
     () => (lotId ? api.get<LotDetail>(`/lots/${encodeURIComponent(lotId)}`) : Promise.resolve(null)),
     `detail:${lotId}`,
@@ -134,6 +133,13 @@ export function UploadPage() {
       {lots.error && (
         <p className="notice notice--error" role="alert">
           {lots.error}
+        </p>
+      )}
+      {unpublished && (
+        <p className="notice">
+          {unpublished.name} is not published yet, so there is nothing to upload to.{' '}
+          <Link to={`/admin/lots/${encodeURIComponent(unpublished.lotId)}/map`}>Publish it from the map editor</Link> or
+          choose a published lot.
         </p>
       )}
       <form className="form" onSubmit={onSubmit} noValidate>

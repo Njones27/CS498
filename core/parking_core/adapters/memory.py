@@ -188,6 +188,13 @@ class MemoryRepository:
         with self._lock:
             self._lots[lot.lot_id] = lot.model_copy(deep=True)
 
+    def put_lot_if_absent(self, lot: Lot) -> bool:
+        with self._lock:
+            if lot.lot_id in self._lots:
+                return False
+            self._lots[lot.lot_id] = lot.model_copy(deep=True)
+            return True
+
     def get_lot(self, lot_id: str) -> Lot | None:
         with self._lock:
             lot = self._lots.get(lot_id)

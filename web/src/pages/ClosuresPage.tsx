@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
+import { useAdminLot } from '../admin/AdminLotContext'
 import { api, errorMessage } from '../api/client'
 import type { ClosureCreate, ClosureOut, ClosureReason } from '../api/closures'
-import type { LotDetail, LotListItem, LotStatusOut, SpaceStatusOut } from '../api/schemas'
+import type { LotDetail, LotStatusOut, SpaceStatusOut } from '../api/schemas'
 import { LotMapSvg } from '../components/LotMapSvg'
 import { StateIconSvg } from '../components/StateIcon'
 import { REASONS, STATUS_LABEL, closureWindow, compactLabels, reasonLabel, rowOf } from '../lib/closures'
@@ -10,26 +11,17 @@ import { dateTime, toDateTimeLocal } from '../lib/relativeTime'
 import { STATE_ORDER, visualFor } from '../lib/status'
 import { parseLocalDateTime } from '../lib/uploadValidation'
 import { useFetch } from '../lib/useFetch'
-import { ADMIN_LOT_KEY } from './UploadPage'
 
 const WINDOW_MESSAGE = 'End time must be after start time'
 
-function rememberedLot(): string {
-  try {
-    return localStorage.getItem(ADMIN_LOT_KEY) ?? ''
-  } catch {
-    return ''
-  }
-}
+const NOT_PUBLISHED = 'Publish the lot before closing spaces'
 
 /** US-10: close spaces for construction, events, maintenance or reservations. */
 export function ClosuresPage() {
-  const [storedLotId] = useState(rememberedLot)
-  const lots = useFetch<LotListItem[] | null>(
-    () => (storedLotId ? Promise.resolve(null) : api.get<LotListItem[]>('/lots')),
-    `closures-lots:${storedLotId}`,
-  )
-  const lotId = storedLotId || lots.data?.[0]?.lotId || ''
+  const { lotId: pickedId, lots, error: lotsError } = useAdminLot()
+  const picked = lots?.find((l) => l.lotId === pickedId)
+  // The lot's layout and status come from the public routes, which only serve published lots.
+  const lotId = picked?.published ? picked.lotId : ''
   const base = `/lots/${encodeURIComponent(lotId)}`
   const adminBase = `/admin/lots/${encodeURIComponent(lotId)}/closures`
   const detail = useFetch<LotDetail | null>(
@@ -128,16 +120,20 @@ export function ClosuresPage() {
     }
   }
 
-  const loadError = lots.error ?? detail.error ?? status.error ?? closures.error
-  const noLots = !storedLotId && lots.data !== null && lots.data.length === 0
+  const loadError = (lots ? null : lotsError) ?? detail.error ?? status.error ?? closures.error
 
   return (
     <main className="page">
       <Link to="/admin" className="back-link">
         ← Admin
       </Link>
-      <h1>Closures{detail.data ? `: ${detail.data.lot.name}` : ''}</h1>
-      {noLots && <p>No lots yet</p>}
+      <h1>Closures{picked ? `: ${picked.name}` : ''}</h1>
+      {lots?.length === 0 && <p>No lots yet</p>}
+      {picked && !picked.published && (
+        <p className="notice">
+          {NOT_PUBLISHED}. <Link to={`/admin/lots/${encodeURIComponent(picked.lotId)}/map`}>Open the map editor</Link>
+        </p>
+      )}
       {loadError && (
         <p className="notice notice--error" role="alert">
           {loadError}
