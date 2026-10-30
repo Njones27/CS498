@@ -1260,27 +1260,16 @@
         "type": "object"
       },
       "ReferenceCompleteRequest": {
+        "description": "The photo's width and height are read from the stored file, not taken from the client.",
         "properties": {
-          "height": {
-            "exclusiveMinimum": 0.0,
-            "title": "Height",
-            "type": "integer"
-          },
           "sha256": {
             "pattern": "^[0-9a-f]{64}$",
             "title": "Sha256",
             "type": "string"
-          },
-          "width": {
-            "exclusiveMinimum": 0.0,
-            "title": "Width",
-            "type": "integer"
           }
         },
         "required": [
-          "sha256",
-          "width",
-          "height"
+          "sha256"
         ],
         "title": "ReferenceCompleteRequest",
         "type": "object"
@@ -2771,6 +2760,16 @@
               }
             },
             "description": "cannot_delete_published_space or validation_error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "snapshot_missing"
           }
         },
         "summary": "Save the draft layout; drivers see nothing until it is published",
@@ -3166,6 +3165,16 @@
               }
             },
             "description": "validation_error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "snapshot_missing"
           }
         },
         "summary": "Replace the draft with a published version's contents; publish to make it live",
@@ -3379,7 +3388,7 @@
                 }
               }
             },
-            "description": "missing_object: file was never uploaded | hash_mismatch"
+            "description": "missing_object: file was never uploaded | hash_mismatch | too_large: the stored file is over the size limit | unsupported_type: the stored file is not a readable JPEG or PNG"
           },
           "422": {
             "content": {
@@ -3392,7 +3401,7 @@
             "description": "validation_error"
           }
         },
-        "summary": "Confirm the reference photo arrived and record dimensions",
+        "summary": "Confirm the reference photo arrived and record its size, read from the file",
         "tags": [
           "admin"
         ]

@@ -203,7 +203,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Confirm the reference photo arrived and record dimensions */
+        /** Confirm the reference photo arrived and record its size, read from the file */
         post: operations["complete_reference_upload_admin_lots__lot_id__views__view_id__reference_complete_post"];
         delete?: never;
         options?: never;
@@ -932,14 +932,13 @@ export interface components {
             /** Y */
             y: number;
         };
-        /** ReferenceCompleteRequest */
+        /**
+         * ReferenceCompleteRequest
+         * @description The photo's width and height are read from the stored file, not taken from the client.
+         */
         ReferenceCompleteRequest: {
-            /** Height */
-            height: number;
             /** Sha256 */
             sha256: string;
-            /** Width */
-            width: number;
         };
         /** ReferenceCompleteResponse */
         ReferenceCompleteResponse: {
@@ -1753,6 +1752,15 @@ export interface operations {
                     "application/json": components["schemas"]["DraftErrorResponse"];
                 };
             };
+            /** @description snapshot_missing */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     validate_admin_lots__lot_id__layout_draft_validate_post: {
@@ -2016,6 +2024,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description snapshot_missing */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     request_reference_upload_admin_lots__lot_id__views__view_id__reference_post: {
@@ -2137,7 +2154,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description missing_object: file was never uploaded | hash_mismatch */
+            /** @description missing_object: file was never uploaded | hash_mismatch | too_large: the stored file is over the size limit | unsupported_type: the stored file is not a readable JPEG or PNG */
             409: {
                 headers: {
                     [name: string]: unknown;

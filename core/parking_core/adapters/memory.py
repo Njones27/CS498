@@ -220,6 +220,19 @@ class MemoryRepository:
             key = (viewpoint.lot_id, viewpoint.view_id)
             self._viewpoints[key] = viewpoint.model_copy(deep=True)
 
+    def update_viewpoint(self, lot_id: str, view_id: str, /, **fields: object) -> bool:
+        unknown = set(fields) - (set(Viewpoint.model_fields) - {"lot_id", "view_id"})
+        if not fields or unknown:
+            raise ValueError(f"not updatable viewpoint fields: {sorted(unknown) or 'none given'}")
+        with self._lock:
+            current = self._viewpoints.get((lot_id, view_id))
+            if current is None:
+                return False
+            data = current.model_dump(by_alias=False)
+            data.update(fields)
+            self._viewpoints[(lot_id, view_id)] = Viewpoint.model_validate(data)
+            return True
+
     def get_viewpoint(self, lot_id: str, view_id: str) -> Viewpoint | None:
         with self._lock:
             v = self._viewpoints.get((lot_id, view_id))

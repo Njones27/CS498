@@ -19,6 +19,7 @@ from parking_core.models import (
     JobStatus,
     LayoutVersion,
     Lot,
+    OutlineReview,
     ParkingSpace,
     PublishedLayout,
     Rect,
@@ -353,6 +354,69 @@ def test_memory_head():
     store.put("k", b"12345", "image/png")
     info = store.head("k")
     assert info is not None and (info.size_bytes, info.content_type) == (5, "image/png")
+
+
+def test_update_viewpoint_sets_only_the_given_fields(repo):
+    outlines = {"s1": [(0.1, 0.1), (0.2, 0.1), (0.2, 0.2), (0.1, 0.2)]}
+    repo.put_viewpoint(
+        Viewpoint(lot_id="L", view_id="V1", name="North", outlines=outlines, camera_height_m=4.0)
+    )
+    assert repo.update_viewpoint(
+        "L", "V1", reference_image_key="reference/L/V1/abc", image_width=640, image_height=360
+    )
+    vp = repo.get_viewpoint("L", "V1")
+    assert (vp.reference_image_key, vp.image_width, vp.image_height) == (
+        "reference/L/V1/abc",
+        640,
+        360,
+    )
+    assert (vp.name, vp.outlines, vp.camera_height_m) == ("North", outlines, 4.0)
+
+    assert not repo.update_viewpoint("L", "V9", name="x")  # never creates one
+    assert repo.get_viewpoint("L", "V9") is None
+    with pytest.raises(ValueError, match="view_id"):
+        repo.update_viewpoint("L", "V1", view_id="V2")
+    with pytest.raises(ValueError, match="none given"):
+        repo.update_viewpoint("L", "V1")
+
+
+def test_viewpoint_update_expression():
+    upd = aws.viewpoint_update(
+        {
+            "outlines": {"s1": [(0.1, 0.2)]},
+            "outline_review": {"s1": OutlineReview(source="drawn", status="accepted")},
+        }
+    )
+    assert upd["UpdateExpression"] == "SET #f0 = :f0, #f1 = :f1"
+    assert upd["ConditionExpression"] == "attribute_exists(PK)"
+    assert upd["ExpressionAttributeNames"] == {"#f0": "outlineReview", "#f1": "outlines"}
+    assert upd["ExpressionAttributeValues"] == {
+        ":f0": {"s1": {"source": "drawn", "status": "accepted"}},
+        ":f1": {"s1": [[Decimal("0.1"), Decimal("0.2")]]},
+    }
+    with pytest.raises(ValueError, match="lot_id"):
+        aws.viewpoint_update({"lot_id": "M"})
+
+
+def test_update_viewpoint_dynamo(aws_creds):
+    repo = aws.DynamoRepository(AWS_SETTINGS)
+    with Stubber(repo._table.meta.client) as stub:
+        stub.add_response(
+            "update_item",
+            {},
+            {
+                "TableName": AWS_SETTINGS.table_name,
+                "Key": {"PK": "LOT#L", "SK": "VIEW#V1"},
+                "UpdateExpression": "SET #f0 = :f0, #f1 = :f1",
+                "ConditionExpression": "attribute_exists(PK)",
+                "ExpressionAttributeNames": {"#f0": "imageWidth", "#f1": "referenceImageKey"},
+                "ExpressionAttributeValues": {":f0": 640, ":f1": "reference/x"},
+            },
+        )
+        stub.add_client_error("update_item", service_error_code="ConditionalCheckFailedException")
+        assert repo.update_viewpoint("L", "V1", reference_image_key="reference/x", image_width=640)
+        assert not repo.update_viewpoint("L", "V9", image_width=640)
+        stub.assert_no_pending_responses()
 
 
 def _version(lot_id: str) -> LayoutVersion:

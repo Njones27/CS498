@@ -21,9 +21,9 @@ class ReferenceUploadSlot(CamelModel):
 
 
 class ReferenceCompleteRequest(CamelModel):
+    """The photo's width and height are read from the stored file, not taken from the client."""
+
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    width: int = Field(gt=0)
-    height: int = Field(gt=0)
 
 
 class ReferenceImageInfo(CamelModel):

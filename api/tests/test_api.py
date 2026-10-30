@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import threading
 from datetime import timedelta
 from pathlib import Path
@@ -9,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from parking_api.export_openapi import export
 from parking_api.main import create_app
+from parking_core.keys import layout_snapshot_key
 from parking_core.models import JobStatus, SpaceObservation, SpaceState, SpaceStatus
 from parking_core.settings import Settings
 
@@ -129,6 +132,21 @@ def test_lots_summary_with_statuses(client, adapters):
         )
     summary = client.get("/lots").json()[0]["summary"]
     assert summary["free"] == 2 and summary["openPercent"] == 14 and summary["hasRecentData"]
+
+
+def test_unloadable_snapshot_counts_as_unpublished(client, adapters, caplog):
+    # A snapshot that no longer loads (here a null schematic width) must not fail GET /lots
+    # for every driver: that lot is left out, and the error is logged.
+    key = layout_snapshot_key("test-lot", 1)
+    data = json.loads(adapters.object_store.get(key))
+    data["schematic"]["width"] = None
+    adapters.object_store.put(key, json.dumps(data).encode(), "application/json")
+    with caplog.at_level(logging.ERROR, logger="parking_api.routes.public"):
+        r = client.get("/lots")
+    assert r.status_code == 200 and r.json() == []
+    assert "Published layout of lot test-lot v1 does not load" in caplog.text
+    assert client.get("/lots/test-lot").status_code == 404
+    assert client.get("/lots/test-lot/status").status_code == 404
 
 
 def test_lot_detail(client):

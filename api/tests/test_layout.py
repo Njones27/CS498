@@ -177,13 +177,20 @@ def test_stale_revision_returns_409(client, admin_headers):
     assert space(d, "A-02")["label"] == "A-02"
 
 
+# A save that loses the race writes nothing, so a publish that won it can't include the
+# items of a save that reported 409.
 def test_lost_race_on_meta_write_returns_409(client, admin_headers, adapters, monkeypatch):
     body = as_body(get_draft(client, admin_headers))
+    space(body, "A-01")["label"] = "lost"
+    view(body, "V1")["outlines"].pop("A-01")
     monkeypatch.setattr(
         adapters.repository, "put_draft_meta", lambda meta, expected_revision: False
     )
     r = put(client, admin_headers, body)
     assert r.status_code == 409 and r.json()["error"] == "stale_revision"
+    d = get_draft(client, admin_headers)
+    assert space(d, "A-01")["label"] == "A-01"
+    assert "A-01" in view(d, "V1")["outlines"]
 
 
 # --- US-07 #3: the driver view does not change until publish -------------------
@@ -682,6 +689,47 @@ def test_restore_drops_never_published_spaces(client, admin_headers):
     assert len(restored["spaces"]) == 14
 
 
+def lose_snapshot(adapters, monkeypatch, key="layouts/test-lot/v1.json"):
+    """The object store no longer has `key` (a snapshot deleted by hand, say)."""
+    store = adapters.object_store
+    get, exists = store.get, store.exists
+
+    def get_or_missing(k: str) -> bytes:
+        if k == key:
+            raise KeyError(k)
+        return get(k)
+
+    monkeypatch.setattr(store, "get", get_or_missing)
+    monkeypatch.setattr(store, "exists", lambda k: k != key and exists(k))
+
+
+SNAPSHOT_MISSING = {
+    "error": "snapshot_missing",
+    "message": "A published version of this lot is missing from storage, so the draft can't "
+    "be changed safely. Ask an operator to restore it.",
+}
+
+
+# A missing snapshot is a server fault, not an unknown version (KeyError is a LookupError).
+def test_restore_with_missing_snapshot_is_500(client, admin_headers, adapters, monkeypatch):
+    lose_snapshot(adapters, monkeypatch)
+    r = client.post(f"{LAYOUT}/versions/1/restore", headers=admin_headers)
+    assert (r.status_code, r.json()) == (500, SNAPSHOT_MISSING)
+    assert get_draft(client, admin_headers)["revision"] == 0
+
+
+def test_deleting_a_space_with_missing_snapshot_is_500(
+    client, admin_headers, adapters, monkeypatch
+):
+    edit(client, admin_headers, lambda b: b["spaces"].append(NEW_SPACE))
+    lose_snapshot(adapters, monkeypatch)
+    body = as_body(get_draft(client, admin_headers))
+    body["spaces"] = [s for s in body["spaces"] if s["spaceId"] != NEW_SPACE["spaceId"]]
+    r = put(client, admin_headers, body)
+    assert (r.status_code, r.json()) == (500, SNAPSHOT_MISSING)
+    assert get_draft(client, admin_headers)["revision"] == 1
+
+
 def test_restore_unknown_version_is_404(client, admin_headers):
     r = client.post(f"{LAYOUT}/versions/9/restore", headers=admin_headers)
     assert r.status_code == 404 and r.json()["error"] == "not_found"
@@ -739,3 +787,51 @@ def test_non_finite_corner_is_422(client, admin_headers, literal):
     assert r.status_code == 422
     assert r.json()["error"] == "validation_error"
     assert get_draft(client, admin_headers)["revision"] == 0
+
+
+@pytest.mark.parametrize("field", ["x", "w"])
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_rect_is_422(client, admin_headers, field, literal):
+    # As for corners: a NaN rect validated as inside the map, published, and the snapshot it
+    # was stored in then failed to load for every driver.
+    body = as_body(get_draft(client, admin_headers))
+    space(body, "A-01")["rect"][field] = "__X__"
+    raw = json.dumps(body).replace('"__X__"', literal)
+    r = client.put(
+        "/admin/lots/test-lot/layout/draft",
+        content=raw,
+        headers={**admin_headers, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 422
+    assert r.json()["error"] == "validation_error"
+    assert get_draft(client, admin_headers)["revision"] == 0
+
+
+@pytest.mark.parametrize("field", ["width", "height"])
+@pytest.mark.parametrize("literal", ["NaN", "Infinity"])
+def test_non_finite_schematic_is_422(client, admin_headers, field, literal):
+    # An infinite width puts every rect inside the map, and is stored as null in the snapshot.
+    body = as_body(get_draft(client, admin_headers))
+    body["schematic"][field] = "__X__"
+    raw = json.dumps(body).replace('"__X__"', literal)
+    r = client.put(
+        "/admin/lots/test-lot/layout/draft",
+        content=raw,
+        headers={**admin_headers, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 422
+    assert r.json()["error"] == "validation_error"
+    assert get_draft(client, admin_headers)["revision"] == 0
+
+
+def test_zero_size_rect_blocks_publishing(client, admin_headers):
+    edit(
+        client,
+        admin_headers,
+        lambda b: space(b, "A-01").update(rect={"x": 80, "y": 80, "w": 0, "h": 0}),
+    )
+    report = validate(client, admin_headers)
+    assert [e["code"] for e in report["errors"]] == ["bad_rect"]
+    assert report["errors"][0]["spaceIds"] == ["A-01"]
+    r = publish(client, admin_headers)
+    assert r.status_code == 409 and r.json()["error"] == "validation_failed"

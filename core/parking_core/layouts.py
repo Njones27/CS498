@@ -7,6 +7,8 @@ read published snapshots, so draft edits never reach them until a publish.
 
 from __future__ import annotations
 
+import contextlib
+import math
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -26,6 +28,7 @@ from .models import (
     ParkingSpace,
     Point,
     PublishedLayout,
+    Rect,
     Schematic,
     Viewpoint,
 )
@@ -67,7 +70,8 @@ def published_space_ids(repo: Repository, store: ObjectStore, lot_id: str) -> se
     """Every space id in any published version of the lot (retired ones included).
 
     Those spaces can be retired but never deleted, so old snapshots and observations stay
-    valid. A missing snapshot object raises KeyError rather than letting a delete through.
+    valid. A missing snapshot object raises SnapshotMissingError rather than letting a delete
+    through.
     """
     ids: set[str] = set()
     for version in repo.list_layout_versions(lot_id):
@@ -75,8 +79,19 @@ def published_space_ids(repo: Repository, store: ObjectStore, lot_id: str) -> se
     return ids
 
 
+class SnapshotMissingError(Exception):
+    """A published version's snapshot object is gone from the object store. Not a
+    LookupError: the version exists, so this is a server fault, not an unknown version."""
+
+
 def read_version(store: ObjectStore, version: LayoutVersion) -> PublishedLayout:
-    return PublishedLayout.model_validate_json(store.get(version.snapshot_key))
+    try:
+        data = store.get(version.snapshot_key)
+    except KeyError:
+        raise SnapshotMissingError(
+            f"Snapshot of {version.lot_id} v{version.version} is missing: {version.snapshot_key}"
+        ) from None
+    return PublishedLayout.model_validate_json(data)
 
 
 @dataclass
@@ -176,6 +191,13 @@ def is_valid_quad(polygon: list[Point]) -> bool:
 
 def _inside_photo(polygon: list[Point]) -> bool:
     return all(0.0 <= x <= 1.0 and 0.0 <= y <= 1.0 for x, y in polygon)
+
+
+def _is_valid_rect(rect: Rect) -> bool:
+    """Finite, with positive width and height. `Rect` rejects non-finite numbers, so only a
+    rect built without validation (`model_construct`) can hold them."""
+    values = (rect.x, rect.y, rect.w, rect.h)
+    return all(math.isfinite(v) for v in values) and rect.w > 0 and rect.h > 0
 
 
 def _views_text(view_ids: list[str]) -> str:
@@ -282,10 +304,17 @@ def validate_draft(draft: Draft, published: PublishedLayout | None) -> Validatio
             next(iter(pending_views)) if len(pending_views) == 1 else None,
         )
 
+    # A bad rect gets only its own error: NaN compares False, so it would look inside.
     width, height = draft.meta.schematic.width, draft.meta.schematic.height
     for s in active:
         r = s.rect
-        if r.x < -_EPS or r.y < -_EPS or r.x + r.w > width + _EPS or r.y + r.h > height + _EPS:
+        if not _is_valid_rect(r):
+            err(
+                "bad_rect",
+                f"{_name(s, s.space_id)} is not a valid rectangle on the map",
+                [s.space_id],
+            )
+        elif r.x < -_EPS or r.y < -_EPS or r.x + r.w > width + _EPS or r.y + r.h > height + _EPS:
             err(
                 "rect_outside_schematic",
                 f"{_name(s, s.space_id)} is outside the map area",
@@ -447,9 +476,13 @@ def publish_draft(
     """Validate the stored draft and publish it as the next version (US-09 #4).
 
     Raises StaleRevisionError when the draft is not at `expected_revision`, and
-    ValidationFailedError when it has errors. Before writing anything, the draft meta is
-    moved to the next revision with `basedOnVersion` set to the new version, as a conditional
-    write: of two publishes (or a publish and a save) racing on one revision, only one wins.
+    ValidationFailedError when it has errors. A snapshot that would not load back (such as a
+    value that serializes as null) raises pydantic's ValidationError with nothing written.
+
+    Before writing anything, the draft meta is moved to the next revision with
+    `basedOnVersion` set to the new version, as a conditional write: of two publishes (or a
+    publish and a save) racing on one revision, only one wins. If writing the version then
+    fails, the meta goes back to the version it was based on.
     """
     draft = load_draft(repo, lot, now)
     if draft.meta.revision != expected_revision:
@@ -459,12 +492,24 @@ def publish_draft(
         raise ValidationFailedError(report)
 
     version = next_version(repo, lot.lot_id)
+    layout = build_layout(lot.lot_id, version, draft, published_by, now)
+    # A snapshot that can't be read back would break the lot for every driver and the worker.
+    PublishedLayout.model_validate_json(layout.model_dump_json())
     claimed = draft.meta.model_copy(
         update={"revision": draft.meta.revision + 1, "based_on_version": version}
     )
     if not repo.put_draft_meta(claimed, expected_revision=draft.meta.revision):
         raise StaleRevisionError
-    return write_layout(repo, store, build_layout(lot.lot_id, version, draft, published_by, now))
+    try:
+        return write_layout(repo, store, layout)
+    except Exception:
+        # The new version does not exist, so the draft must not claim to be based on it. The
+        # revision moves on rather than back, so a window that loaded the claimed revision
+        # can't save over a newer one. Best effort: the write's own error is what is raised.
+        released = draft.meta.model_copy(update={"revision": claimed.revision + 1})
+        with contextlib.suppress(Exception):
+            repo.put_draft_meta(released, expected_revision=claimed.revision)
+        raise
 
 
 def list_versions(repo: Repository, lot_id: str) -> list[LayoutVersion]:
@@ -487,8 +532,9 @@ def restore_version(
     - Viewpoints this version lacks are kept (viewpoints are never removed) with no outlines.
     - `basedOnVersion` becomes the restored version.
 
-    Raises LookupError for an unknown version and StaleRevisionError if the draft was saved
-    while restoring.
+    Raises LookupError for an unknown version, SnapshotMissingError when a published
+    version's snapshot is missing, and StaleRevisionError if the draft was saved while
+    restoring, in which case nothing is written.
     """
     lot_id = lot.lot_id
     entry = next((v for v in repo.list_layout_versions(lot_id) if v.version == version), None)
@@ -511,12 +557,8 @@ def restore_version(
         if v.view_id not in restored_views
     ]
 
-    # Items first and the meta last, like a save, so a failed restore never advances the revision.
-    repo.put_spaces(spaces)
-    for v in viewpoints:
-        repo.put_viewpoint(v)
-    for space_id in dropped:
-        repo.delete_space(lot_id, space_id)
+    # The meta first, as the claim (like a save or a publish), so a restore that loses to a save
+    # writes nothing. A failure after the claim leaves a partly restored draft; restore again.
     meta = draft.meta.model_copy(
         update={
             "revision": draft.meta.revision + 1,
@@ -528,4 +570,9 @@ def restore_version(
     )
     if not repo.put_draft_meta(meta, expected_revision=draft.meta.revision):
         raise StaleRevisionError
+    repo.put_spaces(spaces)
+    for v in viewpoints:
+        repo.put_viewpoint(v)
+    for space_id in dropped:
+        repo.delete_space(lot_id, space_id)
     return Draft(meta, spaces, viewpoints)

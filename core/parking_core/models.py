@@ -59,17 +59,19 @@ class ClosureReason(StrEnum):
 
 
 class Rect(CamelModel):
-    """Schematic rectangle in schematic units (see `Schematic`)."""
+    """Schematic rectangle in schematic units (see `Schematic`). Finite only, like `Point`."""
 
-    x: float
-    y: float
-    w: float
-    h: float
+    x: FiniteFloat
+    y: FiniteFloat
+    w: FiniteFloat
+    h: FiniteFloat
 
 
 class Schematic(CamelModel):
-    width: float = 1000
-    height: float = 600
+    """Finite only, like `Rect`: an infinite width is stored as null in a snapshot."""
+
+    width: FiniteFloat = 1000
+    height: FiniteFloat = 600
 
 
 class Lot(CamelModel):

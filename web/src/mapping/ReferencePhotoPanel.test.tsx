@@ -1,32 +1,17 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { putFile } from '../lib/putFile'
 import { mockFetch } from '../test/helpers'
 import { rylanDraftFixture } from './fixtures/rylan'
 import { ReferencePhotoPanel } from './ReferencePhotoPanel'
-import type { DraftLayout } from './types'
+import type { DraftLayout, ReferencePhotoPanelProps } from './types'
 
 vi.mock('../lib/putFile', () => ({ putFile: vi.fn() }))
-
-class MockImage {
-  onload: (() => void) | null = null
-  onerror: (() => void) | null = null
-  naturalWidth = 1000
-  naturalHeight = 750
-  set src(_val: string) {
-    setTimeout(() => this.onload?.(), 0)
-  }
-}
 
 describe('ReferencePhotoPanel (US-08)', () => {
   beforeEach(() => {
     vi.mocked(putFile).mockResolvedValue()
-    vi.stubGlobal('Image', MockImage)
-    if (!window.URL.createObjectURL) {
-      window.URL.createObjectURL = () => 'blob:mock'
-      window.URL.revokeObjectURL = () => {}
-    }
     vi.spyOn(SVGElement.prototype, 'getBoundingClientRect').mockReturnValue({
       width: 500,
       height: 500,
@@ -55,7 +40,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
     if (props.onViewChange) {
       onViewChange.mockImplementation(props.onViewChange)
     }
-    const onReferenceUploaded = vi.fn<() => void>()
+    const onReferenceUploaded = vi.fn<ReferencePhotoPanelProps['onReferenceUploaded']>()
     if (props.onReferenceUploaded) {
       onReferenceUploaded.mockImplementation(props.onReferenceUploaded)
     }
@@ -103,7 +88,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
   // --- US-08 #1: Upload a Reference Photo -----------------------------------
   it('US-08 #1: uploads reference photo and completes flow', async () => {
     const onReferenceUploaded = vi.fn()
-    mockFetch({
+    const fetchMock = mockFetch({
       'POST /admin/lots/test-lot/views/V3/reference': {
         status: 201,
         body: { uploadUrl: '/api/_test/uploads/slot-1', expiresAt: '2099-01-01T00:00:00Z' },
@@ -127,9 +112,17 @@ describe('ReferencePhotoPanel (US-08)', () => {
     await vi.waitFor(() => {
       expect(putFile).toHaveBeenCalled()
     })
+    // The stored photo goes to the page, so it shows even if the refetch that follows fails.
     await vi.waitFor(() => {
-      expect(onReferenceUploaded).toHaveBeenCalled()
+      expect(onReferenceUploaded).toHaveBeenCalledWith({
+        lotId: 'test-lot',
+        viewId: 'V3',
+        referenceImage: { url: '/api/_test/objects/ref-v3.jpg', width: 1000, height: 750 },
+      })
     })
+    // The server reads the photo's size from the file; the panel sends only the hash.
+    const complete = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/reference/complete'))
+    expect(Object.keys(JSON.parse(String(complete?.[1]?.body)))).toEqual(['sha256'])
   })
 
   it('US-08 #1: shows warning when replacing an existing reference photo', async () => {
@@ -202,7 +195,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
 
   // --- US-08 #2: Outline a Space -------------------------------------------
   it('US-08 #2: clicking 4 corners outlines selected space and shows message', async () => {
-    const { onChange } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a03' })
+    const { onChange, onSave } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a03' })
 
     // Prompt shows initial state
     expect(screen.getByText('Click the 4 corners of A-03 (0 of 4)')).toBeInTheDocument()
@@ -221,10 +214,13 @@ describe('ReferencePhotoPanel (US-08)', () => {
     fireEvent.click(svg, { clientX: 150, clientY: 150 })
     expect(screen.getByText(/Click the 4 corners of A-03 \(3 of 4\)/)).toBeInTheDocument()
 
+    expect(onSave).not.toHaveBeenCalled() // a partial outline is not saved
+
     // Click 4 (completes outline)
     fireEvent.click(svg, { clientX: 50, clientY: 150 })
 
     expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledTimes(1) // the finished outline is saved to the draft
     const updatedDraft: DraftLayout = onChange.mock.calls[0][0]
     const v1 = updatedDraft.viewpoints.find((v) => v.viewId === 'V1')!
     expect(v1.outlines['sp_a03']).toHaveLength(4)
@@ -236,7 +232,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
 
   // --- US-08 #3: Adjust a Polygon ------------------------------------------
   it('US-08 #3: dragging a corner handle emits updated polygon on pointer up', async () => {
-    const { onChange } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
+    const { onChange, onSave } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
 
     // A-01 already has an outline in V1; corner handles are shown
     const handle0 = screen.getByTestId('corner-handle-0')
@@ -247,6 +243,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
 
     // Move to new position (200, 200) -> 200/500 = 0.4
     fireEvent.pointerMove(window, { clientX: 200, clientY: 200 })
+    expect(onSave).not.toHaveBeenCalled()
 
     // Pointer up saves to draft
     fireEvent.pointerUp(window)
@@ -259,6 +256,8 @@ describe('ReferencePhotoPanel (US-08)', () => {
     expect(screen.queryByTestId('partial-clicks')).not.toBeInTheDocument()
 
     expect(onChange).toHaveBeenCalledTimes(1)
+    // US-08 #3: "the change is saved to the draft", on pointer up, without pressing Save
+    expect(onSave).toHaveBeenCalledTimes(1)
     const updatedDraft: DraftLayout = onChange.mock.calls[0][0]
     const v1 = updatedDraft.viewpoints.find((v) => v.viewId === 'V1')!
     expect(v1.outlines['sp_a01']).toBeDefined()
@@ -355,6 +354,18 @@ describe('ReferencePhotoPanel (US-08)', () => {
     expect(onViewChange).toHaveBeenCalledWith('V4')
   })
 
+  it('says so when a new viewpoint could not be saved', async () => {
+    const { user } = renderPanel({ viewId: 'V1', onSave: async () => null })
+
+    await user.click(screen.getByRole('button', { name: '+ Viewpoint' }))
+    await user.type(screen.getByPlaceholderText('e.g. South Corner'), 'South Gate')
+    await user.click(screen.getByRole('button', { name: 'Add Viewpoint' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'South Gate (V4) is not saved yet. Save the draft to keep it.',
+    )
+  })
+
   // --- Forward-Compatible Proposed Outlines --------------------------------
   it('allows accepting or rejecting proposed outlines', async () => {
     const { user, onChange } = renderPanel({ viewId: 'V1' })
@@ -374,12 +385,13 @@ describe('ReferencePhotoPanel (US-08)', () => {
   })
 
   it('rejecting a proposed outline removes it', async () => {
-    const { user, onChange } = renderPanel({ viewId: 'V1' })
+    const { user, onChange, onSave } = renderPanel({ viewId: 'V1' })
 
     const rejectBtn = screen.getByRole('button', { name: 'Reject' })
     await user.click(rejectBtn)
 
     expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledTimes(1)
     const updatedDraft: DraftLayout = onChange.mock.calls[0][0]
     const v1 = updatedDraft.viewpoints.find((v) => v.viewId === 'V1')!
     expect(v1.outlines['sp_a02']).toBeUndefined()
@@ -388,12 +400,13 @@ describe('ReferencePhotoPanel (US-08)', () => {
 
   // --- Delete outline ------------------------------------------------------
   it('allows deleting an existing outline', async () => {
-    const { user, onChange } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
+    const { user, onChange, onSave } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
 
     const deleteBtn = screen.getByRole('button', { name: 'Delete outline' })
     await user.click(deleteBtn)
 
     expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledTimes(1)
     const updatedDraft: DraftLayout = onChange.mock.calls[0][0]
     const v1 = updatedDraft.viewpoints.find((v) => v.viewId === 'V1')!
     expect(v1.outlines['sp_a01']).toBeUndefined()
@@ -448,5 +461,181 @@ describe('ReferencePhotoPanel (US-08)', () => {
     const updatedDraft: DraftLayout = onChange.mock.calls[0][0]
     const v1 = updatedDraft.viewpoints.find((v) => v.viewId === 'V1')!
     expect(v1.outlineReview?.['sp_a02']).toEqual({ source: 'proposed', status: 'accepted' })
+  })
+
+  // --- The Propose test hook -----------------------------------------------
+  it('offers Propose (a test hook for the review flow) only in dev and test builds', () => {
+    renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeInTheDocument()
+  })
+
+  it('leaves Propose out of a production build', () => {
+    vi.stubEnv('DEV', false)
+    try {
+      renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
+      expect(screen.getByRole('button', { name: 'Delete outline' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Propose' })).not.toBeInTheDocument()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  // --- Reference photo loading ---------------------------------------------
+  const V1_URL = '/api/_test/objects/reference/test-lot/V1/2585ffab2de3.jpg'
+  const photo = () => screen.getByRole('img', { name: 'Reference for North Corner' })
+
+  function withV1Url(url: string): DraftLayout {
+    const draft = structuredClone(rylanDraftFixture)
+    draft.viewpoints = draft.viewpoints.map((v) =>
+      v.viewId === 'V1' && v.referenceImage ? { ...v, referenceImage: { ...v.referenceImage, url } } : v,
+    )
+    return draft
+  }
+
+  /** The panel showing `viewId` of `draft`, for rerendering with a re-signed or replaced photo. */
+  function panelFor(draft: DraftLayout, viewId = 'V1') {
+    return (
+      <ReferencePhotoPanel
+        lotId="test-lot"
+        draft={draft}
+        viewId={viewId}
+        onViewChange={vi.fn()}
+        onChange={vi.fn()}
+        onReferenceUploaded={vi.fn()}
+        issues={[]}
+        selectedSpaceId={null}
+        onSelectSpace={vi.fn()}
+        hoveredSpaceId={null}
+        onHoverSpace={vi.fn()}
+      />
+    )
+  }
+
+  it('a photo that fails to load shows an error and Reload photo, never a stand-in photo', async () => {
+    const { user, onReferenceUploaded } = renderPanel({ viewId: 'V1' })
+    expect(screen.getByText('Loading photo…')).toBeInTheDocument()
+    fireEvent.error(photo())
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The reference photo did not load')
+    expect(photo()).toHaveAttribute('src', V1_URL) // nothing else is shown under the outlines
+
+    await user.click(screen.getByRole('button', { name: 'Reload photo' }))
+    expect(onReferenceUploaded).toHaveBeenCalledTimes(1) // fetches fresh signed URLs
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText('Loading photo…')).toBeInTheDocument()
+  })
+
+  it('keeps a loaded photo when a save re-signs its URL, and loads a replaced photo', () => {
+    const { rerender } = render(panelFor(withV1Url(`${V1_URL}?sig=1`)))
+    const img = photo()
+    fireEvent.load(img)
+    expect(screen.queryByText('Loading photo…')).not.toBeInTheDocument()
+
+    rerender(panelFor(withV1Url(`${V1_URL}?sig=2`))) // same object, new signature
+    expect(photo()).toBe(img) // not remounted
+    expect(img).toHaveAttribute('src', `${V1_URL}?sig=1`) // not fetched again
+    expect(screen.queryByText('Loading photo…')).not.toBeInTheDocument()
+
+    const replaced = '/api/_test/objects/reference/test-lot/V1/ffffffffffff?sig=3'
+    rerender(panelFor(withV1Url(replaced)))
+    expect(photo()).toHaveAttribute('src', replaced)
+    expect(screen.getByText('Loading photo…')).toBeInTheDocument()
+  })
+
+  it('shows the signed URL it was given, whatever its host', () => {
+    const signed = 'https://bucket.example.com/ref-v2/photo?X-Amz-Signature=abc'
+    render(panelFor(withV1Url(signed)))
+    expect(photo()).toHaveAttribute('src', signed)
+  })
+
+  it('takes a re-signed URL for a photo that failed to load', () => {
+    const { rerender } = render(panelFor(withV1Url(`${V1_URL}?sig=expired`)))
+    fireEvent.error(photo())
+    rerender(panelFor(withV1Url(`${V1_URL}?sig=fresh`)))
+    expect(photo()).toHaveAttribute('src', `${V1_URL}?sig=fresh`)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  // --- Viewpoints and the spaces table -------------------------------------
+  it('switching viewpoints shows that view’s photo and outlines', async () => {
+    const { user, onViewChange, rerender } = renderPanel({ viewId: 'V1' })
+    expect(photo()).toHaveAttribute('src', V1_URL)
+    expect(screen.getByTestId('space-polygon-sp_a02')).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Viewpoint' }), 'V2')
+    expect(onViewChange).toHaveBeenCalledWith('V2')
+    rerender(panelFor(structuredClone(rylanDraftFixture), 'V2'))
+
+    expect(screen.getByRole('img', { name: 'Reference for East Gate' })).toHaveAttribute(
+      'src',
+      '/api/_test/objects/reference/test-lot/V2/2585ffab2de3.jpg',
+    )
+    expect(screen.getByTestId('space-polygon-sp_a01')).toBeInTheDocument()
+    expect(screen.queryByTestId('space-polygon-sp_a02')).not.toBeInTheDocument()
+  })
+
+  it('the table and summary show outlined, proposed, unmapped and retired spaces', () => {
+    renderPanel({ viewId: 'V1' })
+    const badge = (spaceId: string) => within(screen.getByTestId(`space-item-${spaceId}`)).getAllByRole('cell')[3]
+    expect(badge('sp_a01')).toHaveTextContent('Outlined')
+    expect(badge('sp_a02')).toHaveTextContent('Proposed')
+    expect(badge('sp_a03')).toHaveTextContent('Not outlined')
+    expect(badge('sp_a04')).toHaveTextContent('Not outlined')
+    expect(badge('sp_a05')).toHaveTextContent('Retired')
+
+    const summary = screen.getByRole('region', { name: 'Viewpoint summary' })
+    expect(summary).toHaveTextContent('5 spaces total')
+    expect(summary).toHaveTextContent('3 outlined in V1')
+    expect(summary).toHaveTextContent('1 proposed')
+    // A-03 and A-04; the retired A-05's outline does not stand in for one of them.
+    expect(summary).toHaveTextContent('2 unmapped')
+  })
+
+  // --- The photo does not move while a space is outlined -------------------
+  /** Everything rendered above the photo in the panel, in document order. */
+  function aboveThePhoto(container: HTMLElement): string {
+    const section = container.querySelector('section.ref-panel')!
+    const parts: string[] = []
+    for (let el: Element = container.querySelector('.photo-view')!; el !== section; el = el.parentElement!) {
+      for (let sib = el.previousElementSibling; sib; sib = sib.previousElementSibling) parts.unshift(sib.outerHTML)
+    }
+    return parts.join('\n')
+  }
+
+  it('nothing above the photo changes while a space is outlined', () => {
+    const { container } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a03' })
+    const svg = screen.getByTestId('photo-svg')
+    const before = aboveThePhoto(container)
+
+    fireEvent.click(svg, { clientX: 50, clientY: 50 }) // the prompt changes from 0 to 1 of 4
+    expect(screen.getByText(/Click the 4 corners of A-03 \(1 of 4\)/)).toBeInTheDocument()
+    expect(aboveThePhoto(container)).toBe(before)
+
+    fireEvent.click(svg, { clientX: 150, clientY: 50 })
+    fireEvent.click(svg, { clientX: 150, clientY: 150 })
+    fireEvent.click(svg, { clientX: 50, clientY: 150 }) // a notice appears
+    expect(screen.getByText('A-03 outlined in V1')).toBeInTheDocument()
+    expect(aboveThePhoto(container)).toBe(before)
+  })
+
+  it('clears the outlined notice after a few seconds', () => {
+    vi.useFakeTimers()
+    try {
+      renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a03' })
+      const svg = screen.getByTestId('photo-svg')
+      for (const [x, y] of [
+        [50, 50],
+        [150, 50],
+        [150, 150],
+        [50, 150],
+      ]) {
+        fireEvent.click(svg, { clientX: x, clientY: y })
+      }
+      expect(screen.getByText('A-03 outlined in V1')).toBeInTheDocument()
+      act(() => vi.advanceTimersByTime(4000))
+      expect(screen.queryByText('A-03 outlined in V1')).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

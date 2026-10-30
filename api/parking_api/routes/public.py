@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter
 from parking_core.errors import NotPublishedError
 from parking_core.interfaces import Repository
 from parking_core.models import Lot, PublishedLayout
 from parking_core.status import build_status, lot_summary
+from pydantic import ValidationError
 
 from ..deps import AdaptersDep, NowDep, error
 from ..schemas import (
@@ -25,16 +28,25 @@ from ..schemas import (
 )
 
 router = APIRouter(tags=["public"])
+log = logging.getLogger(__name__)
 
 
 def find_published(repo: Repository, lot_id: str) -> tuple[Lot, PublishedLayout] | None:
-    """The lot and its current layout, or None when unknown or unpublished."""
+    """The lot and its current layout, or None when unknown or unpublished.
+
+    A snapshot that is missing or no longer loads also counts as unpublished, so one bad lot
+    can't fail `GET /lots` for every driver. The unreadable case is logged as an error."""
     lot = repo.get_lot(lot_id)
     if lot is None or lot.current_layout_version is None:
         return None
     try:
         layout = repo.get_published_layout(lot_id)
     except NotPublishedError:
+        return None
+    except ValidationError:
+        log.exception(
+            "Published layout of lot %s v%s does not load", lot_id, lot.current_layout_version
+        )
         return None
     return (lot, layout) if layout is not None else None
 
