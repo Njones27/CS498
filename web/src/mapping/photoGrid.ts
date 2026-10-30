@@ -72,20 +72,31 @@ function layout(all: Marker[]): Layout | null {
       if (b.col !== sorted[i].col) steps.push((b.x - sorted[i].x) / (b.col - sorted[i].col))
     })
   }
-  const pitch = median(steps) ?? median(all.map((m) => m.w))!
+  const width = median(all.map((m) => m.w))!
+  const pitch = median(steps) ?? width
   const rows = [...rowY.keys()].sort((a, b) => a - b)
   const rowSteps = rows.slice(1).map((r, i) => (rowY.get(r)! - rowY.get(rows[i])!) / (r - rows[i]))
   const rowStep = median(rowSteps) ?? median(all.map((m) => m.h))!
-  if (pitch === 0 || rowStep === 0) return null
+  // Columns closer than a quarter of a space (two outlines stacked under far-apart numbers) can't be real.
+  if (Math.abs(pitch) < width * 0.25 || rowStep === 0) return null
   // Most neighbouring numbers and rows must agree on which way they run; a few stray ones (a row half
   // outlined, a mislabelled space) are outvoted, which is when renumbering is wanted.
   const against = (values: number[], sign: number) => values.filter((v) => Math.sign(v) !== sign).length * 3 > values.length
   if (against(steps, Math.sign(pitch)) || against(rowSteps, Math.sign(rowStep))) return null
-  // Rows must run across the photo: within a row, the outlines stay closer together up and down than a
-  // row's height apart. A turned photo, whose rows run down it, fails this.
-  const spread = median([...byRow.values()].map((ms) => Math.max(...ms.map((m) => m.y)) - Math.min(...ms.map((m) => m.y))))!
-  if (byRow.size > 1 && spread > Math.abs(rowStep)) return null
+  // Rows must run across the photo: along a row, the outlines stay on a line (tilted is fine) much closer
+  // than a row step to it. A turned photo, whose rows run down it, fails this.
+  const spread = median([...byRow.values()].filter((ms) => ms.length > 2).map(offLine))
+  if (byRow.size > 1 && spread !== null && spread > Math.abs(rowStep) / 2) return null
   return { byRow, rowY, pitch, rowStep }
+}
+
+/** How far a row's outlines stray up or down from the straight line through them (photo fractions). */
+function offLine(ms: Marker[]): number {
+  const mx = ms.reduce((t, m) => t + m.x, 0) / ms.length
+  const my = ms.reduce((t, m) => t + m.y, 0) / ms.length
+  const sxx = ms.reduce((t, m) => t + (m.x - mx) ** 2, 0)
+  const slope = sxx > 0 ? ms.reduce((t, m) => t + (m.x - mx) * (m.y - my), 0) / sxx : 0
+  return Math.max(...ms.map((m) => Math.abs(m.y - my - slope * (m.x - mx))))
 }
 
 /** The (unrounded) column at photo x, counted from `row`'s marker nearest x; and how many columns away that is. */

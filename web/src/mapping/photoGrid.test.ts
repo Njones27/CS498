@@ -221,3 +221,33 @@ describe('photo moves', () => {
     expect(followOutline(before, after, 'V1', 'C-03', grid, false).draft.spaces.find((s) => s.spaceId === 'C-03')!.label).toBe('C-03')
   })
 })
+
+describe('layout sanity', () => {
+  it('a stacked pair of outlines under far-apart numbers can\'t shrink the columns to nothing', () => {
+    // A two-space row R whose R-01 and R-09 are outlined on top of each other, and nothing else.
+    const draft = davidFixture({
+      spaces: [space('R-01', 0, 0), space('R-09', 0, 0)],
+      viewpoints: [{ ...davidFixture().viewpoints[0], outlines: { 'R-01': at(0, 0.3), 'R-09': at(0.05, 0.3) }, outlineReview: {} }],
+    })
+    expect(photoCell(draft, draft.viewpoints[0], at(3, 0.3))).toBeNull()
+  })
+
+  it('reads a photo whose rows are tilted', () => {
+    const base = lot()
+    const v = base.viewpoints[0]
+    // Every outline shifted down by 0.08 per 0.4 across: rows slope, still clearly apart.
+    const tilt = (o: Outline): Outline => o.map(([x, y]) => [x, Number((y + x * 0.2).toFixed(4))])
+    const draft = { ...base, viewpoints: [{ ...v, outlines: Object.fromEntries(Object.entries(v.outlines).map(([k, o]) => [k, tilt(o)])) }] }
+    expect(photoCell(draft, draft.viewpoints[0], tilt(at(0, ROW_Y.B)))).toMatchObject({ row: 1, col: 0 })
+  })
+
+  it('a sideways drag across a column, ending a hair over a row boundary, keeps the row', () => {
+    const draft = lot()
+    const grid = fitGrid(draft.spaces)
+    const v = draft.viewpoints[0]
+    const before = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'C-03': at(2, ROW_Y.C + 0.098) } }] }
+    const after = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'C-03': at(5, ROW_Y.C + 0.102) } }] }
+    const c03 = followOutline(before, after, 'V1', 'C-03', grid, false).draft.spaces.find((s) => s.spaceId === 'C-03')!
+    expect(c03.label).toBe('C-06')
+  })
+})

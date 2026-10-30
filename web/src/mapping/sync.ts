@@ -427,12 +427,15 @@ export function followOutline(
     const photoTo = photoCell(after, vAfter, now, spaceId)
     const [from, to] =
       photoFrom && photoTo ? [photoFrom, photoTo] : [cellAt(grid, rectCenter(space.rect)), cellAt(grid, rectCenter(rect))]
-    // A nudge that only tips the outline over a boundary on the photo (less than half a column or row)
-    // is not a move to another cell.
-    const farEnough =
-      !(photoFrom && photoTo) || Math.abs(photoTo.at - photoFrom.at) >= 0.5 || Math.abs(photoTo.rowAt - photoFrom.rowAt) >= 0.5
-    const changedCell = farEnough && (to.row !== from.row || to.col !== from.col)
-    // Moving into the cell the space's label already names puts the rect there but renames nothing.
+    // On each axis, a nudge that only tips the outline over a boundary on the photo (less than half a
+    // column, or half a row) keeps the cell it was in on that axis.
+    if (photoFrom && photoTo) {
+      if (Math.abs(photoTo.rowAt - photoFrom.rowAt) < 0.5) to.row = from.row
+      if (Math.abs(photoTo.at - photoFrom.at) < 0.5) to.col = from.col
+    }
+    const changedCell = to.row !== from.row || to.col !== from.col
+    // Moving into the cell the space's label already names renames nothing (with snapping, the rect
+    // still goes into that cell).
     const named = parseLabel(space.label)
     const intoOwnCell = named !== null && rowIndex(named.row) === to.row && named.num - 1 === to.col
     if (snap) {
