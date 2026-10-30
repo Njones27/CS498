@@ -21,6 +21,8 @@ from parking_worker.aligners import build_aligner
 from parking_worker.handler import ProcessResult, process_message
 from parking_worker.scorers.fake import FakeScorer
 
+from .test_reference import jpeg
+
 FREE, OCCUPIED, UNKNOWN, CLOSED = "FREE", "OCCUPIED", "UNKNOWN", "CLOSED"
 
 # (acpdsScore, carOverlap) that the default cutoffs turn into each state.
@@ -122,6 +124,9 @@ def upload_reference(
     width: int = 640,
     height: int = 360,
 ) -> dict:
+    """Upload a reference photo: a JPEG header of `width` x `height` (complete reads the size
+    from the stored file), with `data` after it so each call's bytes and hash differ."""
+    data = jpeg(width, height) + data
     base = f"/admin/lots/{lot_id}/views/{view_id}/reference"
     digest = sha(data)
     slot = client.post(
@@ -134,7 +139,7 @@ def upload_reference(
     assert client.put(url, content=data, headers={"content-type": "image/jpeg"}).status_code == 204
     r = client.post(
         f"{base}/complete",
-        json={"sha256": digest, "width": width, "height": height},
+        json={"sha256": digest},
         headers=headers,
     )
     assert r.status_code == 200, r.text
