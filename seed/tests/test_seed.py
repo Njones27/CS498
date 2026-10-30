@@ -43,7 +43,7 @@ def test_seed_twice_is_idempotent():
     assert v1 is not None and len(v1.outlines) == 10
     assert len(layout.viewpoint("V2").outlines) == 7
     sha12 = hashlib.sha256(b"ref").hexdigest()[:12]
-    assert v1.reference_image_key == f"reference/test-lot/V1/{sha12}.jpg"
+    assert v1.reference_image_key == f"reference/test-lot/V1/{sha12}"
     assert v1.reference_image_key == keys.reference_image_key(
         "test-lot", "V1", hashlib.sha256(b"ref").hexdigest()
     )
