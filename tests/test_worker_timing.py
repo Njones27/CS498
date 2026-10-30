@@ -9,8 +9,12 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import random
+import subprocess
 import sys
+import sysconfig
+import types
 from pathlib import Path
 
 import cv2
@@ -24,13 +28,12 @@ from parking_worker.aligners import OrbAligner, build_aligner
 from parking_worker.scorers import StubScorer
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "worker_timing.py"
 FIXTURE = ROOT / "eval" / "fixtures" / "pklot-ufpr04.jpg"
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location(
-        "worker_timing", ROOT / "scripts" / "worker_timing.py"
-    )
+    spec = importlib.util.spec_from_file_location("worker_timing", SCRIPT)
     module = importlib.util.module_from_spec(spec)
     sys.modules["worker_timing"] = module  # dataclasses resolve annotations through it
     spec.loader.exec_module(module)
@@ -41,7 +44,7 @@ wt = _load()
 
 
 def _report(walls, limit_s=30.0, env=None, lot="drone-lot") -> wt.Report:
-    jobs = [wt.JobTiming(lot, f"img-{i}", w, int(w * 900), 124) for i, w in enumerate(walls)]
+    jobs = [wt.JobTiming(lot, lot, f"img-{i}", w, int(w * 900), 124) for i, w in enumerate(walls)]
     return wt.Report(
         jobs=jobs,
         model_load_s=4.25,
@@ -106,13 +109,26 @@ def test_gate_passes_at_exactly_the_limit():
 
 
 def test_render_markdown_pass_and_fail():
-    jobs = [wt.JobTiming("drone-lot", f"d-{i}", 17.0 + i * 0.1, 16_900, 124) for i in range(10)]
-    jobs += [wt.JobTiming("pklot-ufpr04", f"p-{i}", 3.0, 2_900, 27) for i in range(10)]
+    drone, big = ("drone-lot", (1982, 2000), 600_000), ("drone-lot @4032", (3996, 4032), 1_700_000)
+    jobs = [
+        wt.JobTiming("drone-lot", scope, f"d-{i}", 17.0 + i * 0.1, 16_900, 124, px, size)
+        for scope, px, size in (drone, big)
+        for i in range(10)
+    ]
+    jobs += [
+        wt.JobTiming("pklot-ufpr04", "pklot-ufpr04", f"p-{i}", 3.0, 2_900, 27, (1280, 720), 2**20)
+        for i in range(10)
+    ]
     env = {
         "cgroup_cpus": 2.0,
         "cgroup_memory_max": 4 * 2**30,
         "cgroup_memory_peak": 3 * 2**30,
+        "peak_rss": 2 * 2**30,
+        "cpu_affinity": 2,
+        "quota_threads": 2,
         "torch_threads": 2,
+        "opencv_threads": 2,
+        "omp_num_threads": "2",
         "cpu_count": 4,
         "detector": "acpds_yolo",
         "aligner": "orb",
@@ -131,14 +147,19 @@ def test_render_markdown_pass_and_fail():
     )
     text = wt.render_markdown(report)
     assert text.startswith(f"### NFR-1 worker timing: PASS (p95 {report.p95_s:.1f} s, limit 30 s)")
-    assert "| all | 20 |" in text
-    assert "| drone-lot (124 stalls) | 10 |" in text
-    assert "| pklot-ufpr04 (27 stalls) | 10 | 3.00 | 3.00 | 3.00 |" in text
+    assert "| all | 30 |" in text
+    assert "| drone-lot (124 stalls, 1982x2000, 0.6 MB) | 10 |" in text
+    assert "| drone-lot @4032 (124 stalls, 3996x4032, 1.6 MB) | 10 |" in text
+    assert "| pklot-ufpr04 (27 stalls, 1280x720, 1.0 MB) | 10 | 3.00 | 3.00 | 3.00 |" in text
     assert "| handler `processingMs`: drone-lot | 10 | 16.90 |" in text
+    assert "| handler `processingMs`: drone-lot @4032 | 10 | 16.90 |" in text
     assert "model load 4.2 s" in text
     assert "drone-lot 21.5 s, pklot-ufpr04 5.0 s" in text
-    assert "CPUs 2.0" in text and "memory limit 4.00 GB" in text and "peak 3.00 GB" in text
-    assert "torch threads 2" in text and "`acpds_yolo|acpds=abc`" in text
+    assert "CPUs 2.0" in text and "2 usable (affinity)" in text
+    assert "memory limit 4.00 GB" in text and "peak (incl. page cache) 3.00 GB" in text
+    assert "process peak RSS 2.00 GB" in text
+    assert "torch 2, OpenCV 2 (from the CPU quota: 2)" in text and "`OMP_NUM_THREADS` 2" in text
+    assert "`acpds_yolo|acpds=abc`" in text
 
     failing = wt.Report(**{**report.__dict__, "limit_s": 5.0})
     assert wt.render_markdown(failing).startswith("### NFR-1 worker timing: FAIL (p95 ")
@@ -147,10 +168,12 @@ def test_render_markdown_pass_and_fail():
 
 def test_render_markdown_without_cgroup_values():
     env = {"cgroup_cpus": None, "cgroup_memory_max": None, "cgroup_memory_peak": None}
-    jobs = [wt.JobTiming("drone-lot", "d-0", 1.0, None, 124)]
+    jobs = [wt.JobTiming("drone-lot", "drone-lot", "d-0", 1.0, None, 124)]
     report = wt.Report(jobs, 0.0, {"drone-lot": 1.0}, {"drone-lot": 124}, 30.0, env)
     text = wt.render_markdown(report)
-    assert "CPUs n/a" in text and "memory limit n/a" in text and "peak n/a" in text
+    assert "CPUs n/a" in text and "memory limit n/a" in text
+    assert "peak (incl. page cache) n/a" in text
+    assert "| drone-lot (124 stalls, ?, n/a) | 1 |" in text
     assert "| handler `processingMs`: all | 0 | n/a | n/a | n/a |" in text
 
 
@@ -182,6 +205,35 @@ def test_photo_variant_is_distinct_and_same_size():
     for v in variants:
         assert cv2.imdecode(np.frombuffer(v, np.uint8), cv2.IMREAD_COLOR).shape == shape
     assert wt.photo_variant(reference, 3) == variants[3]  # deterministic
+
+
+@pytest.mark.parametrize("lot", ["drone-lot", "pklot-ufpr04"])
+def test_photo_variant_resizes_to_the_long_edge(lot):
+    reference = (ROOT / "eval" / "fixtures" / f"{lot}.jpg").read_bytes()
+    h, w = cv2.imdecode(np.frombuffer(reference, np.uint8), cv2.IMREAD_COLOR).shape[:2]
+    shapes = set()
+    for i in range(4):
+        big = cv2.imdecode(np.frombuffer(wt.photo_variant(reference, i, 4032), np.uint8), 1)
+        shapes.add(big.shape)
+    assert len(shapes) == 1
+    ((bh, bw, _),) = shapes
+    assert max(bh, bw) == 4032
+    assert bw / bh == pytest.approx(w / h, abs=1e-3)
+    assert wt.photo_variant(reference, 1, max(h, w)) == wt.photo_variant(reference, 1)
+
+
+def test_resized_keeps_the_aspect_ratio():
+    assert wt.resized(4000, 3000, 4032) == (4032, 3024)
+    assert wt.resized(1280, 720, 4032) == (4032, 2268)
+    assert wt.resized(1982, 2000, 4032) == (3996, 4032)
+    assert wt.resized(2000, 2000, 640) == (640, 640)
+
+
+def test_build_scopes():
+    assert [s.name for s in wt.build_scopes(["a", "b"], None)] == ["a", "b"]
+    scopes = wt.build_scopes(["a", "b"], 4032)
+    assert [s.name for s in scopes] == ["a", "b", "a @4032", "b @4032"]
+    assert [s.long_edge for s in scopes] == [None, None, 4032, 4032]
 
 
 def test_photo_variant_rejects_undecodable_bytes():
@@ -234,6 +286,82 @@ def test_time_jobs_runs_the_real_handler_path(world):
         assert len(statuses) == stalls
         last = [j.image_id for j in jobs if j.lot_id == lot][-1]
         assert {s.source_image_id for s in statuses} == {last}
+
+
+class RecordingAligner:
+    """Wraps the real aligner; keeps (image size, viewpoint outlines, aligned outlines)."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.calls = []
+
+    def align(self, image, viewpoint):
+        out = self.inner.align(image, viewpoint)
+        size = wt.header_size(image)
+        self.calls.append((size, dict(viewpoint.outlines), out))
+        return out
+
+
+def test_aligner_runs_once_per_job_at_every_photo_size(world):
+    settings, adapters, lots = world
+    aligner = RecordingAligner(build_aligner(settings, adapters))
+    scopes = wt.build_scopes(list(lots), 4032)
+    warmup, jobs = wt.time_jobs(adapters, aligner, StubScorer(), settings.cutoffs, lots, 2, scopes)
+    assert len(aligner.calls) == len(warmup) + len(jobs) == 2 + 2 * 4
+    assert [j.scope for j in jobs] == [s.name for s in scopes] * 2
+    assert len({j.image_id for j in jobs}) == len(jobs)
+    for job in jobs:
+        assert (
+            max(job.photo_px) == 4032 if job.scope.endswith("@4032") else max(job.photo_px) < 4032
+        )
+        assert job.spaces == lots[job.lot_id][3]
+
+
+@pytest.mark.parametrize("lot", ["drone-lot", "pklot-ufpr04"])
+def test_orb_maps_outlines_onto_an_upscaled_photo(world, lot):
+    """The stored reference stays fixture-size; ORB matches the 4032 px photo at the reference's
+    working size, and outlines come back as fractions of the large photo."""
+    settings, adapters, lots = world
+    aligner = RecordingAligner(build_aligner(settings, adapters))
+    view_id, reference, version, stalls = lots[lot]
+    data = wt.photo_variant(reference, 0, 4032)  # variant 0: no shift, so expect identity
+    wt.run_job(
+        adapters,
+        aligner,
+        StubScorer(),
+        settings.cutoffs,
+        lot_id=lot,
+        view_id=view_id,
+        image_id=f"nfr1-{lot}-big",
+        data=data,
+        capture_time=wt.T0,
+        layout_version=version,
+    )
+    ((size, outlines, aligned),) = aligner.calls
+    assert max(size) == 4032
+    assert len(aligned) == stalls
+    errors = [
+        abs(a - b)
+        for o in aligned
+        for p, q in zip(o.polygon, outlines[o.space_id], strict=True)
+        for a, b in zip(p, q, strict=True)
+    ]
+    assert max(errors) < 0.003  # about 12 px of the 4032 px photo; measured under 0.001
+    assert all(o.in_frame for o in aligned)
+
+
+def test_time_jobs_refuses_a_photo_over_the_upload_limit(world):
+    settings, adapters, lots = world
+    with pytest.raises(ValueError, match="over the 1000 byte upload limit"):
+        wt.time_jobs(
+            adapters,
+            build_aligner(settings, adapters),
+            StubScorer(),
+            settings.cutoffs,
+            lots,
+            1,
+            max_photo_bytes=1000,
+        )
 
 
 def test_run_job_raises_when_the_job_does_not_complete(world):
@@ -297,7 +425,9 @@ def test_main_passes_and_writes_reports(tmp_path, capsys):
     assert rc == wt.EXIT_OK
     data = json.loads(js.read_text())
     assert data["passed"] is True and data["p95_s"] > 0
-    assert len(data["jobs"]) == 2 and set(data["warmup_s"]) == {"pklot-ufpr04"}
+    assert len(data["jobs"]) == 4 and set(data["warmup_s"]) == {"pklot-ufpr04"}
+    assert set(data["wall_s"]) == {"all", "pklot-ufpr04", "pklot-ufpr04 @4032"}
+    assert data["jobs"][1]["photo_px"] == [4032, 2268]
     assert data["env"]["detector"] == "stub" and data["env"]["aligner"] == "orb"
     assert md.read_text().startswith("### NFR-1 worker timing: PASS")
     assert "NFR-1 worker timing: PASS" in capsys.readouterr().out
@@ -310,6 +440,42 @@ def test_main_fails_over_the_limit(tmp_path):
     assert rc == wt.EXIT_OVER_LIMIT
     assert json.loads(js.read_text())["passed"] is False
     assert md.read_text().startswith("### NFR-1 worker timing: FAIL")
+
+
+def test_main_without_large_photos(tmp_path):
+    rc, js, _ = _main(
+        tmp_path, "--lots", "pklot-ufpr04", "--jobs-per-lot", "1", "--photo-long-edge", "0"
+    )
+    assert rc == wt.EXIT_OK
+    assert [j["scope"] for j in json.loads(js.read_text())["jobs"]] == ["pklot-ufpr04"]
+
+
+def test_main_returns_2_when_the_scorer_cannot_be_built(tmp_path, monkeypatch):
+    def no_weights(settings):
+        raise RuntimeError("Model weights missing: models/yolo/yolo26m.pt")
+
+    monkeypatch.setattr(wt, "build_scorer", no_weights)
+    rc, js, md = _main(tmp_path, "--lots", "pklot-ufpr04")
+    assert rc == wt.EXIT_ERROR
+    assert not js.exists()
+    text = md.read_text()
+    assert text.startswith("### NFR-1 worker timing: ERROR")
+    assert "RuntimeError: Model weights missing: models/yolo/yolo26m.pt" in text
+
+
+def test_main_returns_2_when_an_import_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(wt, "IMPORT_ERROR", ImportError("No module named 'cv2'"))
+    rc, js, md = _main(tmp_path)
+    assert rc == wt.EXIT_ERROR
+    assert "ImportError: No module named 'cv2'" in md.read_text()
+
+
+def test_check_setup_runs_without_models(capsys):
+    assert wt.main(["--check-setup", "--detector", "stub", "--jobs-per-lot", "5"]) == wt.EXIT_OK
+    out = capsys.readouterr().out
+    assert out.startswith("NFR-1 setup OK")
+    for line in ("drone-lot: 124/124 spaces", "pklot-ufpr04 @4032: 27/27 spaces, photo 4032x2268"):
+        assert line in out
 
 
 def test_main_reports_a_run_that_could_not_finish(tmp_path):
@@ -343,3 +509,98 @@ def test_environment_without_limits(tmp_path):
     assert env["cgroup_cpus"] is None
     assert env["cgroup_memory_max"] is None
     assert env["cgroup_memory_peak"] is None  # file missing
+
+
+@pytest.mark.parametrize(
+    "cpu_max, affinity, threads",
+    [
+        ("200000 100000", None, 2),
+        ("200000 100000", 2, 2),
+        ("150000 100000", None, 2),
+        ("50000 100000", None, 1),
+        ("400000 100000", 2, 2),
+        ("100000 100000", 8, 1),
+        ("max 100000", 2, None),
+        (None, 2, None),
+    ],
+)
+def test_quota_threads_from_the_cgroup_quota(tmp_path, cpu_max, affinity, threads):
+    if cpu_max is not None:
+        (tmp_path / "cpu.max").write_text(cpu_max + "\n")
+    assert wt.quota_threads(tmp_path, affinity=affinity) == threads
+
+
+def test_apply_thread_limit_sets_torch_and_opencv(monkeypatch):
+    torch_calls, cv2_calls = [], []
+    monkeypatch.setitem(
+        sys.modules, "torch", types.SimpleNamespace(set_num_threads=torch_calls.append)
+    )
+    monkeypatch.setattr(cv2, "setNumThreads", cv2_calls.append)  # macOS reports GCD's count
+    wt.apply_thread_limit(None)
+    assert torch_calls == cv2_calls == []
+    wt.apply_thread_limit(2)
+    assert torch_calls == cv2_calls == [2]
+
+
+def test_time_jobs_calls_after_warmup_between_warmup_and_timed_jobs(world):
+    settings, adapters, lots = world
+    aligner = RecordingAligner(build_aligner(settings, adapters))
+    seen = []
+    wt.time_jobs(
+        adapters,
+        aligner,
+        StubScorer(),
+        settings.cutoffs,
+        lots,
+        1,
+        after_warmup=lambda: seen.append(len(aligner.calls)),
+    )
+    assert seen == [len(lots)] and len(aligner.calls) == 2 * len(lots)
+
+
+# --- the script as CI runs it ----------------------------------------------------------------
+
+
+def _run_isolated(pythonpath, *args, tmp_path):
+    """Run the script with `python -S`: no site processing, so the venv's editable .pth files
+    (parking_core, parking_worker, parking_seed) are not read and only PYTHONPATH counts, as
+    in the image where parking_seed is not installed."""
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(tmp_path),
+        "PYTHONPATH": os.pathsep.join(map(str, pythonpath)),
+    }
+    return subprocess.run(
+        [sys.executable, "-S", str(SCRIPT), *args],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+
+def test_check_setup_falls_back_to_the_repo_seed_package(tmp_path):
+    purelib = sysconfig.get_paths()["purelib"]  # cv2, numpy, pydantic; no .pth processing
+    proc = _run_isolated(
+        [ROOT / "core", ROOT / "worker", purelib],
+        "--check-setup",
+        "--detector",
+        "stub",
+        tmp_path=tmp_path,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert f"parking_seed from {ROOT / 'seed' / 'parking_seed'}" in proc.stdout
+    assert f"parking_worker from {ROOT / 'worker' / 'parking_worker'}" in proc.stdout
+    assert "drone-lot @4032: 124/124 spaces" in proc.stdout
+
+
+def test_an_import_failure_exits_2_with_an_error_report(tmp_path):
+    md = tmp_path / "nfr1.md"
+    proc = _run_isolated(
+        [ROOT / "core", ROOT / "worker"], "--markdown", str(md), tmp_path=tmp_path
+    )  # no site-packages: cv2 is missing
+    assert proc.returncode == 2, proc.stderr
+    text = md.read_text()
+    assert text.startswith("### NFR-1 worker timing: ERROR")
+    assert "No module named" in text
