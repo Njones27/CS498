@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { putFile } from '../lib/putFile'
@@ -487,13 +487,13 @@ describe('ReferencePhotoPanel (US-08)', () => {
     return draft
   }
 
-  /** The panel on V1 with `draft`, for rerendering with a re-signed or replaced photo. */
-  function panelFor(draft: DraftLayout) {
+  /** The panel showing `viewId` of `draft`, for rerendering with a re-signed or replaced photo. */
+  function panelFor(draft: DraftLayout, viewId = 'V1') {
     return (
       <ReferencePhotoPanel
         lotId="test-lot"
         draft={draft}
-        viewId="V1"
+        viewId={viewId}
         onViewChange={vi.fn()}
         onChange={vi.fn()}
         onReferenceUploaded={vi.fn()}
@@ -549,6 +549,41 @@ describe('ReferencePhotoPanel (US-08)', () => {
     rerender(panelFor(withV1Url(`${V1_URL}?sig=fresh`)))
     expect(photo()).toHaveAttribute('src', `${V1_URL}?sig=fresh`)
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  // --- Viewpoints and the spaces table -------------------------------------
+  it('switching viewpoints shows that view’s photo and outlines', async () => {
+    const { user, onViewChange, rerender } = renderPanel({ viewId: 'V1' })
+    expect(photo()).toHaveAttribute('src', V1_URL)
+    expect(screen.getByTestId('space-polygon-sp_a02')).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Viewpoint' }), 'V2')
+    expect(onViewChange).toHaveBeenCalledWith('V2')
+    rerender(panelFor(structuredClone(rylanDraftFixture), 'V2'))
+
+    expect(screen.getByRole('img', { name: 'Reference for East Gate' })).toHaveAttribute(
+      'src',
+      '/api/_test/objects/reference/test-lot/V2/2585ffab2de3.jpg',
+    )
+    expect(screen.getByTestId('space-polygon-sp_a01')).toBeInTheDocument()
+    expect(screen.queryByTestId('space-polygon-sp_a02')).not.toBeInTheDocument()
+  })
+
+  it('the table and summary show outlined, proposed, unmapped and retired spaces', () => {
+    renderPanel({ viewId: 'V1' })
+    const badge = (spaceId: string) => within(screen.getByTestId(`space-item-${spaceId}`)).getAllByRole('cell')[3]
+    expect(badge('sp_a01')).toHaveTextContent('Outlined')
+    expect(badge('sp_a02')).toHaveTextContent('Proposed')
+    expect(badge('sp_a03')).toHaveTextContent('Not outlined')
+    expect(badge('sp_a04')).toHaveTextContent('Not outlined')
+    expect(badge('sp_a05')).toHaveTextContent('Retired')
+
+    const summary = screen.getByRole('region', { name: 'Viewpoint summary' })
+    expect(summary).toHaveTextContent('5 spaces total')
+    expect(summary).toHaveTextContent('3 outlined in V1')
+    expect(summary).toHaveTextContent('1 proposed')
+    // A-03 and A-04; the retired A-05's outline does not stand in for one of them.
+    expect(summary).toHaveTextContent('2 unmapped')
   })
 
   // --- The photo does not move while a space is outlined -------------------

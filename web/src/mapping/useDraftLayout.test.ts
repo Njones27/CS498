@@ -265,6 +265,23 @@ describe('useDraftLayout', () => {
       expect(hook.result.current.canRedo).toBe(false)
     })
 
+    it('keeps the last 50 states', async () => {
+      const { hook } = await loaded()
+      let draft = draftFixture()
+      for (let i = 1; i <= 55; i++) {
+        draft = renamed(draft, `Step ${i}`)
+        const next = draft
+        act(() => hook.result.current.setDraft(next))
+      }
+      let undos = 0
+      while (hook.result.current.canUndo) {
+        act(() => hook.result.current.undo())
+        undos++
+      }
+      expect(undos).toBe(50)
+      expect(hook.result.current.draft?.spaces[1].label).toBe('Step 5') // older states were dropped
+    })
+
     it('keeps server revision valid when undoing after a save', async () => {
       const first = renamed(draftFixture(), 'Edit 1')
       const { fetchMock, hook } = await loaded({

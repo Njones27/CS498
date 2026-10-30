@@ -426,7 +426,8 @@ export function ReferencePhotoPanel({
     (r) => r.status === 'pending',
   ).length
   const activeSpaces = draft.spaces.filter((s) => !s.retired)
-  const missingCount = Math.max(0, activeSpaces.length - outlinedCount)
+  // Counted per space: an outline kept on a retired space does not stand in for an active one.
+  const missingCount = activeSpaces.filter((s) => !currentViewpoint?.outlines[s.spaceId]).length
 
   // Find next unmapped space for streamlined sequence progression
   const nextUnmappedSpace =
