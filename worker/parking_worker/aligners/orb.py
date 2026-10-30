@@ -109,6 +109,10 @@ class OrbAligner:
         ).reshape(-1, 1, 2)
         mapped = cv2.perspectiveTransform(corners * (ref.width, ref.height), h).reshape(-1, 2)
         mapped /= (photo.width, photo.height)
+        if not np.isfinite(mapped).all():
+            # Outline points must be finite (models.Point); a corner sent to infinity means the
+            # homography is not plausible for this layout, which retrying cannot change.
+            raise AlignmentError(TOO_FEW_MATCHES)
 
         out: list[AlignedOutline] = []
         i = 0

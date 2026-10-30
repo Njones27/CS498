@@ -259,6 +259,18 @@ def test_degenerate_homography_is_rejected(store, reference):
     assert not plausible(bow_tie, ref, ref)
 
 
+def test_outline_mapped_to_infinity_is_permanent(store, reference, monkeypatch):
+    # AlignedOutline only takes finite points; a pydantic error here would be retried as a
+    # transient failure, so the aligner rejects the photo itself.
+    vp = store_reference(store, reference)
+    monkeypatch.setattr(
+        "parking_worker.aligners.orb.cv2.perspectiveTransform",
+        lambda pts, h: np.full_like(pts, np.inf),
+    )
+    with pytest.raises(AlignmentError, match="Too few matches"):
+        OrbAligner(store).align(encode(reference, ".jpg"), vp)
+
+
 def test_viewpoint_without_outlines_returns_nothing(store, reference):
     vp = store_reference(store, reference, outlines={})
     assert OrbAligner(store).align(encode(reference), vp) == []
