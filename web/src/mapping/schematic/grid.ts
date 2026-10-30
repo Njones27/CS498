@@ -231,20 +231,34 @@ export function relabelMoved(g: Grid, spaces: DraftSpace[], spaceId: string, cel
 }
 
 /**
- * `spaceId` becomes 01 of `row`, in its first cell, and every other active row-number space of that row
- * moves up one number and one cell to make room (names like "Gate" stay). For a space put before the
- * row's first number. Returns the input when the row has no letter.
+ * `spaceId` becomes 01 of `row`, in its first cell, and the row's other active row-number spaces move up
+ * one number and one cell to make room: all of them, or when the space already belongs to the row, only
+ * those numbered below it (its old number's hole closes). For a space put before the row's first number.
+ * Null when the row has no letter, or a space that doesn't shift (a name like "Gate", or another row's)
+ * sits in a cell the shifted spaces need.
  */
-export function insertAtRowStart(draft: DraftLayout, g: Grid, spaceId: string, row: number): DraftLayout {
+export function insertAtRowStart(draft: DraftLayout, g: Grid, spaceId: string, row: number): DraftLayout | null {
   const letter = rowLetter(row)
-  if (!letter) return draft
   const space = draft.spaces.find((s) => s.spaceId === spaceId)
-  const digits = Math.max(2, (space && parseLabel(space.label)?.digits) ?? labelDigits(draft.spaces))
+  if (!letter || !space) return null
+  const own = parseLabel(space.label)
+  const below = own && own.row === letter ? own.num : Infinity
+  const digits = Math.max(2, own?.digits ?? labelDigits(draft.spaces))
+  const shifting = (s: DraftSpace) => {
+    const p = s.retired || s.spaceId === spaceId ? null : parseLabel(s.label)
+    return p && p.row === letter && p.num < below ? p : null
+  }
+  const needed = [0, ...draft.spaces.flatMap((s) => (shifting(s) ? [shifting(s)!.num] : []))]
+  const blocked = draft.spaces.some((s) => {
+    if (s.retired || s.spaceId === spaceId || shifting(s)) return false
+    const c = cellAt(g, center(s.rect))
+    return c.row === row && needed.includes(c.col)
+  })
+  if (blocked) return null
   const spaces = draft.spaces.map((s) => {
     if (s.spaceId === spaceId) return { ...s, label: formatLabel(letter, 1, digits), rect: cellRect(g, { row, col: 0 }) }
-    const p = s.retired ? null : parseLabel(s.label)
-    if (!p || p.row !== letter) return s
-    return { ...s, label: formatLabel(p.row, p.num + 1, p.digits), rect: cellRect(g, { row, col: p.num }) }
+    const p = shifting(s)
+    return p ? { ...s, label: formatLabel(p.row, p.num + 1, p.digits), rect: cellRect(g, { row, col: p.num }) } : s
   })
   return { ...draft, spaces }
 }

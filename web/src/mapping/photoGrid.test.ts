@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { davidFixture, space } from './fixtures/david'
-import { matchRowToPhoto, placeFromPhoto, photoCell } from './photoGrid'
+import { matchRowToPhoto, outlineLike, placeFromPhoto, photoCell } from './photoGrid'
 import { cellRect, fitGrid } from './schematic/grid'
 import { addSpaceFromOutline, followOutline } from './sync'
 import type { DraftLayout, Outline } from './types'
@@ -347,5 +347,49 @@ describe('more inserts and renumbering', () => {
     expect(added.label).toBe('B-03')
     expect(next.spaces.find((s) => s.spaceId === 'B-03')!.label).toBe('B-06')
     expect(next.spaces.find((s) => s.spaceId === 'B-04')!.label).toBe('B-04')
+  })
+})
+
+describe('outlineLike', () => {
+  it('copies the row neighbour along the row on a turned 4:3 photo, and the nearest row across rows', () => {
+    const base = lot()
+    const v = base.viewpoints[0]
+    const W = 4 / 3
+    const deg = 25
+    const [c, s] = [Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180)]
+    const turn = (o: Outline): Outline =>
+      o.map(([fx, y]) => {
+        const x = fx * W
+        return [Number(((W / 2 + (x - W / 2) * c - (y - 0.5) * s) / W).toFixed(4)), Number((0.5 + (x - W / 2) * s + (y - 0.5) * c).toFixed(4))]
+      })
+    const outlines = Object.fromEntries(Object.entries(v.outlines).map(([k, o]) => [k, turn(o)]))
+    const draft = { ...base, viewpoints: [{ ...v, outlines }] }
+    // Row C's 6th space: shaped like C-05 moved one column along, i.e. where at(5) turned would be.
+    const like = outlineLike(draft, draft.viewpoints[0], 2, 5)!
+    turn(at(5, ROW_Y.C)).forEach((p, i) => {
+      expect(like[i][0]).toBeCloseTo(p[0], 2)
+      expect(like[i][1]).toBeCloseTo(p[1], 2)
+    })
+    // A new row F (none outlined): carried down from row E.
+    const below = outlineLike(draft, draft.viewpoints[0], 5, 2)!
+    turn(at(2, ROW_Y.E + 0.2)).forEach((p, i) => {
+      expect(below[i][0]).toBeCloseTo(p[0], 2)
+      expect(below[i][1]).toBeCloseTo(p[1], 2)
+    })
+    // Far off the photo: nothing.
+    expect(outlineLike(draft, draft.viewpoints[0], 2, 60)).toBeNull()
+  })
+
+  it('never copies the space\'s own outline, and prefers accepted outlines over proposals', () => {
+    const draft = lot()
+    const v = draft.viewpoints[0]
+    const own = outlineLike(draft, v, 2, 2, 'C-03')!
+    expect(own[0][0]).toBeCloseTo(at(2, ROW_Y.C)[0][0], 3) // from C-02 or C-04, not itself
+    const pendingNext = {
+      ...draft,
+      viewpoints: [{ ...v, outlines: { ...v.outlines, 'C-04': at(3.3, ROW_Y.C) }, outlineReview: { 'C-04': { source: 'proposed' as const, status: 'pending' as const } } }],
+    }
+    const copy = outlineLike(pendingNext, pendingNext.viewpoints[0], 2, 4, 'C-05')!
+    expect(copy[0][0]).toBeCloseTo(at(4, ROW_Y.C)[0][0], 3) // from C-03 (accepted), not the shifted proposal
   })
 })

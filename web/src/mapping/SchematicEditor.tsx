@@ -30,6 +30,7 @@ import {
   cellTaken,
   cellsIn,
   insertAtRowStart,
+  labelDigits,
   gridInView,
   gridSizes,
   relabelMoved,
@@ -321,16 +322,19 @@ export function SchematicEditor({
     const from = gr && was && cellAt(gr, [was.rect.x + was.rect.w / 2, was.rect.y + was.rect.h / 2])
     // Only a move renames, and only into another cell: a resize, or a drag back to the same cell, keeps the label.
     const rename = gr && isMove && to && from && (from.row !== to.row || from.col !== to.col)
-    // Moved before a row's first number: it becomes 01 and the rest of that row moves up one to make room.
-    const insert = rename && to.col < 0 && to.row >= 0 && was && (!was.label.trim() || parseLabel(was.label) !== null)
-    const relabel = rename && !insert ? relabelMoved(gr, current.spaces, spaceId, to) : { labels: new Map<string, string>() }
-    const edited = insert
-      ? insertAtRowStart(current, gr, spaceId, to.row)
-      : applyLabels(updateSpace(current, spaceId, { rect }), relabel.labels)
+    // Moved before a row's first number (snapped there, or dropped just before it): it becomes 01 and the
+    // rest of that row moves up one to make room. A space that isn't numbered in the way blocks that.
+    const canInsert =
+      rename && to.col < 0 && to.row >= 0 && (cell !== null || to.col === -1) && was && (!was.label.trim() || parseLabel(was.label) !== null)
+    const inserted = canInsert ? insertAtRowStart(current, gr, spaceId, to.row) : null
+    const relabel = rename && !inserted ? relabelMoved(gr, current.spaces, spaceId, to) : { labels: new Map<string, string>() }
+    const edited = inserted ?? applyLabels(updateSpace(current, spaceId, { rect }), relabel.labels)
     const grown = afterRectChange(current, edited, [spaceId])
-    if (insert) {
-      const label = edited.spaces.find((s) => s.spaceId === spaceId)!.label
+    if (inserted) {
+      const label = inserted.spaces.find((s) => s.spaceId === spaceId)!.label
       relabel.note = `Now ${label}; the rest of row ${rowLetter(to.row)} moved up one to make room`
+    } else if (canInsert) {
+      relabel.note = `${relabel.note ?? ''}; row ${rowLetter(to.row)} can't move up to make room: a space that isn't numbered sits in the way`.replace(/^; /, '')
     }
     emitGrown(grown, emit)
     // followRects leaves an outline as it was when the new spot is off that photo (or would fold it).
@@ -452,7 +456,8 @@ export function SchematicEditor({
       const rowOf = (s: DraftSpace) => cellAt(g, [s.rect.x + s.rect.w / 2, s.rect.y + s.rect.h / 2]).row
       const from = sel ? cellAt(g, [sel.rect.x + sel.rect.w / 2, sel.rect.y + sel.rect.h / 2]) : null
       let cell: Cell = from ? { row: from.row, col: from.col + 1 } : { row: Math.max(0, ...active.map(rowOf)) + (active.length ? 1 : 0), col: 0 }
-      for (let n = 0; n < 200 && cellTaken(g, draft.spaces, cell, cellLabel(cell), undefined); n++) cell = { ...cell, col: cell.col + 1 }
+      const digits = labelDigits(draft.spaces)
+      for (let n = 0; n < 200 && cellTaken(g, draft.spaces, cell, cellLabel(cell, digits), undefined); n++) cell = { ...cell, col: cell.col + 1 }
       const added = addSpacesInCells(draft, g, [cell])
       if (added.spaces.length === 0) return setNote('No free cell to add a space in')
       emitGrown(added)

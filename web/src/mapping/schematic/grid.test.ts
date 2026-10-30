@@ -10,6 +10,7 @@ import {
   cellTaken,
   fitGrid,
   gridInView,
+  insertAtRowStart,
   gridSizes,
   labelDigits,
   relabelMoved,
@@ -250,5 +251,31 @@ describe('labelDigits', () => {
     expect(labelDigits([space('a', 0, 0, { label: 'A-001' }), space('b', 0, 0, { label: 'A-002' }), space('c', 0, 0, { label: 'B-01' })])).toBe(3)
     expect(labelDigits([space('a', 0, 0, { label: 'A1' })])).toBe(2)
     expect(labelDigits([])).toBe(2)
+  })
+})
+
+describe('insertAtRowStart', () => {
+  const at = (id: string, label: string, row: number, col: number) => space(id, 0, 0, { label, rect: cellRect(G, { row, col }) })
+
+  it('a space from another row becomes 01 and the whole row moves up one', () => {
+    const draft = davidFixture({ spaces: [at('x', 'D-07', 3, 6), at('a', 'B-01', 1, 0), at('b', 'B-02', 1, 1)] })
+    const next = insertAtRowStart(draft, G, 'x', 1)!
+    expect(next.spaces.map((s) => [s.label, s.rect.x])).toEqual([
+      ['B-01', cellRect(G, { row: 1, col: 0 }).x],
+      ['B-02', cellRect(G, { row: 1, col: 1 }).x],
+      ['B-03', cellRect(G, { row: 1, col: 2 }).x],
+    ])
+  })
+
+  it('a space of the same row moves only those numbered below it', () => {
+    const draft = davidFixture({ spaces: [at('a', 'B-01', 1, 0), at('b', 'B-02', 1, 1), at('c', 'B-03', 1, 2), at('d', 'B-04', 1, 3)] })
+    const next = insertAtRowStart(draft, G, 'c', 1)!
+    expect(next.spaces.map((s) => s.label)).toEqual(['B-02', 'B-03', 'B-01', 'B-04'])
+  })
+
+  it('refuses when a space that is not numbered sits where the row would move', () => {
+    const draft = davidFixture({ spaces: [at('x', 'D-07', 3, 6), at('a', 'B-01', 1, 0), at('g', 'Gate', 1, 1)] })
+    expect(insertAtRowStart(draft, G, 'x', 1)).toBeNull()
+    expect(insertAtRowStart(draft, G, 'x', -1)).toBeNull() // above row A
   })
 })

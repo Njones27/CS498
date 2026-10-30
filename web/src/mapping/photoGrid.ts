@@ -251,10 +251,19 @@ export function photoCell(draft: DraftLayout, view: DraftViewpoint, outline: Out
  * in the row, the nearest other row's nearest space, carried across the rows too. Null with nothing to
  * copy, or when the copy would sit off the photo.
  */
-export function outlineLike(draft: DraftLayout, view: DraftViewpoint, row: number, named: number): Outline | null {
-  const lay = layout(markers(draft, view))
+export function outlineLike(
+  draft: DraftLayout,
+  view: DraftViewpoint,
+  row: number,
+  named: number,
+  exceptId?: string,
+): Outline | null {
+  const lay = layout(markers(draft, view, exceptId))
   if (!lay) return null
-  const near = (ms: Marker[]) => ms.reduce((a, b) => (Math.abs(b.col - named) < Math.abs(a.col - named) ? b : a))
+  // Copy an accepted outline over a proposal still waiting for review, when the row has one.
+  const pending = (m: Marker) => view.outlineReview?.[m.spaceId]?.status === 'pending'
+  const settled = (ms: Marker[]) => (ms.some((m) => !pending(m)) ? ms.filter((m) => !pending(m)) : ms)
+  const near = (ms: Marker[]) => settled(ms).reduce((a, b) => (Math.abs(b.col - named) < Math.abs(a.col - named) ? b : a))
   const own = lay.byRow.get(row)
   let from: Marker
   let rows = 0
@@ -362,6 +371,7 @@ export function placeFromPhoto(
     // Before the row's first number: it becomes 01, and every other space in the row moves up one
     // number and one cell on the schematic to make room.
     const next = insertAtRowStart(draft, grid, spaceId, cell.row)
+    if (!next) return { ...unchanged, note: `Row ${letter} can't move up to make room: a space that isn't numbered sits in the way` }
     const first = formatLabel(letter, 1, digits)
     return { ...fitSchematic(next), note: `Now ${first}; the rest of row ${letter} moved up one to make room`, renumbered: true }
   }

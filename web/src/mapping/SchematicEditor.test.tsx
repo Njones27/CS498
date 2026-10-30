@@ -538,7 +538,8 @@ describe('SchematicEditor', () => {
       const { last } = setup({ withGrid: true })
       drag(spaceEl('A-03'), -330, 0) // left of A-01, into the cell before column 1
       const labels = (ids: string[]) => ids.map((id) => byId(last(), id).label)
-      expect(labels(['A-03', 'A-01', 'A-02', 'A-04'])).toEqual(['A-01', 'A-02', 'A-03', 'A-05'])
+      // Only the spaces numbered below it move up; A-03's old hole closes.
+      expect(labels(['A-03', 'A-01', 'A-02', 'A-04'])).toEqual(['A-01', 'A-02', 'A-03', 'A-04'])
       expect(byId(last(), 'A-03').rect).toMatchObject({ x: 40, y: 40 })
       expect(byId(last(), 'A-01').rect).toMatchObject({ x: 150, y: 40 })
       expect(screen.getByText('Now A-01; the rest of row A moved up one to make room')).toBeInTheDocument()

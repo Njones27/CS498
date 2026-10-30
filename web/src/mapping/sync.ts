@@ -245,7 +245,7 @@ export function suggestOutline(draft: DraftLayout, view: DraftViewpoint, spaceId
 function outlineByLabel(draft: DraftLayout, view: DraftViewpoint, space: DraftSpace): Outline | null {
   const p = parseLabel(space.label)
   if (!p) return null
-  const like = outlineLike(draft, view, rowIndex(p.row), p.num - 1)
+  const like = outlineLike(draft, view, rowIndex(p.row), p.num - 1, space.spaceId)
   return like && isValidQuad(like) ? like : null
 }
 
