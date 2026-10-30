@@ -51,6 +51,8 @@ YOLO_MAX_DET = 600
 so a busy lot's misread non-car boxes must not push real cars out of the cap."""
 MAX_PIXELS = 100_000_000
 """Photos above 100 MP are refused (a drone frame is ~12-50 MP); checked from the header."""
+WARMUP_PX = 64
+"""Side of the blank image YoloCarDetector predicts on at load (letterboxed to imgsz)."""
 _MAX_COORD = 1e6  # px; keeps absurd outline coordinates inside int32 for cv2.fillPoly
 _SUBPIXEL_SHIFT = 4  # cv2.fillPoly fixed-point bits: vertices at 1/16 pixel
 
@@ -346,6 +348,12 @@ class YoloCarDetector:  # pragma: no cover - needs ultralytics and the weights
             if classes is None
             else [i for i, name in self.model.names.items() if name in classes]
         )
+        # The first predict builds ultralytics' predictor, whose setup (select_device) sets
+        # torch to min(8, os.cpu_count() - 1) threads: the host's cores, not a container's
+        # quota. Later predicts reuse that predictor (it is rebuilt only when a setup argument
+        # such as `device` changes, and __call__ always passes the same ones), so doing it
+        # here, at load, means a thread limit applied afterwards holds for every photo.
+        self(np.zeros((WARMUP_PX, WARMUP_PX, 3), dtype=np.uint8))
 
     def __call__(self, bgr: np.ndarray) -> list[Detection]:
         height, width = bgr.shape[:2]

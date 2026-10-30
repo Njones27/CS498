@@ -61,7 +61,7 @@ jobs:
     name: Worker image with the vision extra
     runs-on: ubuntu-latest
     needs: lint-test
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -87,6 +87,68 @@ jobs:
         run: >
           docker run --rm --network none parking-worker:vision python -c
           "from parking_worker.scorers.acpds.rcnn import RCNN; RCNN(roi_res=128, pooling_type='square')"
+      # NFR-1: per-photo processing p95 <= 30 s in a 2-CPU, 4 GB container, timed through the
+      # real handler (ORB + ACPDS + YOLO26m) by scripts/worker_timing.py; see models/README.md.
+      # The setup check first: the installed core/worker, the seed fallback to the /repo mount,
+      # the fixtures, both photo sizes and ORB, with the stub scorer and no weights.
+      - name: NFR-1 timing setup check in the image (no weights, no network)
+        run: >
+          docker run --rm --network none -v "$PWD:/repo:ro" parking-worker:vision
+          python /repo/scripts/worker_timing.py --check-setup
+      # Restore and save are split so a failing gate still keeps the weights download cached.
+      - name: Restore model weights
+        id: weights
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            models/acpds/*.pt
+            models/yolo/*.pt
+          key: weights-${{ hashFiles('models/manifest.json') }}
+      - name: Download and verify weights (ACPDS + YOLO26m, box mode)
+        run: uv run python scripts/download_weights.py --only RCNN_128_square_gopro --only yolo26m
+      - name: Save model weights
+        if: steps.weights.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            models/acpds/*.pt
+            models/yolo/*.pt
+          key: weights-${{ hashFiles('models/manifest.json') }}
+      # --memory-swap equal to --memory: otherwise Docker allows as much swap again on top, and
+      # 4 GB would not be a real cap on a runner with a swapfile. --cpus is a CFS quota, so the
+      # container would still see every runner core: --cpuset-cpus pins it to two, the OMP/MKL
+      # variables size torch's pool, and the worker sets torch/OpenCV threads from the quota.
+      # --photo-long-edge 4032 (the default, spelled out) also times every lot at 12 MP size.
+      # `timeout` stops a hang early enough for this step to still write the summary.
+      - name: NFR-1 worker timing (docker --cpus=2 --memory=4g, real models, p95 <= 30 s)
+        timeout-minutes: 25
+        run: |
+          out="$RUNNER_TEMP/nfr1"; mkdir -p "$out"
+          name="nfr1-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          set +e
+          docker run --name "$name" --network none \
+            --cpus=2 --cpuset-cpus=0,1 --memory=4g --memory-swap=4g \
+            -e PYTHONDONTWRITEBYTECODE=1 -e OMP_NUM_THREADS=2 -e MKL_NUM_THREADS=2 \
+            -v "$PWD:/repo:ro" -v "$PWD/models:/app/models:ro" -v "$out:/out" \
+            parking-worker:vision \
+            timeout --kill-after=1m 20m \
+            python /repo/scripts/worker_timing.py --jobs-per-lot 10 --photo-long-edge 4032 \
+              --json /out/nfr1.json --markdown /out/nfr1.md
+          rc=$?
+          set -e
+          oom=$(docker inspect --format '{{.State.OOMKilled}}' "$name" || echo unknown)
+          docker rm "$name" >/dev/null || true
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then why="timed out or killed, "; else why=""; fi
+          if [ -s "$out/nfr1.md" ]; then cat "$out/nfr1.md" >> "$GITHUB_STEP_SUMMARY"
+          else echo "### NFR-1 worker timing: no report (${why}exit $rc, OOMKilled=$oom)" >> "$GITHUB_STEP_SUMMARY"; fi
+          exit $rc
+      - name: Upload NFR-1 timing JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfr1-timing
+          path: ${{ runner.temp }}/nfr1/
+          if-no-files-found: ignore
 
   compose:
     name: Compose stack end to end
