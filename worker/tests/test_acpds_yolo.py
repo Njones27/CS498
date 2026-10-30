@@ -454,6 +454,18 @@ def test_settings_reject_yolo_conf_out_of_range():
     assert Settings(_env_file=None).yolo_overlap_mode == "box"
 
 
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_blank_acpds_input_res_means_native_resolution(monkeypatch, blank):
+    # `ACPDS_INPUT_RES=` in .env (or a compose `${ACPDS_INPUT_RES:-}`) used to fail int parsing.
+    monkeypatch.setenv("ACPDS_INPUT_RES", blank)
+    assert Settings(_env_file=None).acpds_input_res is None
+    monkeypatch.setenv("ACPDS_INPUT_RES", "1024")
+    assert Settings(_env_file=None).acpds_input_res == 1024
+    monkeypatch.setenv("ACPDS_INPUT_RES", "big")
+    with pytest.raises(ValueError, match="acpds_input_res"):
+        Settings(_env_file=None)
+
+
 def test_build_scorer_stub_unchanged():
     assert isinstance(build_scorer(Settings(_env_file=None, detector="stub")), StubScorer)
 
