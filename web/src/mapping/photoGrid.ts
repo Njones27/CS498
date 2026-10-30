@@ -42,12 +42,23 @@ function median(values: number[]): number | null {
   return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2
 }
 
-/** Outlined active spaces in `view` with row-number labels, except `exceptId`. */
+/**
+ * An outline in the photo's true proportions: outlines are stored as fractions of its width and of its
+ * height, so on a 4:3 photo a turn would skew them unless x is stretched back to the photo's shape.
+ */
+const inProportion = (view: DraftViewpoint, o: Outline): Outline => {
+  const img = view.referenceImage
+  const aspect = img && img.width > 0 && img.height > 0 ? img.width / img.height : 1
+  return o.map(([x, y]) => [x * aspect, y])
+}
+
+/** Outlined active spaces in `view` with row-number labels, except `exceptId`, in the photo's proportions. */
 function markers(draft: DraftLayout, view: DraftViewpoint, exceptId?: string): Marker[] {
   return draft.spaces.flatMap((s) => {
-    const outline = view.outlines[s.spaceId]
+    const raw = view.outlines[s.spaceId]
     const p = parseLabel(s.label)
-    if (s.retired || !outline || !p || s.spaceId === exceptId) return []
+    if (s.retired || !raw || !p || s.spaceId === exceptId) return []
+    const outline = inProportion(view, raw)
     return [{ spaceId: s.spaceId, row: rowIndex(p.row), col: p.num - 1, outline, ...box(outline) }]
   })
 }
@@ -76,7 +87,10 @@ function rowAngle(raw: Marker[]): number {
   const doubled: number[] = []
   for (const ms of byRow.values()) {
     for (let i = 0; i < ms.length; i++) {
-      for (let j = i + 1; j < ms.length; j++) doubled.push(2 * Math.atan2(ms[j].y - ms[i].y, ms[j].x - ms[i].x))
+      for (let j = i + 1; j < ms.length; j++) {
+        const [dx, dy] = [ms[j].x - ms[i].x, ms[j].y - ms[i].y]
+        if (Math.hypot(dx, dy) > 1e-9) doubled.push(2 * Math.atan2(dy, dx)) // stacked outlines say nothing
+      }
     }
   }
   if (doubled.length === 0) return 0
@@ -122,7 +136,22 @@ function layout(raw: Marker[]): Layout | null {
   // Rows that still overlap (outlines that don't make straight rows) can't be read.
   const spread = median([...byRow.values()].filter((ms) => ms.length > 1).map(band))
   if (byRow.size > 1 && spread !== null && spread > Math.abs(rowStep) / 2) return null
+  // Columns are read straight across rows. When many rows still tilt after levelling (a strong
+  // perspective: rows converging), a column would drift a third of a column per row: don't read it.
+  const tilts = [...byRow.values()].filter((ms) => ms.length > 2).map(slope)
+  if (tilts.filter((t) => Math.abs(t * rowStep) > Math.abs(pitch) / 3).length * 3 > tilts.length) return null
   return { level, byRow, rowY, pitch, rowStep }
+}
+
+/** How a row tilts (y per x): the median slope between its outlines, so one stray doesn't count. */
+function slope(ms: Marker[]): number {
+  const slopes: number[] = []
+  for (let i = 0; i < ms.length; i++) {
+    for (let j = i + 1; j < ms.length; j++) {
+      if (ms[j].x !== ms[i].x) slopes.push((ms[j].y - ms[i].y) / (ms[j].x - ms[i].x))
+    }
+  }
+  return median(slopes) ?? 0
 }
 
 /**
@@ -178,7 +207,7 @@ function photoRow(lay: Layout, y: number): { row: number; at: number } {
 export function photoCell(draft: DraftLayout, view: DraftViewpoint, outline: Outline, exceptId?: string): PhotoCell | null {
   const lay = layout(markers(draft, view, exceptId))
   if (!lay) return null
-  const me = box(lay.level(outline))
+  const me = box(lay.level(inProportion(view, outline)))
   const { row, at: rowAt } = photoRow(lay, me.y)
   const at = photoColumn(lay, row, me.x, me.y)
   return { row, col: Math.round(at), at, rowAt }

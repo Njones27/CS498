@@ -233,7 +233,7 @@ describe('layout sanity', () => {
     expect(photoCell(draft, draft.viewpoints[0], at(3, 0.3))).toBeNull()
   })
 
-  it('reads a photo turned to any angle, every cell, including far corners', () => {
+  it('reads a 4:3 photo turned to any angle, every cell, including far corners', () => {
     // A wider lot (rows B to E, 12 columns, rows 0.12 apart), turned about the middle of the photo.
     const cols = 12
     const y0 = { B: 0.3, C: 0.42, D: 0.54, E: 0.66 } as const
@@ -249,9 +249,16 @@ describe('layout sanity', () => {
     const spaces = (['B', 'C', 'D', 'E'] as const).flatMap((r) =>
       Array.from({ length: cols }, (_, i) => space(`${r}-${String(i + 1).padStart(2, '0')}`, 0, 0)),
     )
+    // The fixture's photo is 4000 x 3000: turn in its true proportions (x stretched by 4/3), then store as
+    // fractions of width and height like the editor does.
+    const W = 4 / 3
     for (const deg of [0, 3, 7, 15, 45, 90, 160]) {
       const [c, s] = [Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180)]
-      const turn = (o: Outline): Outline => o.map(([x, y]) => [0.5 + (x - 0.5) * c - (y - 0.5) * s, 0.5 + (x - 0.5) * s + (y - 0.5) * c])
+      const turn = (o: Outline): Outline =>
+        o.map(([fx, y]) => {
+          const x = fx * W
+          return [(W / 2 + (x - W / 2) * c - (y - 0.5) * s) / W, 0.5 + (x - W / 2) * s + (y - 0.5) * c]
+        })
       const outlines = Object.fromEntries(
         spaces.map((sp) => [sp.spaceId, turn(spot(Number(sp.label.slice(2)) - 1, y0[sp.label[0] as keyof typeof y0]))]),
       )
