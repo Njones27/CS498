@@ -7,12 +7,14 @@ import type { DraftLayout, DraftViewpoint, Outline } from './types'
 // around it, its column from the outlines straight above or below it in the other rows (most rows win).
 // Unlike the photo <-> schematic fit (sync.ts), this doesn't care how the schematic is drawn, so a row the
 // schematic stretches or numbers from the wrong column can't throw it off. It works whichever way the
-// photo faces (numbers running left or right, row A at the top or bottom), as long as rows run across it.
+// photo faces or is turned (numbers running either way, row A at the top or bottom). Columns are read
+// straight across rows, so a strong perspective (columns fanning out) reads less well far from a row.
 
 interface Marker {
   spaceId: string
   row: number
   col: number
+  outline: Outline
   x: number
   y: number
   w: number
@@ -46,20 +48,53 @@ function markers(draft: DraftLayout, view: DraftViewpoint, exceptId?: string): M
     const outline = view.outlines[s.spaceId]
     const p = parseLabel(s.label)
     if (s.retired || !outline || !p || s.spaceId === exceptId) return []
-    return [{ spaceId: s.spaceId, row: rowIndex(p.row), col: p.num - 1, ...box(outline) }]
+    return [{ spaceId: s.spaceId, row: rowIndex(p.row), col: p.num - 1, outline, ...box(outline) }]
   })
 }
 
-/** The photo's layout as its outlines describe it, or null when it can't be read with confidence. */
+/**
+ * The photo's layout as its outlines describe it, or null when it can't be read with confidence. It is
+ * worked out on the photo turned so its rows run level (`level`), so a photo shot at any angle reads the
+ * same; markers here are in those turned coordinates.
+ */
 interface Layout {
+  level: (o: Outline) => Outline
   byRow: Map<number, Marker[]>
   rowY: Map<number, number> // median photo y of each row
   pitch: number // signed photo x per column: negative when numbers run right to left
   rowStep: number // signed photo y per row: negative when row A is at the bottom
 }
 
-function layout(all: Marker[]): Layout | null {
-  if (all.length === 0) return null
+/**
+ * The angle the photo's rows run at (radians): from every pair of outlines in the same row, a median of
+ * their directions around their average, so a stray outline doesn't count. 0 with no row of two.
+ */
+function rowAngle(raw: Marker[]): number {
+  const byRow = new Map<number, Marker[]>()
+  for (const m of raw) byRow.set(m.row, [...(byRow.get(m.row) ?? []), m])
+  // Directions are lines, not arrows (a pair can be taken either way round), so work with doubled angles.
+  const doubled: number[] = []
+  for (const ms of byRow.values()) {
+    for (let i = 0; i < ms.length; i++) {
+      for (let j = i + 1; j < ms.length; j++) doubled.push(2 * Math.atan2(ms[j].y - ms[i].y, ms[j].x - ms[i].x))
+    }
+  }
+  if (doubled.length === 0) return 0
+  const mean = Math.atan2(
+    doubled.reduce((t, a) => t + Math.sin(a), 0),
+    doubled.reduce((t, a) => t + Math.cos(a), 0),
+  )
+  const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a)) // into (-pi, pi]
+  return (mean + median(doubled.map((a) => wrap(a - mean)))!) / 2
+}
+
+function layout(raw: Marker[]): Layout | null {
+  if (raw.length === 0) return null
+  // Turn the photo so its rows run level, then read it as if it were shot square-on.
+  const angle = rowAngle(raw)
+  const [c, s] = [Math.cos(angle), Math.sin(angle)]
+  const level = (o: Outline): Outline => o.map(([x, y]) => [x * c + y * s, -x * s + y * c])
+  const all = raw.map((m) => ({ ...m, ...box(level(m.outline)) }))
   const byRow = new Map<number, Marker[]>()
   for (const m of all) byRow.set(m.row, [...(byRow.get(m.row) ?? []), m])
   const rowY = new Map([...byRow].map(([r, ms]) => [r, median(ms.map((m) => m.y))!]))
@@ -83,15 +118,11 @@ function layout(all: Marker[]): Layout | null {
   // outlined, a mislabelled space) are outvoted, which is when renumbering is wanted.
   const against = (values: number[], sign: number) => values.filter((v) => Math.sign(v) !== sign).length * 3 > values.length
   if (against(steps, Math.sign(pitch)) || against(rowSteps, Math.sign(rowStep))) return null
-  // Rows must run across the photo, each in its own band of height (a slight tilt is fine): rows are told
-  // apart by height (photoRow). A turned or steeply angled photo, whose rows overlap in height, fails this.
+  // Levelled, each row must keep to its own band of height: rows are told apart by height (photoRow).
+  // Rows that still overlap (outlines that don't make straight rows) can't be read.
   const spread = median([...byRow.values()].filter((ms) => ms.length > 1).map(band))
   if (byRow.size > 1 && spread !== null && spread > Math.abs(rowStep) / 2) return null
-  // Columns are read straight down the photo (photoColumn). A photo turned so far that a column drifts a
-  // third of a column from one row to the next (its rows tilt) can't be read that way.
-  const tilt = median([...byRow.values()].filter((ms) => ms.length > 2).map(slope))
-  if (tilt !== null && Math.abs(tilt * rowStep) > Math.abs(pitch) / 3) return null
-  return { byRow, rowY, pitch, rowStep }
+  return { level, byRow, rowY, pitch, rowStep }
 }
 
 /**
@@ -101,17 +132,6 @@ function layout(all: Marker[]): Layout | null {
 function band(ms: Marker[]): number {
   const mid = median(ms.map((m) => m.y))!
   return 2 * median(ms.map((m) => Math.abs(m.y - mid)))!
-}
-
-/** How a row tilts (photo y per photo x): the median slope between its outlines, so one stray doesn't count. */
-function slope(ms: Marker[]): number {
-  const slopes: number[] = []
-  for (let i = 0; i < ms.length; i++) {
-    for (let j = i + 1; j < ms.length; j++) {
-      if (ms[j].x !== ms[i].x) slopes.push((ms[j].y - ms[i].y) / (ms[j].x - ms[i].x))
-    }
-  }
-  return median(slopes) ?? 0
 }
 
 /** The (unrounded) column at photo x, counted from `row`'s marker nearest x; and how many columns away that is. */
@@ -158,7 +178,7 @@ function photoRow(lay: Layout, y: number): { row: number; at: number } {
 export function photoCell(draft: DraftLayout, view: DraftViewpoint, outline: Outline, exceptId?: string): PhotoCell | null {
   const lay = layout(markers(draft, view, exceptId))
   if (!lay) return null
-  const me = box(outline)
+  const me = box(lay.level(outline))
   const { row, at: rowAt } = photoRow(lay, me.y)
   const at = photoColumn(lay, row, me.x, me.y)
   return { row, col: Math.round(at), at, rowAt }
@@ -235,9 +255,8 @@ export function placeFromPhoto(
   const label = cellLabel(cell, Math.max(2, parseLabel(space.label)?.digits ?? labelDigits(draft.spaces)))
   if (!label) return { ...unchanged, note: 'The photo puts this space before column 1 or above row A; it stays as it is' }
   // Another space outlined in the same spot on the photo is the same physical space: a duplicate.
-  const others = markers(draft, view, spaceId)
-  const lay = layout(others)
-  const twin = lay && others.find((m) => m.row === cell.row && Math.round(photoColumn(lay, m.row, m.x, m.y)) === cell.col)
+  const lay = layout(markers(draft, view, spaceId))
+  const twin = lay?.byRow.get(cell.row)?.find((m) => Math.round(photoColumn(lay, m.row, m.x, m.y)) === cell.col)
   if (twin) {
     const name = draft.spaces.find((s) => s.spaceId === twin.spaceId)!.label
     return { ...unchanged, note: `${name} is already outlined in that spot; delete one of the two` }

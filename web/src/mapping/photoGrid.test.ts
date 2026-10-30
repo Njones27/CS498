@@ -111,13 +111,14 @@ describe('photos taken from other sides', () => {
     expect(photoCell(draft, draft.viewpoints[0], flipped(at(2, 0.9)))).toMatchObject({ row: 5, col: 2 })
   })
 
-  it('gives up when rows don\'t run across the photo', () => {
+  it('a row whose outlines are scattered all over is outvoted; the other rows still read', () => {
     const base = lot()
     const v = base.viewpoints[0]
-    // Turned a quarter: rows run down the photo.
-    const turned = Object.fromEntries(Object.entries(v.outlines).map(([k, o]) => [k, o.map(([x, y]) => [y, x] as [number, number])]))
-    const draft = { ...base, viewpoints: [{ ...v, outlines: turned }] }
-    expect(photoCell(draft, draft.viewpoints[0], at(0, 0.1))).toBeNull()
+    const ys = [0.1, 0.5, 0.3, 0.7]
+    const outlines = { ...v.outlines }
+    ;['B-01', 'B-02', 'B-03', 'B-04'].forEach((id, i) => (outlines[id] = at(i + 1, ys[i])))
+    const draft = { ...base, viewpoints: [{ ...v, outlines }] }
+    expect(photoCell(draft, draft.viewpoints[0], at(3, ROW_Y.D), 'D-04')).toMatchObject({ row: 3, col: 3 })
   })
 })
 
@@ -232,23 +233,37 @@ describe('layout sanity', () => {
     expect(photoCell(draft, draft.viewpoints[0], at(3, 0.3))).toBeNull()
   })
 
-  it('reads a photo whose rows are slightly tilted, and gives up on one turned steeply', () => {
-    const base = lot()
-    const v = base.viewpoints[0]
-    const turn = (deg: number) => (o: Outline): Outline => {
-      const [c, s] = [Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180)]
-      return o.map(([x, y]) => [Number((0.5 + (x - 0.5) * c - (y - 0.5) * s).toFixed(4)), Number((0.5 + (x - 0.5) * s + (y - 0.5) * c).toFixed(4))])
+  it('reads a photo turned to any angle, every cell, including far corners', () => {
+    // A wider lot (rows B to E, 12 columns, rows 0.12 apart), turned about the middle of the photo.
+    const cols = 12
+    const y0 = { B: 0.3, C: 0.42, D: 0.54, E: 0.66 } as const
+    const spot = (col: number, y: number): Outline => {
+      const x = 0.25 + col * 0.04
+      return [
+        [x, y],
+        [x + 0.035, y],
+        [x + 0.035, y + 0.08],
+        [x, y + 0.08],
+      ]
     }
-    const turned = (deg: number) => ({
-      ...base,
-      viewpoints: [{ ...v, outlines: Object.fromEntries(Object.entries(v.outlines).map(([k, o]) => [k, turn(deg)(o)])) }],
-    })
-    // Turned 10 degrees, a column drifts most of a column per row: not readable straight down.
-    expect(photoCell(turned(60), turned(60).viewpoints[0], turn(60)(at(0, ROW_Y.B)))).toBeNull()
-    expect(photoCell(turned(10), turned(10).viewpoints[0], turn(10)(at(0, ROW_Y.B)))).toBeNull()
-    const tilt = turn(1)
-    const draft = { ...base, viewpoints: [{ ...v, outlines: Object.fromEntries(Object.entries(v.outlines).map(([k, o]) => [k, tilt(o)])) }] }
-    expect(photoCell(draft, draft.viewpoints[0], tilt(at(0, ROW_Y.B)))).toMatchObject({ row: 1, col: 0 })
+    const spaces = (['B', 'C', 'D', 'E'] as const).flatMap((r) =>
+      Array.from({ length: cols }, (_, i) => space(`${r}-${String(i + 1).padStart(2, '0')}`, 0, 0)),
+    )
+    for (const deg of [0, 3, 7, 15, 45, 90, 160]) {
+      const [c, s] = [Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180)]
+      const turn = (o: Outline): Outline => o.map(([x, y]) => [0.5 + (x - 0.5) * c - (y - 0.5) * s, 0.5 + (x - 0.5) * s + (y - 0.5) * c])
+      const outlines = Object.fromEntries(
+        spaces.map((sp) => [sp.spaceId, turn(spot(Number(sp.label.slice(2)) - 1, y0[sp.label[0] as keyof typeof y0]))]),
+      )
+      const draft = davidFixture({ spaces, viewpoints: [{ ...davidFixture().viewpoints[0], outlines, outlineReview: {} }] })
+      const read = spaces.map((sp) => {
+        const cell = photoCell(draft, draft.viewpoints[0], outlines[sp.spaceId], sp.spaceId)
+        return cell && `${'ABCDEFGH'[cell.row]}-${String(cell.col + 1).padStart(2, '0')}`
+      })
+      expect(read, `${deg} degrees`).toEqual(spaces.map((sp) => sp.label))
+      // A new space past the end of row C.
+      expect(photoCell(draft, draft.viewpoints[0], turn(spot(cols, y0.C))), `${deg} degrees`).toMatchObject({ row: 2, col: cols })
+    }
   })
 
   it('one stray outline in a small lot does not stop the photo being read', () => {
