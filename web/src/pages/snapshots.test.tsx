@@ -244,6 +244,24 @@ describe('Snapshots page (US-06)', () => {
     expect(await screen.findByRole('region', { name: 'Snapshot detail' })).toHaveTextContent('Too few matches')
   })
 
+  it("another lot's photo in the #<imageId> link shows a notice, not its detail", async () => {
+    const elsewhere = { ...detail, imageId: 'img-north', lotId: 'north-lot' }
+    setup(
+      SKETCH,
+      {
+        'GET /admin/lots': {
+          body: [...lots, { ...lots[0], lotId: 'north-lot', name: 'North Lot' }],
+        },
+        'GET /admin/snapshots/img-north': { body: elsewhere },
+      },
+      '/admin/snapshots#img-north',
+    )
+    const panel = await screen.findByRole('region', { name: 'Snapshot detail' })
+    expect(await within(panel).findByText('This photo belongs to North Lot, not Test Lot. Pick that lot to see it.')).toBeInTheDocument()
+    expect(within(panel).queryByRole('table')).not.toBeInTheDocument()
+    expect(within(panel).queryByRole('link', { name: 'View photo with outlines' })).not.toBeInTheDocument()
+  })
+
   it('says when a lot has no photos yet', async () => {
     setup([])
     expect(await screen.findByText(/No photos uploaded for this lot yet/)).toBeInTheDocument()

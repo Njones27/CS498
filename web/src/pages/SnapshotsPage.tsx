@@ -25,7 +25,8 @@ const NO_PATCHES: Record<string, SnapshotOut> = {}
 /** US-06: every uploaded photo for the picked lot, its job state, Retry, and per-space detail. */
 export function SnapshotsPage() {
   const { lotId, lots } = useAdminLot()
-  const lotName = lots?.find((l) => l.lotId === lotId)?.name ?? lotId
+  const nameOf = (id: string) => lots?.find((l) => l.lotId === id)?.name ?? id
+  const lotName = nameOf(lotId)
   const list = useFetch<SnapshotOut[] | null>(
     () => (lotId ? api.get<SnapshotOut[]>(`/admin/snapshots?lotId=${encodeURIComponent(lotId)}`) : Promise.resolve(null)),
     `snapshots:${lotId}`,
@@ -212,6 +213,8 @@ export function SnapshotsPage() {
       {selectedId && (
         <SnapshotDetailPanel
           imageId={selectedId}
+          lotId={lotId}
+          nameOf={nameOf}
           // Refetch the detail whenever the listed job state moves on.
           version={selectedRow ? `${selectedRow.jobStatus}:${selectedRow.attempts}` : ''}
           labelById={labelById}
@@ -224,11 +227,15 @@ export function SnapshotsPage() {
 
 function SnapshotDetailPanel({
   imageId,
+  lotId,
+  nameOf,
   version,
   labelById,
   onClose,
 }: {
   imageId: string
+  lotId: string
+  nameOf: (lotId: string) => string
   version: string
   labelById: Map<string, string>
   onClose: () => void
@@ -237,7 +244,9 @@ function SnapshotDetailPanel({
     () => api.get<SnapshotDetail>(`/admin/snapshots/${encodeURIComponent(imageId)}`),
     `snapshot-detail:${imageId}:${version}`,
   )
-  const d = detail.data
+  // A `#<imageId>` link can name another lot's photo; the detail route is not lot-scoped.
+  const otherLot = detail.data && detail.data.lotId !== lotId ? detail.data.lotId : null
+  const d = otherLot ? null : detail.data
   const label = (o: ObservationOut) => labelById.get(o.spaceId) ?? o.spaceId
   const observations = d
     ? [...d.observations].sort((a, b) => label(a).localeCompare(label(b), undefined, { numeric: true }))
@@ -251,7 +260,12 @@ function SnapshotDetailPanel({
           Close
         </button>
       </div>
-      {detail.loading && !d && <p className="muted">Loading…</p>}
+      {detail.loading && !detail.data && <p className="muted">Loading…</p>}
+      {otherLot && (
+        <p className="notice">
+          This photo belongs to {nameOf(otherLot)}, not {nameOf(lotId)}. Pick that lot to see it.
+        </p>
+      )}
       {detail.error && (
         <p className="notice notice--error" role="alert">
           {detail.error}
