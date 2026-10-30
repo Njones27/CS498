@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
+import { ADMIN_LOT_KEY } from '../admin/adminLot'
 import { api, errorMessage } from '../api/client'
 import type { ClosureCreate, ClosureOut, ClosureReason } from '../api/closures'
 import type { LotDetail, LotListItem, LotStatusOut, SpaceStatusOut } from '../api/schemas'
@@ -10,7 +11,6 @@ import { dateTime, toDateTimeLocal } from '../lib/relativeTime'
 import { STATE_ORDER, visualFor } from '../lib/status'
 import { parseLocalDateTime } from '../lib/uploadValidation'
 import { useFetch } from '../lib/useFetch'
-import { ADMIN_LOT_KEY } from './UploadPage'
 
 const WINDOW_MESSAGE = 'End time must be after start time'
 

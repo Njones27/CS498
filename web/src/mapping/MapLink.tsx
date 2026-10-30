@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { LotListItem } from '../api/schemas'
 import { useFetch } from '../lib/useFetch'
-import { ADMIN_LOT_KEY } from '../pages/UploadPage'
+import { ADMIN_LOT_KEY } from '../admin/adminLot'
 
 function rememberedLot(): string {
   try {

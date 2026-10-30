@@ -6,7 +6,7 @@ import type { LotDetail, LotListItem, LotStatusOut } from '../api/schemas'
 import { draftFixture } from '../mapping/fixtures/kevin'
 import { AGE_RANGE, NAME_REQUIRED } from '../pages/NewLotPage'
 import { ADMIN, mockFetch, renderApp } from '../test/helpers'
-import { resolveLotId } from './adminLot'
+import { ADMIN_LOT_KEY, resolveLotId } from './adminLot'
 
 const KEY = 'parking.admin.lotId'
 
@@ -88,6 +88,10 @@ describe('lot picker', () => {
     mockFetch({ 'GET /admin/lots': { body: [NEW_NORTH, TEST_LOT] } })
     renderApp('/admin', ADMIN)
     expect((await picker()).value).toBe('test-lot')
+  })
+
+  it('remembers the lot under the key the admin pages share, defined in adminLot (no import cycle)', () => {
+    expect(ADMIN_LOT_KEY).toBe(KEY)
   })
 
   it('resolveLotId keeps a known lot, else the first published, else the first lot', () => {

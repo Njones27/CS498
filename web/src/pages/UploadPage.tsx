@@ -21,9 +21,6 @@ import {
 } from '../lib/uploadValidation'
 import { useFetch } from '../lib/useFetch'
 
-/** localStorage key shared with the admin lot picker (US-16 #3). */
-export const ADMIN_LOT_KEY = 'parking.admin.lotId'
-
 type Outcome =
   | { kind: 'success'; imageId: string }
   | { kind: 'duplicate'; uploadedAt: string | null | undefined; imageId: string | null | undefined }

@@ -1,5 +1,7 @@
 import type { AdminLotOut } from '../api/lotsAdmin'
-import { ADMIN_LOT_KEY } from '../pages/UploadPage'
+
+/** localStorage key for the admin's picked lot (US-16 #3). */
+export const ADMIN_LOT_KEY = 'parking.admin.lotId'
 
 /** Admin pages whose URL carries the lot: the picker follows them and switching rewrites them. */
 export const LOT_ROUTE = '/admin/lots/:lotId/*'
