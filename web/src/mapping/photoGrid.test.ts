@@ -142,7 +142,7 @@ describe('matchRowToPhoto', () => {
     const v = base.viewpoints[0]
     // B-04 outlined over B-03's spot: two outlines in column 3.
     const draft = { ...base, viewpoints: [{ ...v, outlines: { ...v.outlines, 'B-04': at(3, ROW_Y.B) } }] }
-    const { clashes } = matchRowToPhoto(draft, draft.viewpoints[0], 1, fitGrid(draft.spaces))
+    const { clashes } = matchRowToPhoto(draft, draft.viewpoints[0], 1, fitGrid(draft.spaces), -1) // row B numbers one below the columns
     expect(clashes).toBe(1)
   })
 })
@@ -313,5 +313,39 @@ describe('a box drawn before column 1', () => {
     // Row B now numbers one higher than the lot's columns: a box after its last space is B-06, not B-05.
     const more = addSpaceFromOutline(next, 'V1', at(4, ROW_Y.B), fitGrid(next.spaces))
     expect(more.space.label).toBe('B-06')
+  })
+})
+
+describe('more inserts and renumbering', () => {
+  it('a box drawn two spaces before 01 still just becomes 01; the rest move up one, no gaps', () => {
+    const base = lot()
+    const v = base.viewpoints[0]
+    const outlines = { ...v.outlines }
+    for (const n of [1, 2, 3, 4]) outlines[`B-0${n}`] = at(n - 1, ROW_Y.B)
+    const draft = { ...base, viewpoints: [{ ...v, outlines }] }
+    const grid = fitGrid(draft.spaces)
+    const { draft: next, space: added } = addSpaceFromOutline(draft, 'V1', at(-2, ROW_Y.B), grid)
+    expect(added.label).toBe('B-01')
+    const b = (id: string) => next.spaces.find((s) => s.spaceId === id)!
+    expect(['B-01', 'B-02', 'B-03', 'B-04'].map((id) => b(id).label)).toEqual(['B-02', 'B-03', 'B-04', 'B-05'])
+    expect(b('B-04').rect).toEqual(cellRect(grid, { row: 1, col: 4 }))
+  })
+
+  it('a held label in a row numbered one off renumbers it keeping that offset', () => {
+    // Row B numbered one higher than the columns (B-0n in column n-2); B-03 wrongly outlined in column 4
+    // where B-06 belongs... a new box in column 1 should be B-03 and push the misnumbered one to its spot.
+    const base = lot()
+    const v = base.viewpoints[0]
+    const outlines = { ...v.outlines }
+    outlines['B-01'] = at(-1, ROW_Y.B)
+    outlines['B-02'] = at(0, ROW_Y.B)
+    outlines['B-03'] = at(4, ROW_Y.B)
+    outlines['B-04'] = at(2, ROW_Y.B)
+    const draft = { ...base, viewpoints: [{ ...v, outlines }] }
+    const grid = fitGrid(draft.spaces)
+    const { draft: next, space: added } = addSpaceFromOutline(draft, 'V1', at(1, ROW_Y.B), grid)
+    expect(added.label).toBe('B-03')
+    expect(next.spaces.find((s) => s.spaceId === 'B-03')!.label).toBe('B-06')
+    expect(next.spaces.find((s) => s.spaceId === 'B-04')!.label).toBe('B-04')
   })
 })

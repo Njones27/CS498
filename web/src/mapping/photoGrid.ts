@@ -26,8 +26,8 @@ export interface PhotoCell extends Cell {
   at: number
   rowAt: number
   /**
-   * The column its label should name: `col` plus its row's numbering offset (rowOffset). A row that
-   * starts one space further left than the others (its 01 is left of column 1) names columns one higher.
+   * The column its label should name: `col` plus its row's numbering offset near it (offsetNear). A row
+   * that starts one space further left than the others (its 01 is left of column 1) names columns one higher.
    */
   named: number
 }
@@ -206,22 +206,23 @@ function photoRow(lay: Layout, y: number): { row: number; at: number } {
 }
 
 /**
- * How a row's numbers sit against the lot's columns on the photo: most of its spaces' (number - 1) minus
- * the column the photo puts them in. 0 when the row is numbered like the other rows (or has nothing).
- */
-function rowOffset(lay: Layout, row: number): number {
-  const ms = lay.byRow.get(row) ?? []
-  return Math.round(median(ms.map((m) => m.col - Math.round(photoColumn(lay, row, m.x, m.y)))) ?? 0)
-}
-
-/**
- * The row's numbering offset (as rowOffset) measured on its three spaces nearest photo x, before
- * rounding: across the photo, perspective makes the columns read from other rows drift, and nearby
+ * How a row's numbers sit against the lot's columns near photo x: on its three spaces nearest x, their
+ * (number - 1) minus the column the photo puts them in, before rounding (0 for a row numbered like the
+ * others, or an empty one). Across the photo, perspective makes the columns read from other rows drift, and nearby
  * spaces drift the same way, so this cancels it where it matters.
  */
 function offsetNear(lay: Layout, row: number, x: number): number {
   const near = [...(lay.byRow.get(row) ?? [])].sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x)).slice(0, 3)
-  return median(near.map((m) => m.col - photoColumn(lay, row, m.x, m.y))) ?? 0
+  const offsets = near.map((m) => m.col - photoColumn(lay, row, m.x, m.y))
+  // Two that disagree: the nearer one decides (an average would round either way).
+  if (offsets.length === 2 && Math.round(offsets[0]) !== Math.round(offsets[1])) return offsets[0]
+  return median(offsets) ?? 0
+}
+
+/** The perspective drift near photo x in `row`: offsetNear less its whole part, so between -0.5 and 0.5. */
+function driftNear(lay: Layout, row: number, x: number): number {
+  const o = offsetNear(lay, row, x)
+  return o - Math.round(o)
 }
 
 /**
@@ -248,18 +249,18 @@ export function matchRowToPhoto(
   view: DraftViewpoint,
   row: number,
   grid: Grid,
-  offset?: number,
+  offset: number,
 ): { draft: DraftLayout; clashes: number } {
   const letter = rowLetter(row)
   const lay = layout(markers(draft, view))
   if (!letter || !lay) return { draft, clashes: 0 }
-  const shift = offset ?? rowOffset(lay, row)
   const digits = labelDigits(draft.spaces)
   const taken = new Set<number>()
   const placed = new Map<string, { label: string; col: number }>()
   let clashes = 0
   for (const m of [...(lay.byRow.get(row) ?? [])].sort((a, b) => (a.x - b.x) * Math.sign(lay.pitch))) {
-    const col = Math.round(photoColumn(lay, row, m.x, m.y)) + shift
+    // Each space read with the perspective drift around it cancelled, as photoCell reads a new one.
+    const col = Math.round(photoColumn(lay, row, m.x, m.y) + driftNear(lay, row, m.x)) + offset
     if (col < 0 || taken.has(col)) {
       clashes++ // keeps its label, which another space may now have
       continue
@@ -320,13 +321,16 @@ export function placeFromPhoto(
   const custom = !parseLabel(space.label) && space.label.trim() !== ''
   const offset = cell.named - cell.col
   if (cell.named < 0 && !custom) {
-    // Before the row's first number: it becomes 01 and the rest of the row moves up to make room.
-    const first = { row: cell.row, col: 0 }
-    const start = updateSpace(draft, spaceId, { label: formatLabel(letter, 1, digits), rect: cellRect(grid, first) })
-    const { draft: shifted, clashes } = matchRowToPhoto(start, view, cell.row, grid, -cell.col)
-    const note = [`Now ${formatLabel(letter, 1, digits)}; the rest of row ${letter} moved up one to make room`]
-    if (clashes) note.push(`${clashes} label${clashes === 1 ? '' : 's'} still clash${clashes === 1 ? 'es' : ''}; rename by hand`)
-    return { ...fitSchematic(shifted), note: note.join('; '), renumbered: true }
+    // Before the row's first number: it becomes 01, and every other space in the row moves up one
+    // number and one cell on the schematic to make room.
+    const shifted = draft.spaces.map((s) => {
+      const p = s.retired || s.spaceId === spaceId ? null : parseLabel(s.label)
+      if (!p || p.row !== letter) return s
+      return { ...s, label: formatLabel(letter, p.num + 1, p.digits), rect: cellRect(grid, { row: cell.row, col: p.num }) }
+    })
+    const first = formatLabel(letter, 1, digits)
+    const next = updateSpace({ ...draft, spaces: shifted }, spaceId, { label: first, rect: cellRect(grid, { row: cell.row, col: 0 }) })
+    return { ...fitSchematic(next), note: `Now ${first}; the rest of row ${letter} moved up one to make room`, renumbered: true }
   }
   const target = { row: cell.row, col: Math.max(0, cell.named) }
   const label = cellLabel(target, digits)!
