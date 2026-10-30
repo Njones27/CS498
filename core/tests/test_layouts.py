@@ -2,6 +2,7 @@
 item, `Viewpoint.outline_review`, and the helpers in `parking_core.layouts`. Then validation
 (§8.4), publish (§8.3), versions and restore (§4.3)."""
 
+import math
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -539,6 +540,39 @@ def test_rect_on_the_schematic_edge_and_retired_rects_are_fine():
     d.spaces.append(sp("edge", rect=Rect(x=950, y=520, w=50, h=80)))
     d.viewpoints[0].outlines["edge"] = sq(5)
     d.spaces.append(sp("gone", rect=Rect(x=5000, y=0, w=50, h=80), retired=True))
+    assert validate_draft(d, None).ok
+
+
+# A NaN rect compares False everywhere, so it looked inside the map and published a snapshot
+# that no longer loads. `Rect` now rejects it; this covers drafts stored before it did.
+@pytest.mark.parametrize(
+    "rect",
+    [
+        Rect(x=0, y=0, w=0, h=80),
+        Rect(x=0, y=0, w=50, h=0),
+        Rect(x=100, y=100, w=-50, h=80),
+        Rect(x=100, y=100, w=50, h=-80),
+        Rect.model_construct(x=math.nan, y=0, w=50, h=80),
+        Rect.model_construct(x=0, y=0, w=math.inf, h=80),
+    ],
+    ids=["zero-width", "zero-height", "negative-width", "negative-height", "nan", "inf"],
+)
+def test_bad_rect(rect):
+    d = clean()
+    d.spaces.append(sp("B-10", rect=rect))
+    d.viewpoints[0].outlines["B-10"] = sq(5)
+    report = validate_draft(d, None)
+    assert codes(report.errors) == ["bad_rect"]
+    issue = report.errors[0]
+    assert (issue.message, issue.space_ids) == (
+        "B-10 is not a valid rectangle on the map",
+        ["B-10"],
+    )
+
+
+def test_retired_bad_rect_is_fine():
+    d = clean()
+    d.spaces.append(sp("gone", rect=Rect(x=0, y=0, w=0, h=0), retired=True))
     assert validate_draft(d, None).ok
 
 

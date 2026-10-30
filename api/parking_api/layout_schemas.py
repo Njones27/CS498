@@ -34,10 +34,11 @@ class DraftSchematic(CamelModel):
 class DraftRect(CamelModel):
     """Schematic rectangle in schematic units."""
 
-    x: float
-    y: float
-    w: float
-    h: float
+    # Finite only, like `Corner`: a NaN would be stored as null (models.Rect).
+    x: FiniteFloat
+    y: FiniteFloat
+    w: FiniteFloat
+    h: FiniteFloat
 
 
 class DraftSpace(CamelModel):

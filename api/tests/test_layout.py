@@ -739,3 +739,34 @@ def test_non_finite_corner_is_422(client, admin_headers, literal):
     assert r.status_code == 422
     assert r.json()["error"] == "validation_error"
     assert get_draft(client, admin_headers)["revision"] == 0
+
+
+@pytest.mark.parametrize("field", ["x", "w"])
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_rect_is_422(client, admin_headers, field, literal):
+    # As for corners: a NaN rect validated as inside the map, published, and the snapshot it
+    # was stored in then failed to load for every driver.
+    body = as_body(get_draft(client, admin_headers))
+    space(body, "A-01")["rect"][field] = "__X__"
+    raw = json.dumps(body).replace('"__X__"', literal)
+    r = client.put(
+        "/admin/lots/test-lot/layout/draft",
+        content=raw,
+        headers={**admin_headers, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 422
+    assert r.json()["error"] == "validation_error"
+    assert get_draft(client, admin_headers)["revision"] == 0
+
+
+def test_zero_size_rect_blocks_publishing(client, admin_headers):
+    edit(
+        client,
+        admin_headers,
+        lambda b: space(b, "A-01").update(rect={"x": 80, "y": 80, "w": 0, "h": 0}),
+    )
+    report = validate(client, admin_headers)
+    assert [e["code"] for e in report["errors"]] == ["bad_rect"]
+    assert report["errors"][0]["spaceIds"] == ["A-01"]
+    r = publish(client, admin_headers)
+    assert r.status_code == 409 and r.json()["error"] == "validation_failed"

@@ -59,12 +59,12 @@ class ClosureReason(StrEnum):
 
 
 class Rect(CamelModel):
-    """Schematic rectangle in schematic units (see `Schematic`)."""
+    """Schematic rectangle in schematic units (see `Schematic`). Finite only, like `Point`."""
 
-    x: float
-    y: float
-    w: float
-    h: float
+    x: FiniteFloat
+    y: FiniteFloat
+    w: FiniteFloat
+    h: FiniteFloat
 
 
 class Schematic(CamelModel):

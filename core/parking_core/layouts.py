@@ -7,6 +7,7 @@ read published snapshots, so draft edits never reach them until a publish.
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from .models import (
     ParkingSpace,
     Point,
     PublishedLayout,
+    Rect,
     Schematic,
     Viewpoint,
 )
@@ -178,6 +180,13 @@ def _inside_photo(polygon: list[Point]) -> bool:
     return all(0.0 <= x <= 1.0 and 0.0 <= y <= 1.0 for x, y in polygon)
 
 
+def _is_valid_rect(rect: Rect) -> bool:
+    """Finite, with positive width and height. `Rect` rejects non-finite numbers, but a draft
+    stored before it did (or built in code) can still hold them."""
+    values = (rect.x, rect.y, rect.w, rect.h)
+    return all(math.isfinite(v) for v in values) and rect.w > 0 and rect.h > 0
+
+
 def _views_text(view_ids: list[str]) -> str:
     if len(view_ids) == 1:
         return view_ids[0]
@@ -282,10 +291,17 @@ def validate_draft(draft: Draft, published: PublishedLayout | None) -> Validatio
             next(iter(pending_views)) if len(pending_views) == 1 else None,
         )
 
+    # A bad rect gets only its own error: NaN compares False, so it would look inside.
     width, height = draft.meta.schematic.width, draft.meta.schematic.height
     for s in active:
         r = s.rect
-        if r.x < -_EPS or r.y < -_EPS or r.x + r.w > width + _EPS or r.y + r.h > height + _EPS:
+        if not _is_valid_rect(r):
+            err(
+                "bad_rect",
+                f"{_name(s, s.space_id)} is not a valid rectangle on the map",
+                [s.space_id],
+            )
+        elif r.x < -_EPS or r.y < -_EPS or r.x + r.w > width + _EPS or r.y + r.h > height + _EPS:
             err(
                 "rect_outside_schematic",
                 f"{_name(s, s.space_id)} is outside the map area",
