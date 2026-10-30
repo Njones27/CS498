@@ -7,8 +7,10 @@ import react from '@vitejs/plugin-react'
 // In Phase 2 set VITE_API_BASE to the API Gateway URL and no proxy is involved.
 //
 // Behind code-server's port proxy, run with VITE_BASE=/proxy/5173/: the app is then served
-// under that prefix and HMR connects back through the proxy on 443. Without it, base is '/'.
-const base = process.env.VITE_BASE ?? '/'
+// under that prefix and HMR connects back through the proxy on 443 (`npm run dev:proxy`).
+// Without it, base is '/'.
+const rawBase = process.env.VITE_BASE || '/'
+const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`
 const behindProxy = base !== '/'
 const apiTarget = process.env.API_PROXY_TARGET ?? 'http://localhost:8000'
 
