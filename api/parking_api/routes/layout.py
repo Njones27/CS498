@@ -4,7 +4,10 @@ Saves are not one transaction. The draft meta is written first, as a conditional
 `revision` that claims the save, and the spaces and viewpoints after it. A save that loses the
 race writes nothing, so a publish (which claims the same way) can never include the items of a
 save that reported 409. A save that fails after its claim leaves the revision advanced: that
-window's next save is stale, and a reload shows what was stored.
+window's next save is stale, and a reload shows what was stored. Known gap: a window that
+loads the draft between a save's claim and its item writes sees the new revision with some
+old items, and could publish that mix. It needs a load within milliseconds of a save, by
+another admin.
 """
 
 from __future__ import annotations
