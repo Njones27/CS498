@@ -66,7 +66,8 @@ describe('SchematicEditor', () => {
   it('renders one labeled rectangle per space in the schematic viewBox, with type badges and retired marker', () => {
     setup()
     const svg = screen.getByRole('group', { name: 'Schematic editor' })
-    expect(svg).toHaveAttribute('viewBox', '0 0 1000 600')
+    // The whole map plus a 6% margin to drag into.
+    expect(svg).toHaveAttribute('viewBox', '-60 -60 1120 720')
     expect(screen.getByRole('button', { name: 'A-01, standard' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'A-02, ADA' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'A-04, EV' })).toBeInTheDocument()
@@ -190,10 +191,44 @@ describe('SchematicEditor', () => {
     expect(rectOf(last(), 'A-03')).toEqual({ x: 250, y: 20, w: 130, h: 170 })
   })
 
-  it('US-07 #3: drags snap to whole units and stay inside the schematic', () => {
+  it('US-07 #3: drags snap to whole units, stop at the edge of the view, and grow the map to hold the space', () => {
     const { last } = setup()
     drag(spaceEl('A-03'), 2000.4, -500.6)
-    expect(rectOf(last(), 'A-03')).toEqual({ x: 900, y: 0, w: 100, h: 120 })
+    // Clamped to the view (-60..1060, -60..660), then everything shifts down 80 so A-03 sits 20 from the top.
+    expect(rectOf(last(), 'A-03')).toEqual({ x: 960, y: 20, w: 100, h: 120 })
+    expect(rectOf(last(), 'A-01')).toEqual({ x: 40, y: 120, w: 100, h: 120 })
+    expect(last().schematic).toEqual({ width: 1080, height: 680 })
+  })
+
+  it('zoom buttons narrow and widen the view; Fit goes back to the whole map', async () => {
+    const { user } = setup()
+    const svg = screen.getByRole('group', { name: 'Schematic editor' })
+    await user.click(screen.getByRole('button', { name: 'Zoom in' }))
+    expect(svg).toHaveAttribute('viewBox', '52 12 896 576')
+    expect(screen.getByText('125%')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Fit' }))
+    expect(svg).toHaveAttribute('viewBox', '-60 -60 1120 720')
+  })
+
+  it('a drag on empty map pans the view', () => {
+    setup()
+    const svg = screen.getByRole('group', { name: 'Schematic editor' })
+    drag(screen.getByTestId('schematic-area'), 100, 50)
+    expect(svg).toHaveAttribute('viewBox', '-160 -110 1120 720')
+  })
+
+  it('with Draw space on, a drag on empty map adds a space there, labeled for its row', async () => {
+    const { last, onSelectSpace, user } = setup()
+    await user.click(screen.getByRole('button', { name: 'Draw space' }))
+    // In jsdom one pixel is one unit from the view's top-left corner (-60, -60).
+    fireEvent.pointerDown(screen.getByTestId('schematic-area'), { clientX: 700, clientY: 100, button: 0 })
+    fireEvent.pointerMove(window, { clientX: 750, clientY: 160 })
+    expect(screen.getByTestId('schematic-drawbox')).toBeInTheDocument()
+    fireEvent.pointerUp(window, { clientX: 800, clientY: 220 })
+    const added = last().spaces.at(-1)!
+    expect(added).toMatchObject({ label: 'A-06', type: 'STANDARD', rect: { x: 640, y: 40, w: 100, h: 120 } })
+    expect(onSelectSpace).toHaveBeenLastCalledWith(added.spaceId)
+    expect(screen.queryByTestId('schematic-drawbox')).toBeNull()
   })
 
   it('a click without movement selects and emits nothing', () => {
@@ -229,6 +264,7 @@ describe('SchematicEditor', () => {
     fireEvent.pointerUp(window, { clientX: 0, clientY: 0 })
     expect(onSelectSpace).toHaveBeenLastCalledWith('A-01')
     fireEvent.pointerDown(document.querySelector('.schematic__bg')!, { clientX: 0, clientY: 0, button: 0 })
+    fireEvent.pointerUp(window, { clientX: 0, clientY: 0 })
     expect(onSelectSpace).toHaveBeenLastCalledWith(null)
   })
 
@@ -384,7 +420,7 @@ describe('SchematicEditor', () => {
     expect(screen.getAllByRole('button', { name: /^A-0\d/ })).toHaveLength(5)
     const reloaded = davidFixture({ revision: 8, schematic: { width: 800, height: 400 }, spaces: [space('Z-09', 10, 10)] })
     rerender(<SchematicEditor {...props} draft={reloaded} />)
-    expect(screen.getByRole('group', { name: 'Schematic editor' })).toHaveAttribute('viewBox', '0 0 800 400')
+    expect(screen.getByRole('group', { name: 'Schematic editor' })).toHaveAttribute('viewBox', '-48 -48 896 496')
     expect(screen.queryByRole('button', { name: /^A-0\d/ })).toBeNull()
     expect(screen.getByRole('button', { name: 'Z-09, standard' })).toBeInTheDocument()
     expect(props.onChange).not.toHaveBeenCalled()

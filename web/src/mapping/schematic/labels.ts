@@ -1,4 +1,4 @@
-import type { DraftSpace } from '../types'
+import type { DraftRect, DraftSpace } from '../types'
 
 /** A row-and-number label such as "B-04". The dash is optional when reading ("B4"). */
 export interface ParsedLabel {
@@ -72,4 +72,23 @@ export function duplicateLabelIds(spaces: DraftSpace[]): Set<string> {
   const dup = new Set<string>()
   for (const ids of byLabel.values()) if (ids.length > 1) ids.forEach((id) => dup.add(id))
   return dup
+}
+
+/**
+ * Label for a space drawn at `rect`: the next number in the row of the nearest active space it lines up
+ * with (its middle is within that space's height), else the first label of a new row.
+ */
+export function labelForRect(spaces: DraftSpace[], rect: DraftRect): string {
+  const cx = rect.x + rect.w / 2
+  const cy = rect.y + rect.h / 2
+  let row: string | null = null
+  let best = Infinity
+  for (const s of spaces) {
+    const r = s.retired ? null : parseLabel(s.label)?.row
+    if (!r || cy < s.rect.y || cy > s.rect.y + s.rect.h) continue
+    const d = Math.abs(s.rect.x + s.rect.w / 2 - cx)
+    if (d < best) [best, row] = [d, r]
+  }
+  if (row) return nextLabel(spaces, row)
+  return nextRowStart(spaces) || nextLabel(spaces, 'A')
 }
