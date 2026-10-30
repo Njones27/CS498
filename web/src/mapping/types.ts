@@ -37,6 +37,8 @@ export interface ReferencePhotoPanelProps extends MappingSelection {
   viewId: string | null
   onViewChange: (viewId: string) => void
   onChange: (next: DraftLayout) => void
+  /** Refetch the reference photos (with fresh signed URLs) into the page's latest draft: after an
+   * upload, and to retry a photo that did not load. */
   onReferenceUploaded: () => void
   issues: Issue[]
   onSave?: () => Promise<DraftLayout | null>

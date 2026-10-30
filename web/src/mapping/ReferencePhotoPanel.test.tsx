@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { putFile } from '../lib/putFile'
@@ -436,5 +436,129 @@ describe('ReferencePhotoPanel (US-08)', () => {
     const updatedDraft: DraftLayout = onChange.mock.calls[0][0]
     const v1 = updatedDraft.viewpoints.find((v) => v.viewId === 'V1')!
     expect(v1.outlineReview?.['sp_a02']).toEqual({ source: 'proposed', status: 'accepted' })
+  })
+
+  // --- Reference photo loading ---------------------------------------------
+  const V1_URL = '/api/_test/objects/reference/test-lot/V1/2585ffab2de3.jpg'
+  const photo = () => screen.getByRole('img', { name: 'Reference for North Corner' })
+
+  function withV1Url(url: string): DraftLayout {
+    const draft = structuredClone(rylanDraftFixture)
+    draft.viewpoints = draft.viewpoints.map((v) =>
+      v.viewId === 'V1' && v.referenceImage ? { ...v, referenceImage: { ...v.referenceImage, url } } : v,
+    )
+    return draft
+  }
+
+  /** The panel on V1 with `draft`, for rerendering with a re-signed or replaced photo. */
+  function panelFor(draft: DraftLayout) {
+    return (
+      <ReferencePhotoPanel
+        lotId="test-lot"
+        draft={draft}
+        viewId="V1"
+        onViewChange={vi.fn()}
+        onChange={vi.fn()}
+        onReferenceUploaded={vi.fn()}
+        issues={[]}
+        selectedSpaceId={null}
+        onSelectSpace={vi.fn()}
+        hoveredSpaceId={null}
+        onHoverSpace={vi.fn()}
+      />
+    )
+  }
+
+  it('a photo that fails to load shows an error and Reload photo, never a stand-in photo', async () => {
+    const { user, onReferenceUploaded } = renderPanel({ viewId: 'V1' })
+    expect(screen.getByText('Loading photo…')).toBeInTheDocument()
+    fireEvent.error(photo())
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The reference photo did not load')
+    expect(photo()).toHaveAttribute('src', V1_URL) // nothing else is shown under the outlines
+
+    await user.click(screen.getByRole('button', { name: 'Reload photo' }))
+    expect(onReferenceUploaded).toHaveBeenCalledTimes(1) // fetches fresh signed URLs
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText('Loading photo…')).toBeInTheDocument()
+  })
+
+  it('keeps a loaded photo when a save re-signs its URL, and loads a replaced photo', () => {
+    const { rerender } = render(panelFor(withV1Url(`${V1_URL}?sig=1`)))
+    const img = photo()
+    fireEvent.load(img)
+    expect(screen.queryByText('Loading photo…')).not.toBeInTheDocument()
+
+    rerender(panelFor(withV1Url(`${V1_URL}?sig=2`))) // same object, new signature
+    expect(photo()).toBe(img) // not remounted
+    expect(img).toHaveAttribute('src', `${V1_URL}?sig=1`) // not fetched again
+    expect(screen.queryByText('Loading photo…')).not.toBeInTheDocument()
+
+    const replaced = '/api/_test/objects/reference/test-lot/V1/ffffffffffff?sig=3'
+    rerender(panelFor(withV1Url(replaced)))
+    expect(photo()).toHaveAttribute('src', replaced)
+    expect(screen.getByText('Loading photo…')).toBeInTheDocument()
+  })
+
+  it('shows the signed URL it was given, whatever its host', () => {
+    const signed = 'https://bucket.example.com/ref-v2/photo?X-Amz-Signature=abc'
+    render(panelFor(withV1Url(signed)))
+    expect(photo()).toHaveAttribute('src', signed)
+  })
+
+  it('takes a re-signed URL for a photo that failed to load', () => {
+    const { rerender } = render(panelFor(withV1Url(`${V1_URL}?sig=expired`)))
+    fireEvent.error(photo())
+    rerender(panelFor(withV1Url(`${V1_URL}?sig=fresh`)))
+    expect(photo()).toHaveAttribute('src', `${V1_URL}?sig=fresh`)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  // --- The photo does not move while a space is outlined -------------------
+  /** Everything rendered above the photo in the panel, in document order. */
+  function aboveThePhoto(container: HTMLElement): string {
+    const section = container.querySelector('section.ref-panel')!
+    const parts: string[] = []
+    for (let el: Element = container.querySelector('.photo-view')!; el !== section; el = el.parentElement!) {
+      for (let sib = el.previousElementSibling; sib; sib = sib.previousElementSibling) parts.unshift(sib.outerHTML)
+    }
+    return parts.join('\n')
+  }
+
+  it('nothing above the photo changes while a space is outlined', () => {
+    const { container } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a03' })
+    const svg = screen.getByTestId('photo-svg')
+    const before = aboveThePhoto(container)
+
+    fireEvent.click(svg, { clientX: 50, clientY: 50 }) // the prompt changes from 0 to 1 of 4
+    expect(screen.getByText(/Click the 4 corners of A-03 \(1 of 4\)/)).toBeInTheDocument()
+    expect(aboveThePhoto(container)).toBe(before)
+
+    fireEvent.click(svg, { clientX: 150, clientY: 50 })
+    fireEvent.click(svg, { clientX: 150, clientY: 150 })
+    fireEvent.click(svg, { clientX: 50, clientY: 150 }) // a notice appears
+    expect(screen.getByText('A-03 outlined in V1')).toBeInTheDocument()
+    expect(aboveThePhoto(container)).toBe(before)
+  })
+
+  it('clears the outlined notice after a few seconds', () => {
+    vi.useFakeTimers()
+    try {
+      renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a03' })
+      const svg = screen.getByTestId('photo-svg')
+      for (const [x, y] of [
+        [50, 50],
+        [150, 50],
+        [150, 150],
+        [50, 150],
+      ]) {
+        fireEvent.click(svg, { clientX: x, clientY: y })
+      }
+      expect(screen.getByText('A-03 outlined in V1')).toBeInTheDocument()
+      act(() => vi.advanceTimersByTime(4000))
+      expect(screen.queryByText('A-03 outlined in V1')).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
