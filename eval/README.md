@@ -59,6 +59,62 @@ disk.
 To use another photo, put its `.jpg` + `.xml` in `fixtures/pklot/`, rerun the two commands with
 a new `--lot-id`, and copy the JPEG to `fixtures/<lot-id>.jpg`.
 
+## Labeling pilot photos
+
+The pilot benchmark needs 20-30 labeled drone photos per drone position. Two tools make that
+quick: `prefill_labels.py` writes every stall's outline into a label file for each new photo,
+and `label.html` lets a human click each stall occupied or empty.
+
+1. **Take photos.** For each drone position, take 20-30 photos at the reference photo's
+   altitude and heading, spread over times of day and occupancy levels. Put them in
+   `eval/data/pilot/<position>/` (`eval/data/` is git-ignored) and rename `.JPG` to `.jpg`:
+   `benchmark.py` pairs `<name>.xml` with `<name>.jpg` and finds nothing else on Linux. Each
+   position needs a viewpoint in a lot JSON and a reference photo for it; the default is
+   `seed/lots/drone-lot.json`, viewpoint `V1`, with `fixtures/drone-lot.jpg`.
+
+2. **Prefill.** Align every photo to the reference with the worker's ORB aligner and write its
+   outlines as unlabeled PKLot XML:
+
+       uv run python eval/prefill_labels.py eval/data/pilot/<position> \
+           [--lot seed/lots/drone-lot.json] [--reference eval/fixtures/drone-lot.jpg] \
+           [--view V1] [--source NAME] [--force]
+
+   One line per photo:
+
+   - `wrote DJI_0001.xml: 118 stalls (6 out of frame: B-01, ...)`: stalls that map partly
+     outside the photo are left out (the worker reports them UNKNOWN, and a half-visible stall
+     cannot be labeled fairly).
+   - `skip DJI_0001.jpg: DJI_0001.xml exists (--force to overwrite)`: labels are never
+     overwritten unless you pass `--force`.
+   - `FAILED DJI_0001.jpg: Too few matches`: no `.xml` is written. Retake the photo closer to
+     the reference position, or loosen the aligner for the pilot with the same `ORB_*`
+     settings the worker reads (`ORB_MIN_MATCHES=20 uv run python eval/prefill_labels.py ...`).
+     A failure here is also what the worker would do with that photo.
+
+   `--source` sets `<parking id>`, which the benchmark reports results by ("per camera");
+   the default is `<lotId>-<viewId>`, e.g. `drone-lot-V1`. Exit code 1 if any photo failed.
+
+3. **Label.** Open `eval/label.html` straight from Finder (`file://`, no server or install) in
+   Chrome, Firefox or Safari, and drop the folder's `.jpg` and `.xml` files on it (or use
+   **Open files**). Photos pair with label files by name. Click a stall to cycle unset ->
+   occupied -> empty, or hover it and press `o` / `e` / `u`; `Shift+E` marks every remaining
+   unset stall empty. Press `?` for all keys. Leave a stall unset when you cannot tell: it has
+   no `occupied` attribute and is not scored. **Save** (`Ctrl/Cmd+S`) downloads the `.xml`
+   under its own name, with only the `occupied` attributes changed (the browser also writes
+   `<point x="1" y="2"/>` without the space before `/>`); move it from Downloads
+   back over the prefilled file, and watch for a browser rename such as `DJI_0001 (1).xml`.
+   Unsaved photos are marked `*` in the list.
+
+4. **Benchmark.** Each position is scored separately (`benchmark.py` reads one flat folder):
+
+       uv run python eval/benchmark.py eval/data/pilot/<position> --setup acpds_yolo \
+           --json eval/data/pilot/<position>.json
+
+The tools are tested by `uv run pytest tests/eval` (part of the normal `uv run pytest`): prefill
+on the reference itself and on a shifted, rotated copy, read back with `benchmark.read_labels`;
+and `label.html#selftest` run in headless Chrome (skipped when no Chrome or Chromium is found;
+set `CHROME_BIN` to point at one).
+
 ## Labeling format for pilot photos
 
 Label each pilot (drone) photo in the same PKLot XML layout, one `.xml` next to each `.jpg`
