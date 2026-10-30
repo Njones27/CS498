@@ -15,7 +15,7 @@ export interface GridControls {
    * Fit grid: to one space (it then exactly fills the cell it sits in; the grid takes its size and keeps
    * the gaps), or with none given, to all the spaces' labels at the sizes they suggest.
    */
-  fitTo: (rect: DraftRect | null) => void
+  fitTo: (space: { rect: DraftRect; label: string } | null) => void
   /**
    * An edit that grew the map left or up moved every space by (dx, dy) on its way to `next`: move the grid
    * with them. Edits say so exactly; undo and redo, which don't, are recognised by uniformShift.
@@ -111,12 +111,12 @@ export function useSchematicGrid(lotId: string, draft: DraftLayout | null): Grid
       update({ ...current, sizes: next })
       setState({ ...state, grid: fitGrid(draft.spaces, next) })
     },
-    fitTo: (rect) => {
-      if (!rect) {
+    fitTo: (space) => {
+      if (!space) {
         update({ ...current, sizes: {} })
         return setState({ ...state, grid: fitGrid(draft.spaces) })
       }
-      const grid = anchorGrid(state.grid, rect)
+      const grid = anchorGrid(state.grid, space.rect, space.label)
       update({ ...current, sizes: gridSizes(grid) })
       setState({ ...state, grid })
     },

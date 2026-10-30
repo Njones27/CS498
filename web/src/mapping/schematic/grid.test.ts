@@ -126,6 +126,17 @@ describe('relabel by cell', () => {
     expect(note).toMatch(/another space is also C-07/)
   })
 
+  it('never gives two other spaces the same new label', () => {
+    // Two spaces both labeled C-07, stacked in C-09's cell.
+    const spaces = [at('a', 'B-01', 1, 0), at('m', 'C-07', 2, 8), at('n', 'C-07', 2, 8)]
+    const { labels, note } = relabelMoved(G, spaces, 'a', { row: 2, col: 6 })
+    expect([...labels]).toEqual([
+      ['a', 'C-07'],
+      ['m', 'C-09'],
+    ])
+    expect(note).toMatch(/another space is also C-07/)
+  })
+
   it('keeps names and cells outside the lettered rows', () => {
     const spaces = [at('g', 'Gate', 1, 0), at('a', 'B-01', 1, 1)]
     expect(relabelMoved(G, spaces, 'g', { row: 3, col: 4 }).labels.size).toBe(0)
@@ -161,6 +172,18 @@ describe('alignToCells', () => {
     ])
   })
 
+  it('never hands out a label another space keeps, even down a chain', () => {
+    const at = (id: string, label: string, row: number, col: number) =>
+      space(id, 0, 0, { label, rect: cellRect(G, { row, col }) })
+    const spaces = [
+      at('keep', 'A-05', -1, 4), // above row A: keeps A-05
+      at('s', 'B-09', 0, 4), // in A-05's cell, but A-05 is kept: keeps B-09
+      at('s3', 'Z-01', 1, 8), // in B-09's cell, but B-09 is now kept: keeps Z-01
+    ]
+    const labels = alignToCells(davidFixture({ spaces }), G).draft.spaces.map((x) => x.label)
+    expect(labels).toEqual(['A-05', 'B-09', 'Z-01'])
+  })
+
   it('leaves a draft already on the grid alone', () => {
     const draft = davidFixture({ spaces: [space('B-01', 0, 0, { rect: cellRect(G, { row: 1, col: 0 }) })] })
     expect(alignToCells(draft, G).draft).toBe(draft)
@@ -168,6 +191,13 @@ describe('alignToCells', () => {
 })
 
 describe('anchorGrid', () => {
+  it('puts a labeled space in its label\'s cell', () => {
+    const rect = { x: 100, y: 120, w: 50, h: 80 }
+    const g = anchorGrid(G, rect, 'C-07')
+    expect(cellAt(g, [125, 160])).toEqual({ row: 2, col: 6 })
+    expect(cellRect(g, { row: 2, col: 6 })).toEqual(rect)
+  })
+
   it('lines the grid up with one space: it fills its cell exactly and the gaps stay', () => {
     const rect = { x: 100, y: 120, w: 50, h: 80 }
     const g = anchorGrid(G, rect)

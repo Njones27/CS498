@@ -520,6 +520,20 @@ describe('SchematicEditor', () => {
       expect(byId(last(), 'A-03')).toMatchObject({ label: 'B-05', rect: { x: 490, y: 170 } })
     })
 
+    it('a resize never renames, even when the middle crosses into another cell', async () => {
+      const { last, user } = setup({ withGrid: true, selectedSpaceId: 'A-03' })
+      await user.click(screen.getByRole('checkbox', { name: 'Snap to grid' }))
+      drag(screen.getByTestId('schematic-handle-se'), 250, 0) // middle moves 125 to the right
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'A-03', rect: { x: 260, w: 350 } })
+    })
+
+    it('a snapped drag that ends in the same cell keeps the label', () => {
+      const spaces = davidFixture().spaces.map((s) => (s.spaceId === 'A-03' ? { ...s, label: 'Q-01' } : s))
+      const { last } = setup({ draft: davidFixture({ spaces }), withGrid: true })
+      drag(spaceEl('A-03'), 20, 10)
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'Q-01', rect: { x: 260, y: 40 } })
+    })
+
     it('Fit grid with a space selected lines the grid up with that space', async () => {
       const spaces = davidFixture().spaces.map((s) => (s.spaceId === 'A-03' ? { ...s, rect: { x: 265, y: 45, w: 90, h: 110 } } : s))
       const { last, user } = setup({ draft: davidFixture({ spaces }), withGrid: true, selectedSpaceId: 'A-03' })

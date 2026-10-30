@@ -397,7 +397,10 @@ export function followOutline(
   if (!plausibleRect(after, rect)) return unchanged
   let labels = new Map<string, string>()
   let note: string | undefined
-  if (grid) {
+  // A reshape on the photo resizes the rect; only a move (same size) can land it in another cell.
+  const isMove = Math.abs(rect.w - space.rect.w) < 0.5 && Math.abs(rect.h - space.rect.h) < 0.5
+  if (grid && snap && !isMove) return unchanged // the grid sets the box size while snapping
+  if (grid && isMove) {
     const from = cellAt(grid, rectCenter(space.rect))
     const to = cellAt(grid, rectCenter(rect))
     const changedCell = to.row !== from.row || to.col !== from.col

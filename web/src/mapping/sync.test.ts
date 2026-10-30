@@ -251,6 +251,18 @@ describe('photo <-> schematic sync', () => {
     expect(note).toBe('Now B-05')
   })
 
+  it('reshaping an outline on the photo resizes the rect without renaming; with snapping the schematic stays', () => {
+    const draft = gridDraft()
+    const grid = fitGrid(draft.spaces)
+    const v = draft.viewpoints[0]
+    // B-02's outline stretched far to the right: its middle crosses into another cell.
+    const after = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'B-02': outlineOf({ x: 150, y: 240, w: 300, h: 120 }) } }] }
+    const free = followOutline(draft, after, 'V1', 'B-02', grid, false).draft.spaces.find((s) => s.spaceId === 'B-02')!
+    expect(free.label).toBe('B-02')
+    expect(free.rect.w).toBeCloseTo(300, 0)
+    expect(followOutline(draft, after, 'V1', 'B-02', grid, true).draft).toBe(after)
+  })
+
   it('a first outline does not move the space', () => {
     const draft = gridDraft()
     const v = draft.viewpoints[0]
