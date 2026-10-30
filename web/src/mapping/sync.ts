@@ -1,6 +1,7 @@
 import { MIN_SIDE, clearOf, medianSize } from './schematic/geometry'
 import { addSpace, addSpaceAt, addSpacesAt, fitSchematic, updateSpace, type Grown } from './schematic/edits'
 import { applyLabels, cellAt, cellLabel, cellRect, cellTaken, labelDigits, relabelMoved, type Cell, type Grid } from './schematic/grid'
+import { photoCell, placeFromPhoto } from './photoGrid'
 import { isValidQuad, orderClockwise } from './photo/geom'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, Outline, Point } from './types'
 
@@ -418,9 +419,13 @@ export function followOutline(
   let labels = new Map<string, string>()
   let note: string | undefined
   if (grid && snap && !isMove) return unchanged // the grid sets the box size while snapping
-  if (grid && isMove) {
-    const from = cellAt(grid, rectCenter(space.rect))
-    const to = cellAt(grid, rectCenter(rect))
+  if (grid && isMove && vAfter) {
+    // The cell is read off the photo (photoCell) when it can be: the schematic may draw a row stretched
+    // or numbered from the wrong column. Otherwise it is where the rect lands on the schematic.
+    const photoFrom = photoCell(before, vBefore, old, spaceId)
+    const photoTo = photoCell(after, vAfter, now, spaceId)
+    const [from, to] =
+      photoFrom && photoTo ? [photoFrom, photoTo] : [cellAt(grid, rectCenter(space.rect)), cellAt(grid, rectCenter(rect))]
     const changedCell = to.row !== from.row || to.col !== from.col
     if (snap) {
       if (!changedCell) return unchanged
@@ -492,9 +497,26 @@ export function addSpaceFromOutline(
   viewId: string,
   outline: Outline,
   grid: Grid | null = null,
-): Grown & { space: DraftSpace } {
+): Grown & { space: DraftSpace; note?: string } {
   const view = draft.viewpoints.find((v) => v.viewId === viewId)
   if (!view) throw new Error(`No viewpoint ${viewId}`)
+  // With a grid, the photo itself says which cell the box is in (its row from the outlines beside it,
+  // its column from the rows above and below); the space goes there and is named for it.
+  const fromPhoto = grid && photoCell(draft, view, outline)
+  if (grid && fromPhoto && cellLabel(fromPhoto)) {
+    const added = addSpaceAt(draft, cellRect(grid, fromPhoto))
+    const id = added.space.spaceId
+    const outlined = withOutline(added.draft, viewId, id, outline)
+    const placed = placeFromPhoto(outlined, viewId, id, grid)
+    const next = proposeOutlines(placed.draft, [id])
+    return {
+      draft: next,
+      dx: added.dx + placed.dx,
+      dy: added.dy + placed.dy,
+      space: next.spaces.find((s) => s.spaceId === id)!,
+      note: placed.note,
+    }
+  }
   const m = photoToSchematic(draft, view)
   const mapped = m && outlineToRect(m, outline)
   const rect = mapped && plausibleRect(draft, mapped) ? mapped : null
@@ -508,17 +530,24 @@ export function addSpaceFromOutline(
       ? addSpaceAt(draft, clearOf(rect, draft.spaces))
       : addSpace(draft, nearestOutlined(draft, view, centroid(outline))?.spaceId ?? null)
   const id = added.space.spaceId
-  const viewpoints = added.draft.viewpoints.map((v) =>
-    v.viewId === viewId
-      ? {
-          ...v,
-          outlines: { ...v.outlines, [id]: outline },
-          outlineReview: { ...v.outlineReview, [id]: { source: 'drawn' as const, status: 'accepted' as const } },
-        }
-      : v,
-  )
-  const next = proposeOutlines({ ...added.draft, viewpoints }, [id])
+  const next = proposeOutlines(withOutline(added.draft, viewId, id, outline), [id])
   return { draft: next, dx: added.dx, dy: added.dy, space: next.spaces.find((s) => s.spaceId === id)! }
+}
+
+/** `draft` with `outline` drawn (accepted) for `spaceId` in `viewId`. */
+function withOutline(draft: DraftLayout, viewId: string, spaceId: string, outline: Outline): DraftLayout {
+  return {
+    ...draft,
+    viewpoints: draft.viewpoints.map((v) =>
+      v.viewId === viewId
+        ? {
+            ...v,
+            outlines: { ...v.outlines, [spaceId]: outline },
+            outlineReview: { ...v.outlineReview, [spaceId]: { source: 'drawn' as const, status: 'accepted' as const } },
+          }
+        : v,
+    ),
+  }
 }
 
 /** A space drawn on the schematic at `rect`, with proposed outlines on every photo it lands on. */

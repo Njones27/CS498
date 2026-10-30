@@ -9,6 +9,7 @@ import {
   polygonCenter,
   polygonToSvgPoints,
 } from './photo/geom'
+import { placeFromPhoto } from './photoGrid'
 import { addSpaceFromOutline, followOutline, suggestOutline } from './sync'
 import type {
   DraftLayout,
@@ -125,7 +126,6 @@ export function ReferencePhotoPanel({
   grid = null,
   snap = false,
 }: ReferencePhotoPanelProps) {
-  const snapGrid = snap ? grid : null
   const currentViewId = viewId ?? draft.viewpoints[0]?.viewId ?? null
   const currentViewpoint = draft.viewpoints.find((v) => v.viewId === currentViewId) ?? null
 
@@ -534,10 +534,10 @@ export function ReferencePhotoPanel({
     setClicks([])
     setIsDrawing(false)
     if (!drawingSelected || !selectedSpace) {
-      const { draft: next, space, dx, dy } = addSpaceFromOutline(draft, currentViewpoint.viewId, outline, snapGrid)
+      const { draft: next, space, dx, dy, note } = addSpaceFromOutline(draft, currentViewpoint.viewId, outline, grid)
       commitOutlines(next, { dx, dy })
       onSelectSpace(space.spaceId)
-      setStatusNotice(`Added ${space.label} to the schematic. Rename it there if needed.`)
+      setStatusNotice(note && !note.startsWith('Now') ? `Added ${space.label}. ${note}` : `Added ${space.label} to the schematic`)
       return
     }
     const nextOutlines = {
@@ -626,6 +626,14 @@ export function ReferencePhotoPanel({
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', stop)
     stopBox.current = stop
+  }
+
+  /** Put the selected space's schematic box in the cell its outline is in on this photo (placeFromPhoto). */
+  const handleMatchToPhoto = () => {
+    if (!currentViewpoint || !selectedSpace || !grid) return
+    const placed = placeFromPhoto(draft, currentViewpoint.viewId, selectedSpace.spaceId, grid)
+    if (placed.draft !== draft) commitOutlines(placed.draft, placed)
+    if (placed.note) setStatusNotice(placed.note)
   }
 
   const handleUseSuggestion = () => {
@@ -1342,6 +1350,17 @@ export function ReferencePhotoPanel({
                       <strong>{selectedSpace.label}</strong> outlined in {currentViewpoint.viewId}
                     </div>
                     <div className="ref-prompt__actions">
+                      {grid && (
+                        <button
+                          type="button"
+                          className="button button--ghost button--sm"
+                          onClick={handleMatchToPhoto}
+                          title="Move this space's schematic box into the cell its outline is in on this photo, and name it for that cell"
+                          data-testid="match-photo-btn"
+                        >
+                          Match schematic to photo
+                        </button>
+                      )}
                       {nextUnmappedSpace && (
                         <button
                           type="button"

@@ -686,7 +686,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
         [0.65, 0.384],
       ])
       expect(onSelectSpace).toHaveBeenLastCalledWith(added.spaceId)
-      expect(screen.getByText('Added A-06 to the schematic. Rename it there if needed.')).toBeInTheDocument()
+      expect(screen.getByText('Added A-06 to the schematic')).toBeInTheDocument()
       expect(screen.queryByTestId('partial-clicks')).not.toBeInTheDocument()
     })
 
