@@ -711,6 +711,37 @@ describe('ReferencePhotoPanel (US-08)', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('Those corners do not make a four-sided shape')
     })
 
+    it('a corner dragged across the opposite edge is refused; a hand-corrected outline becomes drawn', () => {
+      const draft = syncedDraft()
+      draft.viewpoints[0].outlineReview['sp_a01'] = { source: 'proposed', status: 'accepted' }
+      const { onChange } = renderPanel({ draft, selectedSpaceId: 'sp_a01' })
+      // A-01 spans x 0.05..0.15 (25..75 px), y 50/600..230/600; corner 0 is top-left.
+      fireEvent.pointerDown(screen.getByTestId('corner-handle-0'), { clientX: 25, clientY: 42 })
+      fireEvent.pointerMove(window, { clientX: 125, clientY: 125 }) // past the right edge: a bowtie
+      fireEvent.pointerUp(window)
+      expect(onChange).not.toHaveBeenCalled()
+      expect(screen.getByRole('alert')).toHaveTextContent('cross the outline over itself')
+
+      fireEvent.pointerDown(screen.getByTestId('corner-handle-0'), { clientX: 25, clientY: 42 })
+      fireEvent.pointerMove(window, { clientX: 30, clientY: 45 })
+      fireEvent.pointerUp(window)
+      expect(onChange.mock.calls[0][0].viewpoints[0].outlineReview['sp_a01']).toEqual({ source: 'drawn', status: 'accepted' })
+    })
+
+    it('after a box drag with no trailing click (touch), the next click still places a corner', () => {
+      const now = vi.spyOn(performance, 'now').mockReturnValue(1000)
+      renderPanel({ draft: syncedDraft() })
+      const svg = screen.getByTestId('photo-svg')
+      fireEvent.pointerDown(svg, { clientX: 400, clientY: 400, button: 0 })
+      fireEvent.pointerMove(window, { clientX: 401, clientY: 401 }) // under the drag threshold: a tap
+      fireEvent.pointerDown(svg, { clientX: 325, clientY: 42, button: 0 })
+      fireEvent.pointerMove(window, { clientX: 360, clientY: 192 })
+      fireEvent.pointerUp(svg, { clientX: 360, clientY: 192 })
+      now.mockReturnValue(5000) // no click came; much later the admin taps a corner
+      fireEvent.click(svg, { clientX: 100, clientY: 450 })
+      expect(screen.getByText(/\(1 of 4\)/)).toBeInTheDocument()
+    })
+
     it('a click on empty photo clears a selected, outlined space instead of drawing', () => {
       const { onChange, onSelectSpace } = renderPanel({ draft: syncedDraft(), selectedSpaceId: 'sp_a01' })
       fireEvent.click(screen.getByTestId('photo-svg'), { clientX: 400, clientY: 400 })

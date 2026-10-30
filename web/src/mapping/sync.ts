@@ -110,7 +110,8 @@ export function fitTransform(src: Point[], dst: Point[]): Mat3 | null {
   const s = src.map((p) => applyMat(Ts, p)!)
   const d = dst.map((p) => applyMat(Td, p)!)
   const TdInv = invert(Td)!
-  for (const projective of [true, false]) {
+  // Four points pin a homography exactly, so its own residual says nothing; it needs a fifth to be checked.
+  for (const projective of src.length > MIN_MATCHES ? [true, false] : [false]) {
     const n = projective ? 8 : 6
     const AtA = Array.from({ length: n }, () => new Array<number>(n).fill(0))
     const Atb = new Array<number>(n).fill(0)
@@ -341,7 +342,8 @@ function nearestOutlined(draft: DraftLayout, view: DraftViewpoint, point: Point)
 }
 
 /**
- * Whether a rect mapped from the photo is believable: no bigger than a few spaces, and near the map. A box
+ * Whether a rect mapped from the photo is believable: no bigger than a few spaces, and within a few rows of
+ * the map. A box
  * drawn where the fit extrapolates badly (towards the horizon) maps far away and huge; that would grow
  * the map without bound.
  */
@@ -349,7 +351,10 @@ function plausibleRect(draft: DraftLayout, r: DraftRect): boolean {
   const size = medianSize(draft.spaces.filter((s) => !s.retired).map((s) => s.rect))
   const { width, height } = draft.schematic
   if (size && (r.w > 4 * size.w || r.h > 4 * size.h)) return false
-  return r.x > -width && r.y > -height && r.x + r.w < 2 * width && r.y + r.h < 2 * height
+  // Room for a few new rows or columns past any edge, but not a jump that would double the map.
+  const mx = Math.max(0.25 * width, 3 * (size?.w ?? 0))
+  const my = Math.max(0.25 * height, 3 * (size?.h ?? 0))
+  return r.x > -mx && r.y > -my && r.x + r.w < width + mx && r.y + r.h < height + my
 }
 
 /**

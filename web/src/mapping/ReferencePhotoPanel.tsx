@@ -22,6 +22,8 @@ import type {
 
 /** Pointer travel (screen px) before a press on the photo becomes a box drag rather than a corner click. */
 const BOX_THRESHOLD_PX = 4
+/** How soon after a box drag's release a click on the photo is taken to be that release's click. */
+const BOX_CLICK_WINDOW_MS = 300
 /** Smallest box side, as a fraction of the photo, that counts as a space. */
 const MIN_BOX = 0.004
 
@@ -124,8 +126,9 @@ export function ReferencePhotoPanel({
   const [box, setBox] = useState<[Point, Point] | null>(null)
   const stopBox = useRef<(() => void) | null>(null)
   useEffect(() => () => stopBox.current?.(), [])
-  // The click the browser sends after a box drag is released; it must not place a corner.
-  const boxClickRef = useRef(false)
+  // When a box drag was last released over the photo. The click a mouse sends right after must not place a
+  // corner; a touch drag sends none, so the window is short rather than a flag that waits for a click.
+  const boxReleasedAt = useRef(-Infinity)
 
   const selectedSpace = draft.spaces.find((s) => s.spaceId === selectedSpaceId) ?? null
   const selectedOutline =
@@ -215,11 +218,21 @@ export function ReferencePhotoPanel({
     const handlePointerUp = () => {
       const idx = draggingIdxRef.current
       const finalCorners = dragCornersRef.current
-      if (idx !== null && finalCorners && currentViewpoint && selectedSpaceId) {
+      if (idx !== null && finalCorners && currentViewpoint && selectedSpaceId && !isValidQuad(finalCorners)) {
+        // A corner dragged across the opposite edge: publishing would reject it, so keep the old outline.
+        setErrorMsg('That would cross the outline over itself. Drag the corner back to its side.')
+      } else if (idx !== null && finalCorners && currentViewpoint && selectedSpaceId) {
         // Keep corner handle indices stable without reordering
         const nextOutlines = { ...currentViewpoint.outlines, [selectedSpaceId]: finalCorners }
+        // An accepted outline the admin has corrected by hand is theirs: it now anchors the photo <-> schematic
+        // fit (sync.ts). A proposal still waiting for review stays one.
+        const review = currentViewpoint.outlineReview?.[selectedSpaceId]
+        const nextReview =
+          review?.status === 'pending'
+            ? currentViewpoint.outlineReview
+            : { ...currentViewpoint.outlineReview, [selectedSpaceId]: { source: 'drawn' as const, status: 'accepted' as const } }
         const nextVps = draft.viewpoints.map((v) =>
-          v.viewId === currentViewpoint.viewId ? { ...v, outlines: nextOutlines } : v,
+          v.viewId === currentViewpoint.viewId ? { ...v, outlines: nextOutlines, outlineReview: nextReview } : v,
         )
         // commitOutlines, spelled out so this effect's dependencies stay listed
         onChange({ ...draft, viewpoints: nextVps })
@@ -350,13 +363,13 @@ export function ReferencePhotoPanel({
   /** A finished outline (4 clicked corners or a dragged box): the selected space's, or a new space. */
   const finishOutline = (outline: Outline) => {
     if (!currentViewpoint) return
-    setClicks([])
-    setIsDrawing(false)
     if (!isValidQuad(outline)) {
-      setErrorMsg('Those corners do not make a four-sided shape. Click four separate corners.')
+      // The first three clicks stay; only the fourth is refused.
+      setErrorMsg('Those corners do not make a four-sided shape. Click a different fourth corner.')
       return
     }
-    setErrorMsg(null)
+    setClicks([])
+    setIsDrawing(false)
     if (!drawingSelected || !selectedSpace) {
       const { draft: next, space } = addSpaceFromOutline(draft, currentViewpoint.viewId, outline)
       commitOutlines(next)
@@ -388,8 +401,8 @@ export function ReferencePhotoPanel({
   })
 
   const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (boxClickRef.current) {
-      boxClickRef.current = false
+    if (performance.now() - boxReleasedAt.current < BOX_CLICK_WINDOW_MS) {
+      boxReleasedAt.current = -Infinity
       return
     }
     if (justDraggedRef.current) {
@@ -433,9 +446,7 @@ export function ReferencePhotoPanel({
     const onUp = (ev: PointerEvent) => {
       stop()
       if (!moved) return
-      // A release over the photo is followed by a click there; it must not also place a corner. A
-      // release elsewhere sends none, so the flag is only raised for one over the photo.
-      boxClickRef.current = ev.target instanceof Node && svg.contains(ev.target)
+      if (ev.target instanceof Node && svg.contains(ev.target)) boxReleasedAt.current = performance.now()
       const outline = boxOutline(start, getSvgPoint(svg, ev.clientX, ev.clientY, svgWidth, svgHeight))
       if (outline) finishOutlineRef.current(outline)
     }
