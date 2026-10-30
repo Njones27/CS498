@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LotDetail } from '../api/schemas'
 import { dateTime } from '../lib/relativeTime'
@@ -29,6 +30,16 @@ afterEach(() => {
 })
 
 const rows = () => screen.getAllByRole('row').slice(1)
+
+/** The browser's Back button. */
+function Back() {
+  const navigate = useNavigate()
+  return (
+    <button type="button" onClick={() => navigate(-1)}>
+      Browser back
+    </button>
+  )
+}
 
 describe('VersionsPage', () => {
   // US-09 #6: each version with who published it and when, newest first.
@@ -94,6 +105,28 @@ describe('VersionsPage', () => {
     // The note stays until the next save, which shows the usual "Draft saved".
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Draft saved')).toBeInTheDocument()
+    expect(screen.queryByText(/Draft restored from v3/)).not.toBeInTheDocument()
+  })
+
+  // The note comes from navigation state; Back (or a refresh) to that entry must not repeat it.
+  it('the restore note shows once, not again on Back', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const restored = draftFixture({ revision: 9, basedOnVersion: 3 })
+    mockFetch({
+      'GET /lots/test-lot': { body: detail },
+      [`GET ${VERSIONS}`]: { body: versions },
+      [`POST ${VERSIONS}/3/restore`]: { body: restored },
+      [`GET ${DRAFT}`]: { body: restored },
+    })
+    renderApp('/admin/lots/test-lot/versions', ADMIN, <Back />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Restore v3' }))
+    expect(await screen.findByText('Draft restored from v3. Publish to make it live.')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('link', { name: 'Versions' }))
+    await waitFor(() => expect(rows()).toHaveLength(3))
+    await userEvent.click(screen.getByRole('button', { name: 'Browser back' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/admin/lots/test-lot/map'))
+    expect(await screen.findByText('Revision 9')).toBeInTheDocument()
     expect(screen.queryByText(/Draft restored from v3/)).not.toBeInTheDocument()
   })
 

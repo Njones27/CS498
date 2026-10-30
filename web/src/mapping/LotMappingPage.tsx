@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useLocation, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, api, errorMessage } from '../api/client'
 import type { LotDetail } from '../api/schemas'
 import { useFetch } from '../lib/useFetch'
@@ -47,6 +47,7 @@ export function LotMappingPage() {
     setAutosave,
   } = useDraftLayout(lotId)
   const location = useLocation()
+  const navigate = useNavigate()
   const restoredFrom = (location.state as MappingLocationState | null)?.restoredFrom
   // Unpublished lots are not in the public API, so their header falls back to the lot id.
   const detail = useFetch<LotDetail | null>(
@@ -58,7 +59,14 @@ export function LotMappingPage() {
   const [pageNote, setPageNote] = useState<string | null>(
     restoredFrom != null ? `Draft restored from v${restoredFrom}. Publish to make it live.` : null,
   )
-  const [report, setReport] = useState<ValidationReport | null>(null)
+  // The note is read once (above); drop it from history so a refresh or Back doesn't repeat it.
+  useEffect(() => {
+    if (restoredFrom != null) navigate(location.pathname, { replace: true, state: null })
+  }, [restoredFrom, location.pathname, navigate])
+  // A report describes the revision it checked. After an edit or another save it is out of date,
+  // so it no longer marks spaces red or blocks Publish (which validates again on the server).
+  const [checked, setChecked] = useState<{ report: ValidationReport; revision: number } | null>(null)
+  const report = checked && !dirty && checked.revision === draft?.revision ? checked.report : null
   const [busy, setBusy] = useState<'validating' | 'publishing' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   // A publish refused with stale_revision: like a stale save, the draft must be reloaded.
@@ -136,8 +144,9 @@ export function LotMappingPage() {
     try {
       // Validate and Publish act on the stored draft, so they always save first: the report then
       // matches the screen, and a draft changed in another window comes back as stale.
-      if (!(await save())) return
-      setReport(await api.post<ValidationReport>(`${draftPath(lotId)}/validate`))
+      const current = await save()
+      if (!current) return
+      setChecked({ report: await api.post<ValidationReport>(`${draftPath(lotId)}/validate`), revision: current.revision })
     } catch (e: unknown) {
       setActionError(errorMessage(e))
     } finally {
@@ -149,17 +158,20 @@ export function LotMappingPage() {
     setPageNote(null)
     setActionError(null)
     setBusy('publishing')
+    let revision = 0
     try {
       const current = await save()
       if (!current) return
-      const published = await api.post<LayoutVersionOut>(`${layoutPath(lotId)}/publish`, { revision: current.revision })
-      setReport(null)
+      revision = current.revision
+      const published = await api.post<LayoutVersionOut>(`${layoutPath(lotId)}/publish`, { revision })
+      setChecked(null)
       setPageNote(`Published v${published.version}`)
       detail.reload()
       reload() // publishing moves the draft to a new revision based on the new version
     } catch (e: unknown) {
       if (e instanceof ApiError && e.code === 'validation_failed') {
-        setReport((e.body as { report?: ValidationReport }).report ?? null)
+        const refused = (e.body as { report?: ValidationReport }).report
+        setChecked(refused ? { report: refused, revision } : null)
         setActionError(e.message)
       } else if (e instanceof ApiError && e.code === 'stale_revision') {
         setPublishStale(e.message)
