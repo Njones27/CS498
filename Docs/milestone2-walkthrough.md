@@ -462,7 +462,7 @@ during the walkthrough; strike it when fixed.
   "Lot not found" and Map opens a missing lot. Workaround: in DevTools,
   `localStorage.removeItem('parking.admin.lotId')`, or pick the lot in the header picker. Fix:
   use `useAdminLot()` on both, as Upload and Snapshots do.
-- **G2 README seeds the compose stack with the wrong env.** README "Local development" runs
+- ~~**G2 README seeds the compose stack with the wrong env.**~~ Fixed in this PR: README now loads `.env.ci-host` for the host-side seed. README "Local development" runs
   `uv run python seed/seed.py --lot pklot-ufpr04` from the host, which reads `.env` whose
   endpoints are compose-internal hostnames (`http://rustfs:9000`, ...). CI seeds with
   `.env.ci-host` loaded. US-14 #2 also names `--lot test-lot`, the seed default.
