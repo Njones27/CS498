@@ -37,7 +37,11 @@ def snapshot_out(s: Snapshot, now: datetime) -> dict[str, object]:
 @router.get(
     "",
     response_model=list[SnapshotOut],
-    responses={401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+    },
     summary="Recent snapshots for a lot, newest capture first",
 )
 def list_snapshots(
@@ -47,7 +51,10 @@ def list_snapshots(
     lot_id: str = Query(alias="lotId"),
     limit: int = Query(50, ge=1, le=200),
 ) -> list[SnapshotOut]:
-    snaps = adapters.repository.list_snapshots(lot_id, limit=limit)
+    repo = adapters.repository
+    if repo.get_lot(lot_id) is None:
+        raise error(404, "not_found", "Lot not found")
+    snaps = repo.list_snapshots(lot_id, limit=limit)
     snaps.sort(key=lambda s: s.capture_time, reverse=True)
     return [SnapshotOut(**snapshot_out(s, now)) for s in snaps]
 

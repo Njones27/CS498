@@ -61,6 +61,12 @@ def test_recent_snapshots_are_listed(client, admin_headers, adapters):
     assert top["error"] is None
 
 
+def test_unknown_lot_404(client, admin_headers):
+    r = client.get("/admin/snapshots?lotId=nope", headers=admin_headers)
+    assert r.status_code == 404
+    assert r.json() == {"error": "not_found", "message": "Lot not found"}
+
+
 def test_failed_job_shows_its_error(client, admin_headers, adapters):
     add(adapters, "img-1", 5, JobStatus.QUEUED)
     adapters.repository.transition_job(
