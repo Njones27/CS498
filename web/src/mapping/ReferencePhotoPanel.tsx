@@ -435,6 +435,10 @@ export function ReferencePhotoPanel({
   // When user is actively placing points or in drawing mode, existing polygons MUST NOT intercept clicks!
   const isActivelyDrawing = isDrawing || clicks.length > 0
 
+  // Nothing produces proposed outlines yet (HDD §4.6, wave 3), so "Propose" is a test hook for the
+  // review flow. A production build leaves it out: a pending outline blocks publishing.
+  const canProposeOutlines = import.meta.env.DEV
+
   const notices = (
     <>
       {errorMsg && (
@@ -983,14 +987,16 @@ export function ReferencePhotoPanel({
                       >
                         Redraw
                       </button>
-                      <button
-                        type="button"
-                        className="button button--ghost button--sm"
-                        onClick={() => handleProposeOutline(selectedSpace.spaceId)}
-                        title="Mark outline as proposed for testing review workflow"
-                      >
-                        Propose
-                      </button>
+                      {canProposeOutlines && (
+                        <button
+                          type="button"
+                          className="button button--ghost button--sm"
+                          onClick={() => handleProposeOutline(selectedSpace.spaceId)}
+                          title="Mark outline as proposed for testing review workflow"
+                        >
+                          Propose
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="button button--ghost button--sm"

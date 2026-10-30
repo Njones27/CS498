@@ -458,6 +458,23 @@ describe('ReferencePhotoPanel (US-08)', () => {
     expect(v1.outlineReview?.['sp_a02']).toEqual({ source: 'proposed', status: 'accepted' })
   })
 
+  // --- The Propose test hook -----------------------------------------------
+  it('offers Propose (a test hook for the review flow) only in dev and test builds', () => {
+    renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeInTheDocument()
+  })
+
+  it('leaves Propose out of a production build', () => {
+    vi.stubEnv('DEV', false)
+    try {
+      renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
+      expect(screen.getByRole('button', { name: 'Delete outline' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Propose' })).not.toBeInTheDocument()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   // --- Reference photo loading ---------------------------------------------
   const V1_URL = '/api/_test/objects/reference/test-lot/V1/2585ffab2de3.jpg'
   const photo = () => screen.getByRole('img', { name: 'Reference for North Corner' })
