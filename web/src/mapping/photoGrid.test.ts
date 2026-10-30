@@ -54,7 +54,7 @@ describe('a box drawn on the photo before the first space of a row', () => {
     const label = (id: string) => next.spaces.find((s) => s.spaceId === id)!.label
     expect(['B-01', 'B-02', 'B-03', 'B-04'].map(label)).toEqual(['B-02', 'B-03', 'B-04', 'B-05'])
     expect(next.spaces.find((s) => s.spaceId === 'B-01')!.rect).toEqual(cellRect(grid, { row: 1, col: 1 }))
-    expect(note).toBe('Now B-01; row B renumbered to match the photo')
+    expect(note).toBe('Now B-01; the rest of row B moved up one to make room')
   })
 
   it('a box drawn over a space already outlined there is reported as a duplicate, and nothing is renumbered', () => {
@@ -291,5 +291,27 @@ describe('layout sanity', () => {
     const after = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'C-03': at(5, ROW_Y.C + 0.102) } }] }
     const c03 = followOutline(before, after, 'V1', 'C-03', grid, false).draft.spaces.find((s) => s.spaceId === 'C-03')!
     expect(c03.label).toBe('C-06')
+  })
+})
+
+describe('a box drawn before column 1', () => {
+  it('becomes 01 of its row and the rest of that row moves up one; other rows keep their numbers', () => {
+    // Row B renumbered to line up with C (B-0n in column n-1); then a box drawn left of B-01.
+    const base = lot()
+    const v = base.viewpoints[0]
+    const outlines = { ...v.outlines }
+    for (const n of [1, 2, 3, 4]) outlines[`B-0${n}`] = at(n - 1, ROW_Y.B)
+    const draft = { ...base, viewpoints: [{ ...v, outlines }] }
+    const grid = fitGrid(draft.spaces)
+    const { draft: next, space: added, note } = addSpaceFromOutline(draft, 'V1', at(-1, ROW_Y.B), grid)
+    expect(added.label).toBe('B-01')
+    const label = (id: string) => next.spaces.find((s) => s.spaceId === id)!.label
+    expect(['B-01', 'B-02', 'B-03', 'B-04'].map(label)).toEqual(['B-02', 'B-03', 'B-04', 'B-05'])
+    expect(label('C-01')).toBe('C-01')
+    expect(note).toBe('Now B-01; the rest of row B moved up one to make room')
+
+    // Row B now numbers one higher than the lot's columns: a box after its last space is B-06, not B-05.
+    const more = addSpaceFromOutline(next, 'V1', at(4, ROW_Y.B), fitGrid(next.spaces))
+    expect(more.space.label).toBe('B-06')
   })
 })

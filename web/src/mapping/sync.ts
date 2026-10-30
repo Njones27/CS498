@@ -425,8 +425,14 @@ export function followOutline(
     // or numbered from the wrong column. Otherwise it is where the rect lands on the schematic.
     const photoFrom = photoCell(before, vBefore, old, spaceId)
     const photoTo = photoCell(after, vAfter, now, spaceId)
+    // Cells by the column the label should name (a row may be numbered one off from the lot's columns).
     const [from, to] =
-      photoFrom && photoTo ? [photoFrom, photoTo] : [cellAt(grid, rectCenter(space.rect)), cellAt(grid, rectCenter(rect))]
+      photoFrom && photoTo
+        ? [
+            { row: photoFrom.row, col: photoFrom.named },
+            { row: photoTo.row, col: photoTo.named },
+          ]
+        : [cellAt(grid, rectCenter(space.rect)), cellAt(grid, rectCenter(rect))]
     // On each axis, a nudge that only tips the outline over a boundary on the photo (less than half a
     // column, or half a row) keeps the cell it was in on that axis.
     if (photoFrom && photoTo) {
@@ -514,8 +520,8 @@ export function addSpaceFromOutline(
   // With a grid, the photo itself says which cell the box is in (its row from the outlines beside it,
   // its column from the rows above and below); the space goes there and is named for it.
   const fromPhoto = grid && photoCell(draft, view, outline)
-  if (grid && fromPhoto && cellLabel(fromPhoto)) {
-    const added = addSpaceAt(draft, cellRect(grid, fromPhoto))
+  if (grid && fromPhoto && fromPhoto.row >= 0) {
+    const added = addSpaceAt(draft, cellRect(grid, { row: fromPhoto.row, col: Math.max(0, fromPhoto.named) }))
     const id = added.space.spaceId
     const outlined = withOutline(added.draft, viewId, id, outline)
     // addSpaceAt may have grown the map left or up, moving every space: the grid moves with them.

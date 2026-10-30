@@ -25,6 +25,11 @@ interface Marker {
 export interface PhotoCell extends Cell {
   at: number
   rowAt: number
+  /**
+   * The column its label should name: `col` plus its row's numbering offset (rowOffset). A row that
+   * starts one space further left than the others (its 01 is left of column 1) names columns one higher.
+   */
+  named: number
 }
 
 /** Middle and size of an outline on the photo (fractions). */
@@ -201,6 +206,25 @@ function photoRow(lay: Layout, y: number): { row: number; at: number } {
 }
 
 /**
+ * How a row's numbers sit against the lot's columns on the photo: most of its spaces' (number - 1) minus
+ * the column the photo puts them in. 0 when the row is numbered like the other rows (or has nothing).
+ */
+function rowOffset(lay: Layout, row: number): number {
+  const ms = lay.byRow.get(row) ?? []
+  return Math.round(median(ms.map((m) => m.col - Math.round(photoColumn(lay, row, m.x, m.y)))) ?? 0)
+}
+
+/**
+ * The row's numbering offset (as rowOffset) measured on its three spaces nearest photo x, before
+ * rounding: across the photo, perspective makes the columns read from other rows drift, and nearby
+ * spaces drift the same way, so this cancels it where it matters.
+ */
+function offsetNear(lay: Layout, row: number, x: number): number {
+  const near = [...(lay.byRow.get(row) ?? [])].sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x)).slice(0, 3)
+  return median(near.map((m) => m.col - photoColumn(lay, row, m.x, m.y))) ?? 0
+}
+
+/**
  * The cell the photo puts `outline` in, or null when the photo's outlines can't say (nothing outlined,
  * or rows that don't run across the photo). `at` is the column before rounding.
  */
@@ -210,7 +234,7 @@ export function photoCell(draft: DraftLayout, view: DraftViewpoint, outline: Out
   const me = box(lay.level(inProportion(view, outline)))
   const { row, at: rowAt } = photoRow(lay, me.y)
   const at = photoColumn(lay, row, me.x, me.y)
-  return { row, col: Math.round(at), at, rowAt }
+  return { row, col: Math.round(at), at, rowAt, named: Math.round(at + offsetNear(lay, row, me.x)) }
 }
 
 /**
@@ -224,16 +248,18 @@ export function matchRowToPhoto(
   view: DraftViewpoint,
   row: number,
   grid: Grid,
+  offset?: number,
 ): { draft: DraftLayout; clashes: number } {
   const letter = rowLetter(row)
   const lay = layout(markers(draft, view))
   if (!letter || !lay) return { draft, clashes: 0 }
+  const shift = offset ?? rowOffset(lay, row)
   const digits = labelDigits(draft.spaces)
   const taken = new Set<number>()
   const placed = new Map<string, { label: string; col: number }>()
   let clashes = 0
   for (const m of [...(lay.byRow.get(row) ?? [])].sort((a, b) => (a.x - b.x) * Math.sign(lay.pitch))) {
-    const col = Math.round(photoColumn(lay, row, m.x, m.y))
+    const col = Math.round(photoColumn(lay, row, m.x, m.y)) + shift
     if (col < 0 || taken.has(col)) {
       clashes++ // keeps its label, which another space may now have
       continue
@@ -281,8 +307,9 @@ export function placeFromPhoto(
   if (!view || !space || !outline || space.retired) return unchanged
   const cell = photoCell(draft, view, outline, spaceId)
   if (!cell) return { ...unchanged, note: 'Outline more spaces on this photo first, so it can tell rows and columns' }
-  const label = cellLabel(cell, Math.max(2, parseLabel(space.label)?.digits ?? labelDigits(draft.spaces)))
-  if (!label) return { ...unchanged, note: 'The photo puts this space before column 1 or above row A; it stays as it is' }
+  const letter = rowLetter(cell.row)
+  if (!letter) return { ...unchanged, note: 'The photo puts this space above row A; it stays as it is' }
+  const digits = Math.max(2, parseLabel(space.label)?.digits ?? labelDigits(draft.spaces))
   // Another space outlined in the same spot on the photo is the same physical space: a duplicate.
   const lay = layout(markers(draft, view, spaceId))
   const twin = lay?.byRow.get(cell.row)?.find((m) => Math.round(photoColumn(lay, m.row, m.x, m.y)) === cell.col)
@@ -290,20 +317,32 @@ export function placeFromPhoto(
     const name = draft.spaces.find((s) => s.spaceId === twin.spaceId)!.label
     return { ...unchanged, note: `${name} is already outlined in that spot; delete one of the two` }
   }
-  const rect = cellRect(grid, cell)
   const custom = !parseLabel(space.label) && space.label.trim() !== ''
+  const offset = cell.named - cell.col
+  if (cell.named < 0 && !custom) {
+    // Before the row's first number: it becomes 01 and the rest of the row moves up to make room.
+    const first = { row: cell.row, col: 0 }
+    const start = updateSpace(draft, spaceId, { label: formatLabel(letter, 1, digits), rect: cellRect(grid, first) })
+    const { draft: shifted, clashes } = matchRowToPhoto(start, view, cell.row, grid, -cell.col)
+    const note = [`Now ${formatLabel(letter, 1, digits)}; the rest of row ${letter} moved up one to make room`]
+    if (clashes) note.push(`${clashes} label${clashes === 1 ? '' : 's'} still clash${clashes === 1 ? 'es' : ''}; rename by hand`)
+    return { ...fitSchematic(shifted), note: note.join('; '), renumbered: true }
+  }
+  const target = { row: cell.row, col: Math.max(0, cell.named) }
+  const label = cellLabel(target, digits)!
+  const rect = cellRect(grid, target)
   const holder = draft.spaces.find(
     (s) => !s.retired && s.spaceId !== spaceId && normalizeLabel(s.label) === normalizeLabel(label),
   )
   if (custom || !holder) {
-    const stacked = cellTaken(grid, draft.spaces, cell, null, spaceId)
+    const stacked = cellTaken(grid, draft.spaces, target, null, spaceId)
     const moved = fitSchematic(updateSpace(draft, spaceId, custom ? { rect } : { label, rect }))
     const note = [custom ? `Moved into ${label}'s cell` : `Now ${label}`]
     if (stacked) note.push('another space is drawn in that cell on the schematic; match it to the photo too')
     return { ...moved, note: note.join('; ') }
   }
   // The row's numbering is off from the photo: renumber it, this space included.
-  const { draft: renumbered, clashes } = matchRowToPhoto(updateSpace(draft, spaceId, { label, rect }), view, cell.row, grid)
+  const { draft: renumbered, clashes } = matchRowToPhoto(updateSpace(draft, spaceId, { label, rect }), view, cell.row, grid, offset)
   const after = renumbered.spaces.find((s) => s.spaceId === spaceId)!
   const note = [`Now ${after.label}; row ${rowLetter(cell.row)} renumbered to match the photo`]
   if (clashes) note.push(`${clashes} label${clashes === 1 ? '' : 's'} still clash${clashes === 1 ? 'es' : ''}; rename by hand`)
