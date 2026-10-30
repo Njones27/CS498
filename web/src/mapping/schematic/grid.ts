@@ -212,10 +212,8 @@ export function relabelMoved(g: Grid, spaces: DraftSpace[], spaceId: string, cel
   const notes = [`Now ${target}`]
   const others = spaces.filter((s) => !s.retired && s.spaceId !== spaceId && normalizeLabel(s.label) === key)
   // Labels in use once the move is done: the moved space's old label is free, its new one is taken, and
-  // so is each label given out below.
-  const used = new Set(
-    spaces.filter((s) => !s.retired && s.spaceId !== spaceId && !others.includes(s)).map((s) => normalizeLabel(s.label)),
-  )
+  // so is each label given out below. Retired spaces' labels count as used (their history keeps them).
+  const used = new Set(spaces.filter((s) => s.spaceId !== spaceId && !others.includes(s)).map((s) => normalizeLabel(s.label)))
   used.add(key)
   for (const other of others) {
     const own = cellLabel(cellAt(g, center(other.rect)), Math.max(2, parseLabel(other.label)?.digits ?? digits))
@@ -304,9 +302,13 @@ export function alignToCells(draft: DraftLayout, g: Grid): { draft: DraftLayout;
   return { draft: moved || renamed ? { ...draft, spaces } : draft, moved, renamed, left }
 }
 
+/** How far (rows or columns) a space may sit from its label's cell for Fit grid to go by the label. */
+const LABEL_REACH = 2
+
 /**
  * Fit grid to one space: the grid shifts and resizes so `rect` exactly fills its label's cell (C-07: row
- * C, column 7), or for a name like "Gate" the cell it sits in; the gaps are kept.
+ * C, column 7) when that is within LABEL_REACH of where it sits, else (a name like "Gate", or a label
+ * far off, likely a mistake) the cell it sits in; the gaps are kept.
  */
 export function anchorGrid(g: Grid, rect: DraftRect, label = ''): Grid {
   const gapX = g.cellW - g.boxW
@@ -314,7 +316,10 @@ export function anchorGrid(g: Grid, rect: DraftRect, label = ''): Grid {
   const cellW = rect.w + gapX
   const cellH = rect.h + gapY
   const parsed = parseLabel(label)
-  const { row, col } = parsed ? { row: rowIndex(parsed.row), col: parsed.num - 1 } : cellAt(g, center(rect))
+  const sits = cellAt(g, center(rect))
+  const named = parsed && { row: rowIndex(parsed.row), col: parsed.num - 1 }
+  const near = named && Math.abs(named.row - sits.row) <= LABEL_REACH && Math.abs(named.col - sits.col) <= LABEL_REACH
+  const { row, col } = near ? named : sits
   return {
     x0: r2(rect.x - col * cellW - gapX / 2),
     y0: r2(rect.y - row * cellH - gapY / 2),

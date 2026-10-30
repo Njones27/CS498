@@ -345,6 +345,13 @@ export function followRects(before: DraftLayout, after: DraftLayout, spaceIds: s
   return changed ? { ...after, viewpoints } : after
 }
 
+/** Width and height of an outline's bounding box on the photo (fractions). */
+function photoSize(outline: Outline): [number, number] {
+  const xs = outline.map((p) => p[0])
+  const ys = outline.map((p) => p[1])
+  return [Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)]
+}
+
 /** The bounding box, in schematic units, of a photo outline. */
 function mappedBox(m: Mat3, outline: Outline): DraftRect | null {
   const pts = outline.map((p) => applyMat(m, p))
@@ -387,18 +394,29 @@ export function followOutline(
   const b0 = m && mappedBox(m, old)
   const b1 = m && mappedBox(m, now)
   if (!b0 || !b1) return unchanged
-  // Each edge of the rect moves as far as the same edge of the outline's box did.
+  // Move or reshape is decided on the photo itself: through a perspective map, a plain move of an
+  // outline changes its mapped size a little, which must not count as a resize.
+  const [w0, h0] = photoSize(old)
+  const [w1, h1] = photoSize(now)
+  const isMove = Math.abs(w1 - w0) <= 0.02 * w0 + 1e-4 && Math.abs(h1 - h0) <= 0.02 * h0 + 1e-4
   const { x, y, w, h } = space.rect
-  const left = x + (b1.x - b0.x)
-  const top = y + (b1.y - b0.y)
-  const right = x + w + (b1.x + b1.w - (b0.x + b0.w))
-  const bottom = y + h + (b1.y + b1.h - (b0.y + b0.h))
-  let rect: DraftRect = { x: r2(left), y: r2(top), w: r2(Math.max(MIN_SIDE, right - left)), h: r2(Math.max(MIN_SIDE, bottom - top)) }
+  let rect: DraftRect
+  if (isMove) {
+    // The rect keeps its size; its middle moves as far as the outline's middle did.
+    const dx = b1.x + b1.w / 2 - (b0.x + b0.w / 2)
+    const dy = b1.y + b1.h / 2 - (b0.y + b0.h / 2)
+    rect = { x: r2(x + dx), y: r2(y + dy), w, h }
+  } else {
+    // A reshape: each edge of the rect moves as far as the same edge of the outline's box did.
+    const left = x + (b1.x - b0.x)
+    const top = y + (b1.y - b0.y)
+    const right = x + w + (b1.x + b1.w - (b0.x + b0.w))
+    const bottom = y + h + (b1.y + b1.h - (b0.y + b0.h))
+    rect = { x: r2(left), y: r2(top), w: r2(Math.max(MIN_SIDE, right - left)), h: r2(Math.max(MIN_SIDE, bottom - top)) }
+  }
   if (!plausibleRect(after, rect)) return unchanged
   let labels = new Map<string, string>()
   let note: string | undefined
-  // A reshape on the photo resizes the rect; only a move (same size) can land it in another cell.
-  const isMove = Math.abs(rect.w - space.rect.w) < 0.5 && Math.abs(rect.h - space.rect.h) < 0.5
   if (grid && snap && !isMove) return unchanged // the grid sets the box size while snapping
   if (grid && isMove) {
     const from = cellAt(grid, rectCenter(space.rect))

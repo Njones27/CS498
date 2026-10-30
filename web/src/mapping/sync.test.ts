@@ -30,6 +30,14 @@ const project = (m: Mat3, p: Point): Point => {
   const q = applyMat(m, p)!
   return [Number(q[0].toFixed(4)), Number(q[1].toFixed(4))]
 }
+/** B-02's (or any) outline slid on the photo, keeping its photo size, so its middle lands where `to`'s would. */
+const slideTo = (outline: Outline, to: DraftRect): Outline => {
+  const mid = (o: Outline) => [o.reduce((t, p) => t + p[0], 0) / 4, o.reduce((t, p) => t + p[1], 0) / 4]
+  const [ax, ay] = mid(outline)
+  const [bx, by] = mid(outlineOf(to))
+  return outline.map(([x, y]) => [Number((x + bx - ax).toFixed(4)), Number((y + by - ay).toFixed(4))] as Point)
+}
+
 const outlineOf = (r: DraftRect): Outline =>
   [
     [r.x, r.y],
@@ -197,7 +205,7 @@ describe('photo <-> schematic sync', () => {
     const draft = gridDraft()
     const grid = fitGrid(draft.spaces)
     const v = draft.viewpoints[0]
-    const withOutline = (r: DraftRect) => ({ ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'B-02': outlineOf(r) } }] })
+    const withOutline = (r: DraftRect) => ({ ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'B-02': slideTo(v.outlines['B-02'], r) } }] })
     expect(followOutline(draft, withOutline({ x: 155, y: 245, w: 100, h: 120 }), 'V1', 'B-02', grid).draft.spaces).toBe(
       draft.spaces,
     )
@@ -243,11 +251,12 @@ describe('photo <-> schematic sync', () => {
     const draft = gridDraft()
     const grid = fitGrid(draft.spaces)
     const v = draft.viewpoints[0]
-    const after = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'B-02': outlineOf({ x: 485, y: 245, w: 100, h: 120 }) } }] }
+    const after = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'B-02': slideTo(v.outlines['B-02'], { x: 485, y: 245, w: 100, h: 120 }) } }] }
     const { draft: next, note } = followOutline(draft, after, 'V1', 'B-02', grid, false)
     const b02 = next.spaces.find((s) => s.spaceId === 'B-02')!
     expect(b02.label).toBe('B-05')
-    expect(b02.rect.x).toBeCloseTo(485, 0)
+    expect(b02.rect.x).toBeCloseTo(485, -1)
+    expect(b02.rect.w).toBe(100) // a move keeps the size
     expect(note).toBe('Now B-05')
   })
 
@@ -261,6 +270,39 @@ describe('photo <-> schematic sync', () => {
     expect(free.label).toBe('B-02')
     expect(free.rect.w).toBeCloseTo(300, 0)
     expect(followOutline(draft, after, 'V1', 'B-02', grid, true).draft).toBe(after)
+  })
+
+  it('under a strong perspective, moving an outline on the photo still counts as a move', () => {
+    // Rows A and B (five spaces each, 120 apart) seen through a steep perspective.
+    const STEEP: Mat3 = [0.0008, 0, 0.05, 0, 0.0012, 0.1, 0, 0.0015, 1]
+    const steep = (r: DraftRect): Outline =>
+      [
+        [r.x, r.y],
+        [r.x + r.w, r.y],
+        [r.x + r.w, r.y + r.h],
+        [r.x, r.y + r.h],
+      ].map((p) => project(STEEP, p as Point))
+    const spaces = ['A', 'B'].flatMap((row, r) => [1, 2, 3, 4, 5].map((n) => space(`${row}-0${n}`, 40 + (n - 1) * 110, 40 + r * 130)))
+    const draft = davidFixture({
+      spaces,
+      viewpoints: [
+        {
+          ...davidFixture().viewpoints[0],
+          outlines: Object.fromEntries(spaces.map((s) => [s.spaceId, steep(s.rect)])),
+          outlineReview: {},
+        },
+      ],
+    })
+    const grid = fitGrid(draft.spaces)
+    // A-02's outline slid straight down on the photo, by the photo height of a row.
+    const old = draft.viewpoints[0].outlines['A-02']
+    const dy = steep(spaces[6].rect)[0][1] - old[0][1]
+    const slid = old.map(([x, y]) => [x, Number((y + dy).toFixed(4))] as Point)
+    const after = { ...draft, viewpoints: [{ ...draft.viewpoints[0], outlines: { ...draft.viewpoints[0].outlines, 'A-02': slid } }] }
+    const { draft: next } = followOutline(draft, after, 'V1', 'A-02', grid, false)
+    const a02 = next.spaces.find((s) => s.spaceId === 'A-02')!
+    expect(a02.rect.w).toBe(100) // a move keeps the size
+    expect(a02.label).toBe('B-02')
   })
 
   it('a first outline does not move the space', () => {

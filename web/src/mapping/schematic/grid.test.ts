@@ -184,6 +184,25 @@ describe('alignToCells', () => {
     expect(labels).toEqual(['A-05', 'B-09', 'Z-01'])
   })
 
+  it('goes row by row, then left to right, even when a row is a little uneven', () => {
+    // q is left of p but sits a little lower; both are in row B and want p's cell.
+    const spaces = [
+      space('p', 0, 0, { label: 'B-01', rect: { x: 36, y: 34, w: 40, h: 72 } }),
+      space('q', 0, 0, { label: 'X-01', rect: { x: 31, y: 40, w: 40, h: 72 } }),
+    ]
+    const next = alignToCells(davidFixture({ spaces }), G).draft.spaces
+    expect(next.map((x) => x.label)).toEqual(['B-02', 'B-01']) // q, further left, takes column 1
+  })
+
+  it('keeps retired labels out of what relabelMoved hands out', () => {
+    const at = (id: string, label: string, row: number, col: number, retired = false) =>
+      space(id, 0, 0, { label, retired, rect: cellRect(G, { row, col }) })
+    const spaces = [at('a', 'B-01', 1, 0), at('m', 'C-07', 2, 8), at('r', 'C-09', 4, 4, true)]
+    const { labels, note } = relabelMoved(G, spaces, 'a', { row: 2, col: 6 })
+    expect([...labels]).toEqual([['a', 'C-07']])
+    expect(note).toMatch(/another space is also C-07/)
+  })
+
   it('leaves a draft already on the grid alone', () => {
     const draft = davidFixture({ spaces: [space('B-01', 0, 0, { rect: cellRect(G, { row: 1, col: 0 }) })] })
     expect(alignToCells(draft, G).draft).toBe(draft)
@@ -191,11 +210,18 @@ describe('alignToCells', () => {
 })
 
 describe('anchorGrid', () => {
+  it('goes by where the space sits when its label points far away', () => {
+    const rect = { x: 100, y: 120, w: 50, h: 80 }
+    const g = anchorGrid(G, rect, 'Z-40')
+    expect(cellAt(g, [125, 160])).toEqual(cellAt(G, [125, 160]))
+  })
+
   it('puts a labeled space in its label\'s cell', () => {
     const rect = { x: 100, y: 120, w: 50, h: 80 }
-    const g = anchorGrid(G, rect, 'C-07')
-    expect(cellAt(g, [125, 160])).toEqual({ row: 2, col: 6 })
-    expect(cellRect(g, { row: 2, col: 6 })).toEqual(rect)
+    // It sits in C-03's cell; labeled C-04 (one column off), it goes into C-04's.
+    const g = anchorGrid(G, rect, 'C-04')
+    expect(cellAt(g, [125, 160])).toEqual({ row: 2, col: 3 })
+    expect(cellRect(g, { row: 2, col: 3 })).toEqual(rect)
   })
 
   it('lines the grid up with one space: it fills its cell exactly and the gaps stay', () => {
