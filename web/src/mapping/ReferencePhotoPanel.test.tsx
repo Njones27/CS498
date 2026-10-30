@@ -757,6 +757,51 @@ describe('ReferencePhotoPanel (US-08)', () => {
       expect(screen.getByText(/\(1 of 4\)/)).toBeInTheDocument()
     })
 
+    it('dragging a side handle resizes the outline, and the schematic rect follows', () => {
+      const { onChange } = renderPanel({ draft: syncedDraft(), selectedSpaceId: 'sp_a01' })
+      // A-01's outline spans x 0.05..0.15 (25..75 px of 500); side 1 is its right side.
+      fireEvent.pointerDown(screen.getByTestId('side-handle-1'), { clientX: 75, clientY: 117, button: 0 })
+      fireEvent.pointerMove(window, { clientX: 100, clientY: 130 }) // only the sideways part counts
+      fireEvent.pointerUp(window)
+      const next: DraftLayout = onChange.mock.calls[0][0]
+      const outline = next.viewpoints[0].outlines['sp_a01']
+      expect(outline.map((p) => p[0])).toEqual([0.05, 0.2, 0.2, 0.05])
+      expect(outline[1][1]).toBeCloseTo(50 / 600, 3)
+      const rect = next.spaces.find((s) => s.spaceId === 'sp_a01')!.rect
+      expect(rect.x).toBeCloseTo(50, 0)
+      expect(rect.w).toBeCloseTo(150, 0)
+    })
+
+    it('dragging the selected outline moves it, and the schematic rect moves too', () => {
+      const { onChange } = renderPanel({ draft: syncedDraft(), selectedSpaceId: 'sp_a01' })
+      const polygon = screen.getByTestId('space-polygon-sp_a01').querySelector('polygon')!
+      fireEvent.pointerDown(polygon, { clientX: 50, clientY: 100, button: 0 })
+      fireEvent.pointerMove(window, { clientX: 60, clientY: 100 })
+      fireEvent.pointerUp(window)
+      const next: DraftLayout = onChange.mock.calls[0][0]
+      expect(next.viewpoints[0].outlines['sp_a01'].map((p) => p[0])).toEqual([0.07, 0.17, 0.17, 0.07])
+      expect(next.spaces.find((s) => s.spaceId === 'sp_a01')!.rect.x).toBeCloseTo(70, 0)
+    })
+
+    it('zooms the photo in and back to fit', async () => {
+      const { user } = renderPanel({ draft: syncedDraft() })
+      const zoom = screen.getByRole('group', { name: 'Photo zoom' })
+      await user.click(within(zoom).getByRole('button', { name: 'Zoom photo in' }))
+      expect(within(zoom).getByText('150%')).toBeInTheDocument()
+      expect(document.querySelector('.photo-view__stage')).toHaveStyle({ transform: 'translate(0px, 0px) scale(1.5)' })
+      await user.click(within(zoom).getByRole('button', { name: 'Fit' }))
+      expect(within(zoom).getByText('100%')).toBeInTheDocument()
+    })
+
+    it('handles keep a usable size on screen however large the photo is', () => {
+      const draft = syncedDraft()
+      draft.viewpoints[0].referenceImage = { ...draft.viewpoints[0].referenceImage!, width: 2000, height: 1125 }
+      renderPanel({ draft, selectedSpaceId: 'sp_a01' })
+      // 2000 photo pixels drawn 500 px wide: a 6 px handle is 24 photo pixels.
+      const dot = screen.getByTestId('corner-handle-0').querySelector('circle:not(.ref-handle__hit)')!
+      expect(dot.getAttribute('r')).toBe('24')
+    })
+
     it('a click on empty photo clears a selected, outlined space instead of drawing', () => {
       const { onChange, onSelectSpace } = renderPanel({ draft: syncedDraft(), selectedSpaceId: 'sp_a01' })
       fireEvent.click(screen.getByTestId('photo-svg'), { clientX: 400, clientY: 400 })

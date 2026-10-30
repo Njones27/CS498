@@ -8,7 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { addRow, addSpace, canDeleteSpace, deleteSpace, updateSpace, type Grown } from './schematic/edits'
+import { addRow, addSpace, canDeleteSpace, deleteSpace, fitSchematic, updateSpace, type Grown } from './schematic/edits'
 import {
   CORNERS,
   MARGIN,
@@ -21,8 +21,24 @@ import {
   type Bounds,
   type Corner,
 } from './schematic/geometry'
+import {
+  arrangeByLabels,
+  cellAt,
+  cellRect,
+  cellsIn,
+  gridInView,
+  gridSizes,
+  relabelForCell,
+  rowLetter,
+  snapMove,
+  snapResize,
+  type Cell,
+  type Grid,
+  type GridSizes,
+} from './schematic/grid'
 import { duplicateLabelIds, nextRowStart, parseLabel, type ParsedLabel } from './schematic/labels'
-import { addSpaceOnSchematic, afterRectChange, dropPendingProposals, proposeOutlines } from './sync'
+import { addSpaceOnSchematic, addSpacesInCells, afterRectChange, dropPendingProposals, photoToSchematic, proposeOutlines } from './sync'
+import type { GridControls } from './useSchematicGrid'
 import type { DraftLayout, DraftRect, DraftSpace, Issue, MappingSelection, Point, SpaceType } from './types'
 
 export interface SchematicEditorProps extends MappingSelection {
@@ -34,6 +50,8 @@ export interface SchematicEditorProps extends MappingSelection {
    * spaces the draft had when the editor first showed this lot and version count as published.
    */
   publishedSpaceIds?: ReadonlySet<string>
+  /** The page's grid (useSchematicGrid). Without it there is no grid and nothing snaps. */
+  grid?: GridControls | null
 }
 
 const TYPES: { value: SpaceType; label: string; spoken: string }[] = [
@@ -101,6 +119,7 @@ export function SchematicEditor({
   onChange,
   issues,
   publishedSpaceIds,
+  grid,
   selectedSpaceId,
   onSelectSpace,
   hoveredSpaceId,
@@ -115,14 +134,17 @@ export function SchematicEditor({
   const view = camera ?? fit
   const [tool, setTool] = useState<Tool>('pan')
   const [drawBox, setDrawBox] = useState<DraftRect | null>(null)
+  // With snapping on, a box drawn on the map previews the cells it will fill.
+  const [drawCells, setDrawCells] = useState<Cell[] | null>(null)
+  const snapGrid = grid?.snap ? grid.grid : null
   const [rowOpen, setRowOpen] = useState(false)
   const [note, setNote] = useState('')
   const noteId = useId()
 
   // A drag listens on window; it reads the latest draft and callback when the pointer is released.
-  const latest = useRef({ draft, onChange })
+  const latest = useRef({ draft, onChange, snapGrid })
   useEffect(() => {
-    latest.current = { draft, onChange }
+    latest.current = { draft, onChange, snapGrid }
   })
   const stopDrag = useRef<(() => void) | null>(null)
   useEffect(() => () => stopDrag.current?.(), [])
@@ -213,12 +235,14 @@ export function SchematicEditor({
       if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < DRAG_THRESHOLD_PX) return
       moved = true
       if (mode === 'pan') setCamera({ ...v0, x: v0.x - (ev.clientX - x0) * scale, y: v0.y - (ev.clientY - y0) * scale })
+      else if (snapGrid) setDrawCells(cellsIn(snapGrid, start, toUnits(ev.clientX, ev.clientY)))
       else setDrawBox(spanRect(start, toUnits(ev.clientX, ev.clientY)))
     }
     const onUp = (ev: PointerEvent) => {
       stop()
       if (!moved) return onSelectSpace(null)
       if (mode !== 'draw') return
+      if (snapGrid) return fillCells(cellsIn(snapGrid, start, toUnits(ev.clientX, ev.clientY)))
       const rect = spanRect(start, toUnits(ev.clientX, ev.clientY))
       if (rect.w < MIN_SIDE || rect.h < MIN_SIDE) return setNote(`Too small: drag a box at least ${MIN_SIDE} units wide and tall`)
       const added = addSpaceOnSchematic(latest.current.draft, rect)
@@ -232,11 +256,51 @@ export function SchematicEditor({
       window.removeEventListener('pointercancel', stop)
       stopDrag.current = null
       setDrawBox(null)
+      setDrawCells(null)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', stop)
     stopDrag.current = stop
+  }
+
+  /** Snapping on, a drawn box: one new space per free cell it covers, named for the cell. */
+  function fillCells(cells: Cell[]) {
+    const { draft: current, onChange: emit, snapGrid: g } = latest.current
+    if (!g) return
+    if (cells.length === 0) return setNote('That box covers too many cells; draw a smaller one')
+    const added = addSpacesInCells(current, g, cells)
+    if (added.spaces.length === 0) return setNote('Those cells already have spaces (or are outside the lettered rows)')
+    emitGrown(added, emit)
+    onSelectSpace(added.spaces[0].spaceId)
+    const first = added.spaces[0].label
+    const last = added.spaces[added.spaces.length - 1].label
+    setNote(added.spaces.length === 1 ? `Added ${first}` : `Added ${added.spaces.length} spaces, ${first} to ${last}`)
+  }
+
+  /**
+   * Commit a moved or resized space: its photo outlines follow and the map grows to hold it. A move with
+   * snapping on also takes the label of the cell it lands in (see relabelForCell).
+   */
+  function commitRect(current: DraftLayout, emit: (next: DraftLayout) => void, spaceId: string, rect: DraftRect, cell: Cell | null) {
+    const relabel = cell ? relabelForCell(current.spaces, spaceId, cell) : {}
+    const patch = relabel.label ? { rect, label: relabel.label } : { rect }
+    const grown = afterRectChange(current, updateSpace(current, spaceId, patch), [spaceId])
+    emitGrown(grown, emit)
+    // followRects leaves an outline as it was when the new spot is off that photo (or would fold it).
+    const was = current.spaces.find((s) => s.spaceId === spaceId)
+    const stuck =
+      was &&
+      !sameRect(was.rect, rect) &&
+      current.viewpoints.some((v) => {
+        const outline = v.outlines[spaceId]
+        const unmoved = outline && grown.draft.viewpoints.find((n) => n.viewId === v.viewId)?.outlines[spaceId] === outline
+        // Without a fit (too few outlined spaces) nothing follows, which is not about the spot.
+        return unmoved && photoToSchematic(current, v) !== null
+      })
+    const notes = [relabel.label ? `Now ${relabel.label}` : relabel.note]
+    if (stuck) notes.push('its photo outline stays where it is: the new spot is off the photo')
+    setNote(notes.filter(Boolean).join('; '))
   }
 
   /** Press on a space (move) or a corner handle (resize). Selects at once; emits one onChange on release. */
@@ -251,23 +315,29 @@ export function SchematicEditor({
     const origin = space.rect
     const bounds = dragBounds()
     let moved = false
-    const rectAt = (ev: PointerEvent) => {
+    // With snapping on, a move lands in the cell under the space's middle and a resize on box edges.
+    const placeAt = (ev: PointerEvent): { rect: DraftRect; cell: Cell | null } => {
       const dx = (ev.clientX - x0) * scale
       const dy = (ev.clientY - y0) * scale
-      return mode === 'move' ? moveRect(origin, dx, dy, bounds) : resizeRect(origin, mode, dx, dy, bounds)
+      if (mode === 'move') {
+        const free = moveRect(origin, dx, dy, bounds)
+        return snapGrid ? snapMove(snapGrid, free) : { rect: free, cell: null }
+      }
+      const free = resizeRect(origin, mode, dx, dy, bounds)
+      return { rect: snapGrid ? snapResize(snapGrid, free, mode) : free, cell: null }
     }
     const onMove = (ev: PointerEvent) => {
       if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < DRAG_THRESHOLD_PX) return
       moved = true
-      setPreview({ spaceId: space.spaceId, rect: rectAt(ev) })
+      setPreview({ spaceId: space.spaceId, rect: placeAt(ev).rect })
     }
     const onUp = (ev: PointerEvent) => {
       stop()
       if (!moved) return
-      const rect = rectAt(ev)
+      const { rect, cell } = placeAt(ev)
       const { draft: current, onChange: emit } = latest.current
       const now = current.spaces.find((s) => s.spaceId === space.spaceId)
-      if (now && !sameRect(rect, now.rect)) emitGrown(afterRectChange(current, updateSpace(current, space.spaceId, { rect }), [space.spaceId]), emit)
+      if (now && (!sameRect(rect, now.rect) || cell)) commitRect(current, emit, space.spaceId, rect, cell)
     }
     const stop = () => {
       window.removeEventListener('pointermove', onMove)
@@ -282,14 +352,28 @@ export function SchematicEditor({
     stopDrag.current = stop
   }
 
-  /** Arrow keys move the selected space by 1 unit, 10 with Shift. */
+  /** Arrow keys move the selected space by 1 unit, 10 with Shift; with snapping on, by one cell. */
   function onSvgKeyDown(e: ReactKeyboardEvent<SVGSVGElement>) {
     const step = ARROWS[e.key]
     if (!step || !selected || selected.retired) return
     e.preventDefault()
+    if (snapGrid) {
+      const from = cellAt(snapGrid, [selected.rect.x + selected.rect.w / 2, selected.rect.y + selected.rect.h / 2])
+      const cell = { row: from.row + step[1], col: from.col + step[0] }
+      return commitRect(draft, onChange, selected.spaceId, cellRect(snapGrid, cell), cell)
+    }
     const n = e.shiftKey ? 10 : 1
     const rect = moveRect(selected.rect, step[0] * n, step[1] * n, dragBounds())
-    if (!sameRect(rect, selected.rect)) emitGrown(afterRectChange(draft, updateSpace(draft, selected.spaceId, { rect }), [selected.spaceId]))
+    if (!sameRect(rect, selected.rect)) commitRect(draft, onChange, selected.spaceId, rect, null)
+  }
+
+  /** Every row-number-labeled space into its label's cell at the grid's size. The photo outlines stay put. */
+  function onAlignAll() {
+    if (!grid) return
+    const { draft: next, spaceIds } = arrangeByLabels(draft, grid.grid)
+    if (spaceIds.length === 0) return setNote('Every labeled space is already on the grid')
+    emitGrown(fitSchematic(next))
+    setNote(`Aligned ${spaceIds.length} space${spaceIds.length === 1 ? '' : 's'} to the grid`)
   }
 
   /** Esc clears the selection, except while typing in a field. */
@@ -361,6 +445,7 @@ export function SchematicEditor({
         </span>
         <span className="hint">{summary}</span>
       </div>
+      {grid && <GridBar controls={grid} onAlignAll={onAlignAll} />}
       {rowOpen && (
         <RowDialog
           initialStart={nextRowStart(draft.spaces)}
@@ -390,6 +475,7 @@ export function SchematicEditor({
           height={height}
           onPointerDown={startBackground}
         />
+        {grid?.show && <GridLines grid={grid.grid} view={view} />}
         {draft.spaces.map((space) => {
           const id = space.spaceId
           const { x, y, w, h } = preview?.spaceId === id ? preview.rect : space.rect
@@ -476,6 +562,20 @@ export function SchematicEditor({
               />
             )
           })}
+        {drawCells?.map((cell) => {
+          const r = cellRect(grid!.grid, cell)
+          return (
+            <rect
+              key={`${cell.row}:${cell.col}`}
+              className="schematic-drawbox"
+              data-testid="schematic-drawcell"
+              x={r.x}
+              y={r.y}
+              width={r.w}
+              height={r.h}
+            />
+          )
+        })}
         {drawBox && (
           <rect
             className="schematic-drawbox"
@@ -647,5 +747,102 @@ function RowDialog({ initialStart, maxCount, onAdd, onCancel }: RowDialogProps) 
         </button>
       </div>
     </form>
+  )
+}
+
+/** Cell boundaries, and row letters / column numbers along the top and left of the view. Not clickable. */
+function GridLines({ grid, view }: { grid: Grid; view: { x: number; y: number; w: number; h: number } }) {
+  const { xs, ys, rows, cols } = gridInView(grid, view)
+  const fs = Math.min(grid.cellH * 0.3, grid.cellW * 0.45, Math.max(view.w, view.h) * 0.018)
+  return (
+    <g className="schematic-grid" aria-hidden="true" data-testid="schematic-grid">
+      {xs.map((x) => (
+        <line key={`x${x}`} x1={x} x2={x} y1={view.y} y2={view.y + view.h} />
+      ))}
+      {ys.map((y) => (
+        <line key={`y${y}`} x1={view.x} x2={view.x + view.w} y1={y} y2={y} />
+      ))}
+      {rows.map((row) => {
+        const letter = rowLetter(row)
+        return (
+          letter && (
+            <text key={`r${row}`} x={view.x + fs * 0.4} y={grid.y0 + (row + 0.5) * grid.cellH} fontSize={fs} dominantBaseline="central">
+              {letter}
+            </text>
+          )
+        )
+      })}
+      {cols
+        .filter((col) => col >= 0)
+        .map((col) => (
+          <text key={`c${col}`} x={grid.x0 + (col + 0.5) * grid.cellW} y={view.y + fs * 0.9} fontSize={fs} textAnchor="middle">
+            {col + 1}
+          </text>
+        ))}
+    </g>
+  )
+}
+
+const SIZE_FIELDS: { key: keyof GridSizes; label: string }[] = [
+  { key: 'boxW', label: 'Space width' },
+  { key: 'boxH', label: 'Space height' },
+  { key: 'gapX', label: 'Gap across' },
+  { key: 'gapY', label: 'Gap down' },
+]
+
+/** Snap and grid toggles, the grid's sizes (schematic units), Fit grid, and Align all. */
+function GridBar({ controls, onAlignAll }: { controls: GridControls; onAlignAll: () => void }) {
+  const sizes = gridSizes(controls.grid)
+  return (
+    <div className="schematic-gridbar" role="group" aria-label="Grid">
+      <label className="schematic-check">
+        <input type="checkbox" checked={controls.snap} onChange={(e) => controls.setSnap(e.target.checked)} />
+        Snap to grid
+      </label>
+      <label className="schematic-check">
+        <input type="checkbox" checked={controls.show} onChange={(e) => controls.setShow(e.target.checked)} />
+        Show grid
+      </label>
+      {SIZE_FIELDS.map(({ key, label }) => (
+        <SizeField key={key} label={label} value={sizes[key]} min={key.startsWith('gap') ? 0 : MIN_SIDE} onCommit={(v) => controls.setSizes({ [key]: v })} />
+      ))}
+      <button type="button" className="button button--sm" onClick={controls.refit} title="Fit the grid to the spaces' labels again">
+        Fit grid
+      </button>
+      <button
+        type="button"
+        className="button button--sm"
+        onClick={onAlignAll}
+        title="Move every labeled space into its label's cell, at the grid's size"
+      >
+        Align all to grid
+      </button>
+    </div>
+  )
+}
+
+/** A number field that applies its value on Enter or when it loses focus, so typing "45" doesn't apply "4" first. */
+function SizeField({ label, value, min, onCommit }: { label: string; value: number; min: number; onCommit: (v: number) => void }) {
+  const [text, setText] = useState<string | null>(null)
+  const commit = () => {
+    const v = Number(text)
+    if (text !== null && Number.isFinite(v) && v >= min) onCommit(v)
+    setText(null)
+  }
+  return (
+    <label className="schematic-size">
+      {label}
+      <input
+        type="number"
+        min={min}
+        step="any"
+        value={text ?? String(value)}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit()
+        }}
+      />
+    </label>
   )
 }

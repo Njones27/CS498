@@ -7,6 +7,7 @@ import { ReferencePhotoPanel } from './ReferencePhotoPanel'
 import { SchematicEditor } from './SchematicEditor'
 import type { DraftLayout, Issue, LayoutVersionOut, MappingSelection, ValidationReport } from './types'
 import { draftPath, useDraftLayout } from './useDraftLayout'
+import { useSchematicGrid } from './useSchematicGrid'
 import { ValidationPanel } from './ValidationPanel'
 
 /** "Draft based on v3", or "Not published yet" for a lot that was never published (brief §8.5). */
@@ -46,6 +47,7 @@ export function LotMappingPage() {
     autosave,
     setAutosave,
   } = useDraftLayout(lotId)
+  const grid = useSchematicGrid(lotId, draft)
   const location = useLocation()
   const navigate = useNavigate()
   const restoredFrom = (location.state as MappingLocationState | null)?.restoredFrom
@@ -286,7 +288,7 @@ export function LotMappingPage() {
       {draft && (
         <>
           <div className="mapping-panels">
-            <SchematicEditor {...selection} draft={draft} onChange={setDraft} issues={issues} />
+            <SchematicEditor {...selection} draft={draft} onChange={setDraft} issues={issues} grid={grid} />
             <ReferencePhotoPanel
               {...selection}
               lotId={lotId}
@@ -297,6 +299,7 @@ export function LotMappingPage() {
               onReferenceUploaded={(uploaded) => void refreshReferenceImages(uploaded)}
               issues={issues}
               onSave={save}
+              snapGrid={grid?.snap ? grid.grid : null}
             />
           </div>
           <ValidationPanel report={report} draft={draft} onSelectSpace={setSelectedSpaceId} />

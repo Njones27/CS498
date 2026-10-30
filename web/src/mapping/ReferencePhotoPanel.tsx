@@ -9,7 +9,7 @@ import {
   polygonCenter,
   polygonToSvgPoints,
 } from './photo/geom'
-import { addSpaceFromOutline, suggestOutline } from './sync'
+import { addSpaceFromOutline, followOutline, suggestOutline } from './sync'
 import type {
   DraftLayout,
   DraftViewpoint,
@@ -38,6 +38,50 @@ function boxOutline(a: Point, b: Point): Outline | null {
     [x1, y1],
     [x0, y1],
   ]
+}
+
+/** Keep a move of all `pts` by `d` on the photo: the move is cut short at the edge, so the shape holds. */
+function clampMove(pts: Point[], d: Point): Point {
+  const xs = pts.map((p) => p[0])
+  const ys = pts.map((p) => p[1])
+  return [
+    Math.min(Math.max(d[0], -Math.min(...xs)), 1 - Math.max(...xs)),
+    Math.min(Math.max(d[1], -Math.min(...ys)), 1 - Math.max(...ys)),
+  ]
+}
+
+const round4 = (v: number) => Number(v.toFixed(4))
+
+/**
+ * The outline while a drag is at photo point `p`: a corner goes to `p`; a side moves straight out or in
+ * (along its normal, measured in photo pixels so a non-square photo doesn't skew it); the body moves by
+ * the drag. Corners that don't move keep their identity, so an unmoved drag can be told apart.
+ */
+function reshape(
+  spec: { kind: 'corner' | 'side' | 'body'; idx: number; start: Point; from: Outline },
+  p: Point,
+  width: number,
+  height: number,
+): Outline {
+  const { kind, idx, start, from } = spec
+  if (kind === 'corner') return from.map((c, i) => (i === idx ? p : c))
+  const d: Point = [p[0] - start[0], p[1] - start[1]]
+  const moving = kind === 'body' ? [0, 1, 2, 3] : [idx, (idx + 1) % from.length]
+  let step = d
+  if (kind === 'side') {
+    const [a, b] = moving.map((i) => from[i])
+    const ex = (b[0] - a[0]) * width
+    const ey = (b[1] - a[1]) * height
+    const len = Math.hypot(ex, ey) || 1
+    const [nx, ny] = [-ey / len, ex / len]
+    const along = d[0] * width * nx + d[1] * height * ny
+    step = [(nx * along) / width, (ny * along) / height]
+  }
+  const [dx, dy] = clampMove(
+    moving.map((i) => from[i]),
+    step,
+  )
+  return from.map((c, i) => (moving.includes(i) ? [round4(c[0] + dx), round4(c[1] + dy)] : c))
 }
 
 function resolveImageUrl(url: string | null | undefined): string {
@@ -78,6 +122,7 @@ export function ReferencePhotoPanel({
   hoveredSpaceId,
   onHoverSpace,
   onSave,
+  snapGrid = null,
 }: ReferencePhotoPanelProps) {
   const currentViewId = viewId ?? draft.viewpoints[0]?.viewId ?? null
   const currentViewpoint = draft.viewpoints.find((v) => v.viewId === currentViewId) ?? null
@@ -117,10 +162,12 @@ export function ReferencePhotoPanel({
   // Partial clicks during corner placement: [p0, p1, p2]
   const [clicks, setClicks] = useState<Point[]>([])
 
-  // Dragging a corner handle
-  const [draggingIdx, setDraggingIdx] = useState<number | null>(null)
+  // Reshaping the selected outline: a corner handle moves one corner, a side handle moves a whole side
+  // (resizing the box), and the outline itself moves all four. The shape is worked out from where the
+  // drag started, so it never drifts.
+  const [dragging, setDragging] = useState(false)
   const [dragCorners, setDragCorners] = useState<Outline | null>(null)
-  const draggingIdxRef = useRef<number | null>(null)
+  const dragSpecRef = useRef<{ kind: 'corner' | 'side' | 'body'; idx: number; start: Point; from: Outline } | null>(null)
   const dragCornersRef = useRef<Outline | null>(null)
   const justDraggedRef = useRef(false)
 
@@ -205,26 +252,102 @@ export function ReferencePhotoPanel({
     return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [clicks.length, isDrawing, selectedOutline, selectedSpaceId, onSelectSpace])
 
-  // Global pointer listeners for dragging corner handles
+  // Zoom into the photo: the stage holding the photo and its outlines is scaled by k and shifted by
+  // (tx, ty) screen pixels inside the frame. Ctrl/Cmd + scroll zooms at the pointer; scrolling or a
+  // middle-button drag pans while zoomed. Each viewpoint starts unzoomed.
+  const frameRef = useRef<HTMLDivElement>(null)
+  const [zoom, setZoom] = useState({ viewId: currentViewId, k: 1, tx: 0, ty: 0 })
+  const view = zoom.viewId === currentViewId ? zoom : { viewId: currentViewId, k: 1, tx: 0, ty: 0 }
+  /** Keep the zoomed photo covering the frame. */
+  const clampZoom = (k: number, tx: number, ty: number) => {
+    const box = frameRef.current?.getBoundingClientRect()
+    const w = box?.width ?? 0
+    const h = box?.height ?? 0
+    return { viewId: currentViewId, k, tx: Math.min(0, Math.max(w - w * k, tx)), ty: Math.min(0, Math.max(h - h * k, ty)) }
+  }
+  /** Zoom by `factor` (1x to 8x) keeping the photo point under (clientX, clientY), or the middle, still. */
+  const zoomPhoto = (factor: number, clientX?: number, clientY?: number) => {
+    const box = frameRef.current?.getBoundingClientRect()
+    if (!box) return
+    const px = (clientX ?? box.left + box.width / 2) - box.left
+    const py = (clientY ?? box.top + box.height / 2) - box.top
+    const k = Math.min(8, Math.max(1, view.k * factor))
+    setZoom(clampZoom(k, px - ((px - view.tx) / view.k) * k, py - ((py - view.ty) / view.k) * k))
+  }
+  const panPhoto = (dx: number, dy: number) => setZoom(clampZoom(view.k, view.tx + dx, view.ty + dy))
+  const zoomRef = useRef({ zoomPhoto, panPhoto, k: view.k })
   useEffect(() => {
-    if (draggingIdx === null) return
+    zoomRef.current = { zoomPhoto, panPhoto, k: view.k }
+  })
+  const hasPhoto = Boolean(currentViewpoint?.referenceImage)
+  useEffect(() => {
+    const frame = frameRef.current
+    if (!frame) return
+    // React's onWheel is passive; preventDefault needs a native listener.
+    const onWheel = (e: WheelEvent) => {
+      const { zoomPhoto: z, panPhoto: p, k } = zoomRef.current
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        z(Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY)
+      } else if (k > 1) {
+        e.preventDefault()
+        p(-e.deltaX, -e.deltaY)
+      }
+    }
+    frame.addEventListener('wheel', onWheel, { passive: false })
+    return () => frame.removeEventListener('wheel', onWheel)
+  }, [hasPhoto])
+  const startPhotoPan = (e: React.PointerEvent) => {
+    if (e.button !== 1) return
+    e.preventDefault()
+    let last = [e.clientX, e.clientY]
+    const onMove = (ev: PointerEvent) => {
+      zoomRef.current.panPhoto(ev.clientX - last[0], ev.clientY - last[1])
+      last = [ev.clientX, ev.clientY]
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  // Photo units per screen pixel. The photo is drawn far smaller than its pixel size (a 2000 px drone
+  // photo in a 600 px panel), so handles and markers are sized from this to stay grabbable on screen.
+  const [unitsPerPx, setUnitsPerPx] = useState(1)
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg) return
+    const measure = () => {
+      const w = svg.getBoundingClientRect().width
+      if (w > 0) setUnitsPerPx(svgWidth / w)
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(svg)
+    return () => observer.disconnect()
+  }, [svgWidth, hasPhoto, view.k])
+
+  // Global pointer listeners while reshaping the selected outline
+  useEffect(() => {
+    if (!dragging) return
 
     const handlePointerMove = (e: PointerEvent) => {
-      if (draggingIdxRef.current === null || !dragCornersRef.current || !svgRef.current) return
+      const spec = dragSpecRef.current
+      if (!spec || !svgRef.current) return
       justDraggedRef.current = true
-      const point = getSvgPoint(svgRef.current, e.clientX, e.clientY, svgWidth, svgHeight)
-      const updated = [...dragCornersRef.current]
-      updated[draggingIdxRef.current] = point
+      const p = getSvgPoint(svgRef.current, e.clientX, e.clientY, svgWidth, svgHeight)
+      const updated = reshape(spec, p, svgWidth, svgHeight)
       dragCornersRef.current = updated
       setDragCorners(updated)
     }
 
     const handlePointerUp = () => {
-      const idx = draggingIdxRef.current
       const finalCorners = dragCornersRef.current
       // A press on a handle without moving it changes nothing, so it must not mark the outline drawn.
       const moved =
-        idx !== null &&
         finalCorners !== null &&
         currentViewpoint !== null &&
         selectedSpaceId !== null &&
@@ -246,13 +369,16 @@ export function ReferencePhotoPanel({
         const nextVps = draft.viewpoints.map((v) =>
           v.viewId === currentViewpoint.viewId ? { ...v, outlines: nextOutlines, outlineReview: nextReview } : v,
         )
+        // The schematic rect (and the other photos) follow the outline.
+        const followed = followOutline(draft, { ...draft, viewpoints: nextVps }, currentViewpoint.viewId, selectedSpaceId, snapGrid)
+        if (followed.note) setStatusNotice(followed.note)
         // commitOutlines, spelled out so this effect's dependencies stay listed
-        onChange({ ...draft, viewpoints: nextVps })
+        onChange(followed.draft)
         void onSave?.()
       }
-      draggingIdxRef.current = null
+      dragSpecRef.current = null
       dragCornersRef.current = null
-      setDraggingIdx(null)
+      setDragging(false)
       setDragCorners(null)
       if (justDraggedRef.current) {
         setTimeout(() => {
@@ -267,7 +393,20 @@ export function ReferencePhotoPanel({
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [draggingIdx, currentViewpoint, selectedSpaceId, draft, onChange, onSave, svgWidth, svgHeight])
+  }, [dragging, currentViewpoint, selectedSpaceId, draft, onChange, onSave, svgWidth, svgHeight, snapGrid, setStatusNotice])
+
+  /** Start reshaping the selected outline from a handle or the outline itself. */
+  const startOutlineDrag = (e: React.PointerEvent, kind: 'corner' | 'side' | 'body', idx: number) => {
+    if (e.button !== 0 || !selectedOutline || !svgRef.current) return
+    e.stopPropagation()
+    e.preventDefault()
+    const from = [...selectedOutline]
+    dragSpecRef.current = { kind, idx, start: getSvgPoint(svgRef.current, e.clientX, e.clientY, svgWidth, svgHeight), from }
+    dragCornersRef.current = from
+    setDragCorners(from)
+    setDragging(true)
+    justDraggedRef.current = false
+  }
 
   const handleAddViewpoint = (e: React.FormEvent) => {
     e.preventDefault()
@@ -384,7 +523,7 @@ export function ReferencePhotoPanel({
     setClicks([])
     setIsDrawing(false)
     if (!drawingSelected || !selectedSpace) {
-      const { draft: next, space } = addSpaceFromOutline(draft, currentViewpoint.viewId, outline)
+      const { draft: next, space } = addSpaceFromOutline(draft, currentViewpoint.viewId, outline, snapGrid)
       commitOutlines(next)
       onSelectSpace(space.spaceId)
       setStatusNotice(`Added ${space.label} to the schematic. Rename it there if needed.`)
@@ -403,8 +542,10 @@ export function ReferencePhotoPanel({
         ? { ...v, outlines: nextOutlines, outlineReview: nextReview }
         : v,
     )
-    setStatusNotice(`${selectedSpace.label} outlined in ${currentViewpoint.viewId}`)
-    commitOutlines({ ...draft, viewpoints: nextVps })
+    // A redrawn outline moves the space on the schematic the same way; a first outline moves nothing.
+    const followed = followOutline(draft, { ...draft, viewpoints: nextVps }, currentViewpoint.viewId, selectedSpace.spaceId, snapGrid)
+    setStatusNotice(followed.note ?? `${selectedSpace.label} outlined in ${currentViewpoint.viewId}`)
+    commitOutlines(followed.draft)
   }
 
   // A box drag ends after the render it started in; it finishes with the newest draft and selection.
@@ -748,9 +889,15 @@ export function ReferencePhotoPanel({
         <div className="ref-panel__body">
           {/* Photo viewer with SVG overlay */}
           <div
+            ref={frameRef}
             className="photo-view"
             style={{ aspectRatio: `${svgWidth} / ${svgHeight}` }}
+            onPointerDown={startPhotoPan}
           >
+            <div
+              className="photo-view__stage"
+              style={{ transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.k})` }}
+            >
             <img
               key={photoAttempt}
               src={resolveImageUrl(photoSrc)}
@@ -828,6 +975,10 @@ export function ReferencePhotoPanel({
                     style={{ pointerEvents: isActivelyDrawing ? 'none' : 'auto' }}
                     onPointerEnter={() => !isActivelyDrawing && onHoverSpace(sId)}
                     onPointerLeave={() => !isActivelyDrawing && onHoverSpace(null)}
+                    onPointerDown={(e) => {
+                      // The selected outline moves as a whole when dragged; a click still just selects.
+                      if (isSelected && !isActivelyDrawing) startOutlineDrag(e, 'body', 0)
+                    }}
                     onClick={(e) => {
                       if (isActivelyDrawing) return
                       e.stopPropagation()
@@ -848,7 +999,7 @@ export function ReferencePhotoPanel({
                       className="photo-label"
                       textAnchor="middle"
                       dominantBaseline="middle"
-                      fontSize={Math.max(12, svgWidth * 0.018)}
+                      fontSize={12 * unitsPerPx}
                     >
                       {space?.label ?? sId}
                     </text>
@@ -903,36 +1054,51 @@ export function ReferencePhotoPanel({
                 />
               )}
 
-              {/* Corner handles for selected space (when not clicking new points) */}
+              {/* Handles for the selected outline (when not clicking new points): corners reshape it, the
+                  squares on its sides move a whole side. Each has a wider invisible ring to grab. */}
               {selectedSpaceId && selectedOutline && clicks.length === 0 && !isDrawing && (
                 <g className="ref-handles" data-testid="selected-corner-handles">
-                  {(dragCorners ?? selectedOutline).map((corner, idx) => (
-                    <circle
-                      key={idx}
-                      data-testid={`corner-handle-${idx}`}
-                      className="ref-handle"
-                      cx={corner[0] * svgWidth}
-                      cy={corner[1] * svgHeight}
-                      r={7}
-                      fill="#ffffff"
-                      stroke="var(--accent)"
-                      strokeWidth={2.5}
-                      onPointerDown={(e) => {
-                        e.stopPropagation()
-                        e.preventDefault()
-                        draggingIdxRef.current = idx
-                        const initial = [...(dragCornersRef.current ?? dragCorners ?? selectedOutline)]
-                        dragCornersRef.current = initial
-                        setDraggingIdx(idx)
-                        setDragCorners(initial)
-                        justDraggedRef.current = false
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        e.preventDefault()
-                      }}
-                    />
-                  ))}
+                  {(dragCorners ?? selectedOutline).map((corner, idx, pts) => {
+                    const next = pts[(idx + 1) % pts.length]
+                    const mx = ((corner[0] + next[0]) / 2) * svgWidth
+                    const my = ((corner[1] + next[1]) / 2) * svgHeight
+                    // A small outline on screen gets smaller grab rings, so a corner's ring never covers
+                    // the side handle next to it. Zooming in makes them full size again.
+                    const shortest = Math.min(
+                      ...pts.map((p, i) => {
+                        const q = pts[(i + 1) % pts.length]
+                        return Math.hypot((q[0] - p[0]) * svgWidth, (q[1] - p[1]) * svgHeight) / unitsPerPx
+                      }),
+                    )
+                    const hitPx = Math.min(14, Math.max(4, shortest / 4))
+                    const side = Math.min(9, Math.max(4, shortest / 4)) * unitsPerPx
+                    const stop = (e: React.MouseEvent) => {
+                      e.stopPropagation()
+                      e.preventDefault()
+                    }
+                    return (
+                      <g key={idx}>
+                        <g
+                          className="ref-handle ref-handle--side"
+                          data-testid={`side-handle-${idx}`}
+                          onPointerDown={(e) => startOutlineDrag(e, 'side', idx)}
+                          onClick={stop}
+                        >
+                          <circle className="ref-handle__hit" cx={mx} cy={my} r={hitPx * unitsPerPx} />
+                          <rect x={mx - side / 2} y={my - side / 2} width={side} height={side} rx={side * 0.2} />
+                        </g>
+                        <g
+                          className="ref-handle"
+                          data-testid={`corner-handle-${idx}`}
+                          onPointerDown={(e) => startOutlineDrag(e, 'corner', idx)}
+                          onClick={stop}
+                        >
+                          <circle className="ref-handle__hit" cx={corner[0] * svgWidth} cy={corner[1] * svgHeight} r={hitPx * unitsPerPx} />
+                          <circle cx={corner[0] * svgWidth} cy={corner[1] * svgHeight} r={Math.min(6, hitPx * 0.6) * unitsPerPx} />
+                        </g>
+                      </g>
+                    )
+                  })}
                 </g>
               )}
 
@@ -951,7 +1117,7 @@ export function ReferencePhotoPanel({
                       <circle
                         cx={pt[0] * svgWidth}
                         cy={pt[1] * svgHeight}
-                        r={11}
+                        r={11 * unitsPerPx}
                         fill="var(--accent)"
                         stroke="#ffffff"
                         strokeWidth={2}
@@ -960,7 +1126,7 @@ export function ReferencePhotoPanel({
                         x={pt[0] * svgWidth}
                         y={pt[1] * svgHeight}
                         fill="#ffffff"
-                        fontSize={11}
+                        fontSize={11 * unitsPerPx}
                         fontWeight="bold"
                         textAnchor="middle"
                         dominantBaseline="central"
@@ -972,6 +1138,19 @@ export function ReferencePhotoPanel({
                 </g>
               )}
             </svg>
+            </div>
+            <div className="photo-zoom" role="group" aria-label="Photo zoom">
+              <button type="button" className="button button--sm" aria-label="Zoom photo out" onClick={() => zoomPhoto(1 / 1.5)} disabled={view.k <= 1}>
+                −
+              </button>
+              <span className="photo-zoom__level">{Math.round(view.k * 100)}%</span>
+              <button type="button" className="button button--sm" aria-label="Zoom photo in" onClick={() => zoomPhoto(1.5)} disabled={view.k >= 8}>
+                +
+              </button>
+              <button type="button" className="button button--sm" onClick={() => setZoom({ viewId: currentViewId, k: 1, tx: 0, ty: 0 })} disabled={view.k === 1}>
+                Fit
+              </button>
+            </div>
             {photoState === 'loading' && (
               <p className="photo-view__loading" role="status">
                 Loading photo…

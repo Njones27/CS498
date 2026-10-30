@@ -1,5 +1,6 @@
 import { MIN_SIDE, clearOf, medianSize } from './schematic/geometry'
-import { addSpace, addSpaceAt, fitSchematic, type Grown } from './schematic/edits'
+import { addSpace, addSpaceAt, addSpacesAt, fitSchematic, updateSpace, type Grown } from './schematic/edits'
+import { cellAt, cellLabel, cellRect, cellTaken, relabelForCell, snapMove, type Cell, type Grid } from './schematic/grid'
 import { isValidQuad, orderClockwise } from './photo/geom'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, Outline, Point } from './types'
 
@@ -229,8 +230,7 @@ export function rectToOutline(toPhoto: Mat3, rect: DraftRect): Outline | null {
 export function suggestOutline(draft: DraftLayout, view: DraftViewpoint, spaceId: string): Outline | null {
   const space = draft.spaces.find((s) => s.spaceId === spaceId)
   if (!space || !view.referenceImage) return null
-  const m = photoToSchematic(draft, view)
-  const toPhoto = m && invert(m)
+  const toPhoto = schematicToPhoto(draft, view)
   return toPhoto ? rectToOutline(toPhoto, space.rect) : null
 }
 
@@ -241,9 +241,7 @@ export function suggestOutline(draft: DraftLayout, view: DraftViewpoint, spaceId
 export function proposeOutlines(draft: DraftLayout, spaceIds: string[]): DraftLayout {
   let changed = false
   const viewpoints = draft.viewpoints.map((v) => {
-    if (!v.referenceImage) return v
-    const m = photoToSchematic(draft, v)
-    const toPhoto = m && invert(m)
+    const toPhoto = v.referenceImage ? schematicToPhoto(draft, v) : null
     if (!toPhoto) return v
     const outlines = { ...v.outlines }
     const outlineReview = { ...v.outlineReview }
@@ -270,37 +268,73 @@ function schematicToPhoto(draft: DraftLayout, view: DraftViewpoint): Mat3 | null
   return m && invert(m)
 }
 
-const sameOutline = (a: Outline, b: Outline) =>
-  a.length === b.length && a.every((p, i) => Math.abs(p[0] - b[i][0]) <= 2e-4 && Math.abs(p[1] - b[i][1]) <= 2e-4)
+/**
+ * Carries a point along as rect `a` becomes rect `b`: a point on an edge moves with that edge, one
+ * between edges moves in proportion, and one past an edge moves with that edge. So moving only the
+ * bottom edge leaves everything at the top where it was.
+ */
+const edgeCarry =
+  (a: DraftRect, b: DraftRect) =>
+  ([x, y]: Point): Point => {
+    const u = Math.min(1, Math.max(0, (x - a.x) / a.w))
+    const v = Math.min(1, Math.max(0, (y - a.y) / a.h))
+    const dl = b.x - a.x
+    const dr = b.x + b.w - (a.x + a.w)
+    const dt = b.y - a.y
+    const db = b.y + b.h - (a.y + a.h)
+    return [x + dl * (1 - u) + dr * u, y + dt * (1 - v) + db * v]
+  }
+
+const sameRect = (a: DraftRect, b: DraftRect) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
+
+/** An outline's corners pulled onto the photo and rounded as stored; null if that leaves no valid four-sided shape. */
+function onPhoto(pts: (Point | null)[]): Outline | null {
+  if (pts.some((p) => p === null || !Number.isFinite(p[0]) || !Number.isFinite(p[1]))) return null
+  const out = pts.map((p): Point => [
+    Number(Math.min(1, Math.max(0, p![0])).toFixed(4)),
+    Number(Math.min(1, Math.max(0, p![1])).toFixed(4)),
+  ])
+  const [cx, cy] = centroid(pts as Point[])
+  return cx >= 0 && cx <= 1 && cy >= 0 && cy <= 1 && isValidQuad(out) ? out : null
+}
 
 /**
- * After `spaceIds` moved or resized on the schematic (`before` -> `after`), move the proposals this
- * editor made for them and that still wait for review. A proposal is moved only while it is exactly the
- * projection of the old rect, so a detector's proposal or one an admin dragged stays put; one that no
- * longer lands on the photo is dropped. Accepted outlines are the admin's and never move.
+ * After `spaceIds` moved or resized on the schematic (`before` -> `after`), their outlines on the photos
+ * move and resize the same way: each corner moves with the rect's edges (edgeCarry), carried through the
+ * view's photo <-> schematic map (fitted on `before`). An outline that would leave the photo or fold
+ * stays where it was, except a proposal still waiting for review, which is dropped. `skipViewId` is left
+ * alone (the view the change came from).
  */
-export function reprojectPending(before: DraftLayout, after: DraftLayout, spaceIds: string[]): DraftLayout {
+export function followRects(before: DraftLayout, after: DraftLayout, spaceIds: string[], skipViewId?: string): DraftLayout {
   let changed = false
   const viewpoints = after.viewpoints.map((v) => {
-    const ids = spaceIds.filter((id) => v.outlineReview?.[id]?.status === 'pending' && v.outlineReview[id].source === 'proposed')
     const vBefore = before.viewpoints.find((b) => b.viewId === v.viewId)
-    const oldMap = vBefore && schematicToPhoto(before, vBefore)
-    const newMap = schematicToPhoto(after, v)
-    if (ids.length === 0 || !oldMap || !newMap) return v
+    if (v.viewId === skipViewId || !vBefore) return v
+    const ids = spaceIds.filter((id) => v.outlines[id])
+    const toSchematic = ids.length ? photoToSchematic(before, vBefore) : null
+    const toPhoto = toSchematic && invert(toSchematic)
+    if (!toSchematic || !toPhoto) return v
     const outlines = { ...v.outlines }
     const outlineReview = { ...v.outlineReview }
     let touched = false
     for (const id of ids) {
       const was = before.spaces.find((s) => s.spaceId === id)
       const now = after.spaces.find((s) => s.spaceId === id)
-      const projected = was && rectToOutline(oldMap, was.rect)
-      if (!now || !projected || !sameOutline(projected, v.outlines[id])) continue
-      const outline = now.retired ? null : rectToOutline(newMap, now.rect)
-      if (outline) {
-        outlines[id] = outline
-      } else {
+      if (!was || !now || now.retired || sameRect(was.rect, now.rect)) continue
+      const carry = edgeCarry(was.rect, now.rect)
+      const moved = onPhoto(
+        v.outlines[id].map((p) => {
+          const q = applyMat(toSchematic, p)
+          return q && applyMat(toPhoto, carry(q))
+        }),
+      )
+      if (moved) {
+        outlines[id] = moved
+      } else if (v.outlineReview?.[id]?.status === 'pending') {
         delete outlines[id]
         delete outlineReview[id]
+      } else {
+        continue
       }
       touched = true
     }
@@ -309,6 +343,70 @@ export function reprojectPending(before: DraftLayout, after: DraftLayout, spaceI
     return { ...v, outlines, outlineReview }
   })
   return changed ? { ...after, viewpoints } : after
+}
+
+/** The bounding box, in schematic units, of a photo outline. */
+function mappedBox(m: Mat3, outline: Outline): DraftRect | null {
+  const pts = outline.map((p) => applyMat(m, p))
+  if (pts.some((p) => p === null || !Number.isFinite(p[0]) || !Number.isFinite(p[1]))) return null
+  const xs = pts.map((p) => p![0])
+  const ys = pts.map((p) => p![1])
+  const x = Math.min(...xs)
+  const y = Math.min(...ys)
+  const w = Math.max(...xs) - x
+  const h = Math.max(...ys) - y
+  return w > 0 && h > 0 ? { x, y, w, h } : null
+}
+
+const r2 = (v: number) => Math.round(v * 100) / 100
+
+/**
+ * After `spaceId`'s outline in `viewId` was moved or reshaped on the photo (`before` -> `after`), its
+ * schematic rect moves and resizes the same way, through the view's map; then its outlines in the other
+ * views follow the rect. With a `grid` (snapping on), the rect only changes when the outline moved it into
+ * another cell: it then fills that cell and takes its label (`note` says which, or why it was kept).
+ * A first outline moves nothing: it says where the space is on the photo, not that it moved.
+ */
+export function followOutline(
+  before: DraftLayout,
+  after: DraftLayout,
+  viewId: string,
+  spaceId: string,
+  grid: Grid | null,
+): Grown & { note?: string } {
+  const unchanged = { draft: after, dx: 0, dy: 0 }
+  const vBefore = before.viewpoints.find((v) => v.viewId === viewId)
+  const vAfter = after.viewpoints.find((v) => v.viewId === viewId)
+  const space = after.spaces.find((s) => s.spaceId === spaceId)
+  const old = vBefore?.outlines[spaceId]
+  const now = vAfter?.outlines[spaceId]
+  if (!vBefore || !old || !now || !space || space.retired) return unchanged
+  const m = photoToSchematic(before, vBefore)
+  const b0 = m && mappedBox(m, old)
+  const b1 = m && mappedBox(m, now)
+  if (!b0 || !b1) return unchanged
+  // Each edge of the rect moves as far as the same edge of the outline's box did.
+  const { x, y, w, h } = space.rect
+  const left = x + (b1.x - b0.x)
+  const top = y + (b1.y - b0.y)
+  const right = x + w + (b1.x + b1.w - (b0.x + b0.w))
+  const bottom = y + h + (b1.y + b1.h - (b0.y + b0.h))
+  let rect: DraftRect = { x: r2(left), y: r2(top), w: r2(Math.max(MIN_SIDE, right - left)), h: r2(Math.max(MIN_SIDE, bottom - top)) }
+  if (!plausibleRect(after, rect)) return unchanged
+  let patch: Partial<DraftSpace> = { rect }
+  let note: string | undefined
+  if (grid) {
+    const from = cellAt(grid, rectCenter(space.rect))
+    const snapped = snapMove(grid, rect)
+    if (snapped.cell.row === from.row && snapped.cell.col === from.col) return unchanged
+    rect = snapped.rect
+    const relabel = relabelForCell(after.spaces, spaceId, snapped.cell)
+    patch = relabel.label ? { rect, label: relabel.label } : { rect }
+    note = relabel.label ? `Now ${relabel.label}` : relabel.note
+  }
+  if (sameRect(rect, space.rect) && !patch.label) return unchanged
+  const moved = updateSpace(after, spaceId, patch)
+  return { ...fitSchematic(followRects(after, moved, [spaceId], viewId)), note }
 }
 
 /** Remove the proposals still waiting for review for `spaceIds` (a retired space should not block publishing). */
@@ -364,15 +462,22 @@ export function addSpaceFromOutline(
   draft: DraftLayout,
   viewId: string,
   outline: Outline,
+  grid: Grid | null = null,
 ): { draft: DraftLayout; space: DraftSpace } {
   const view = draft.viewpoints.find((v) => v.viewId === viewId)
   if (!view) throw new Error(`No viewpoint ${viewId}`)
   const m = photoToSchematic(draft, view)
   const mapped = m && outlineToRect(m, outline)
   const rect = mapped && plausibleRect(draft, mapped) ? mapped : null
-  const added = rect
-    ? addSpaceAt(draft, clearOf(rect, draft.spaces))
-    : addSpace(draft, nearestOutlined(draft, view, centroid(outline))?.spaceId ?? null)
+  // Snapping on: the space fills the free cell it lands in and is named for it.
+  const cell = grid && rect ? cellAt(grid, rectCenter(rect)) : null
+  const cellName = cell && cellLabel(cell)
+  const inCell = grid && cell && cellName && !cellTaken(grid, draft.spaces, cell, cellName)
+  const added = inCell
+    ? addSpaceAt(draft, cellRect(grid, cell), cellName)
+    : rect
+      ? addSpaceAt(draft, clearOf(rect, draft.spaces))
+      : addSpace(draft, nearestOutlined(draft, view, centroid(outline))?.spaceId ?? null)
   const id = added.space.spaceId
   const viewpoints = added.draft.viewpoints.map((v) =>
     v.viewId === viewId
@@ -393,7 +498,24 @@ export function addSpaceOnSchematic(draft: DraftLayout, rect: DraftRect): Grown 
   return { ...added, draft: proposeOutlines(added.draft, [added.space.spaceId]) }
 }
 
-/** After `spaceIds` moved or resized (`before` -> `after`): their proposals follow, and the map grows to hold them. */
+/**
+ * A box drawn on the schematic with snapping on: one space per free cell it covers, named for the cell,
+ * each with proposed outlines on the photos. Cells already holding a space (or whose label is used), and
+ * cells outside the lettered rows, are skipped.
+ */
+export function addSpacesInCells(draft: DraftLayout, grid: Grid, cells: Cell[]): Grown & { spaces: DraftSpace[] } {
+  const items: { rect: DraftRect; label: string }[] = []
+  for (const cell of cells) {
+    const label = cellLabel(cell)
+    const placed = [...draft.spaces, ...items.map((it, i) => ({ spaceId: `new${i}`, label: it.label, type: 'STANDARD' as const, rect: it.rect, retired: false }))]
+    if (label && !cellTaken(grid, placed, cell, label)) items.push({ rect: cellRect(grid, cell), label })
+  }
+  if (items.length === 0) return { draft, dx: 0, dy: 0, spaces: [] }
+  const added = addSpacesAt(draft, items)
+  return { ...added, draft: proposeOutlines(added.draft, added.spaces.map((s) => s.spaceId)) }
+}
+
+/** After `spaceIds` moved or resized (`before` -> `after`): their outlines follow, and the map grows to hold them. */
 export function afterRectChange(before: DraftLayout, after: DraftLayout, spaceIds: string[]): Grown {
-  return fitSchematic(reprojectPending(before, after, spaceIds))
+  return fitSchematic(followRects(before, after, spaceIds))
 }

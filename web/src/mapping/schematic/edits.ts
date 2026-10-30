@@ -77,17 +77,27 @@ export function addSpace(draft: DraftLayout, selectedSpaceId: string | null): Gr
   return { ...grown, space: spaces[0] }
 }
 
-/** A space drawn at `rect` (in the schematic or on a photo), labeled for the row it lines up with. */
-export function addSpaceAt(draft: DraftLayout, rect: DraftRect): Grown & { space: DraftSpace } {
-  const space: DraftSpace = {
-    spaceId: newSpaceId(new Set(draft.spaces.map((s) => s.spaceId))),
-    label: labelForRect(draft.spaces, rect),
-    type: 'STANDARD',
-    rect,
-    retired: false,
-  }
-  const { spaces, ...grown } = appendSpaces(draft, [space])
+/** A space drawn at `rect` (in the schematic or on a photo), labeled `label` or for the row it lines up with. */
+export function addSpaceAt(draft: DraftLayout, rect: DraftRect, label?: string): Grown & { space: DraftSpace } {
+  const { spaces, ...grown } = addSpacesAt(draft, [{ rect, label }])
   return { ...grown, space: spaces[0] }
+}
+
+/** Several spaces at once (one edit, one undo step), each labeled as given or for the row it lines up with. */
+export function addSpacesAt(
+  draft: DraftLayout,
+  items: { rect: DraftRect; label?: string }[],
+): Grown & { spaces: DraftSpace[] } {
+  const taken = new Set(draft.spaces.map((s) => s.spaceId))
+  const added: DraftSpace[] = []
+  for (const { rect, label } of items) {
+    const spaceId = newSpaceId(taken)
+    taken.add(spaceId)
+    // Later spaces see the earlier ones, so a run drawn in one go gets consecutive labels.
+    const all = [...draft.spaces, ...added]
+    added.push({ spaceId, label: label ?? labelForRect(all, rect), type: 'STANDARD', rect, retired: false })
+  }
+  return appendSpaces(draft, added)
 }
 
 /** + Row (US-07 #2): `count` evenly spaced spaces labeled from `start` on one line below the lowest row. */

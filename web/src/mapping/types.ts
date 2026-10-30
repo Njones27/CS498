@@ -1,4 +1,5 @@
 import type { components } from '../api/types.gen'
+import type { Grid } from './schematic/grid'
 
 /** Mapping types shared by the mapping page and its panels (brief §4.4): aliases of the generated schemas. */
 type S = components['schemas']
@@ -49,4 +50,6 @@ export interface ReferencePhotoPanelProps extends MappingSelection {
   onReferenceUploaded: (uploaded?: UploadedReference) => void
   issues: Issue[]
   onSave?: () => Promise<DraftLayout | null>
+  /** The schematic grid while snapping is on: spaces added or moved from the photo land in its cells. */
+  snapGrid?: Grid | null
 }

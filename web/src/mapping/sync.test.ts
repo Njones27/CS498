@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { davidFixture, space } from './fixtures/david'
 import { fitSchematic } from './schematic/edits'
 import { labelForRect } from './schematic/labels'
+import { cellRect, fitGrid } from './schematic/grid'
 import { isValidQuad } from './photo/geom'
 import {
   addSpaceFromOutline,
@@ -14,7 +15,9 @@ import {
   photoToSchematic,
   proposeOutlines,
   rectToOutline,
-  reprojectPending,
+  followOutline,
+  followRects,
+  addSpacesInCells,
   suggestOutline,
   type Mat3,
 } from './sync'
@@ -141,31 +144,100 @@ describe('photo <-> schematic sync', () => {
     expect(proposeOutlines(off, ['far'])).toBe(off)
   })
 
-  it('moving a space moves its pending proposal, never an accepted outline', () => {
+  it('moving or resizing a space on the schematic moves and resizes its outlines on the photo', () => {
     const { draft, space: added } = addSpaceOnSchematic(gridDraft(), { x: 480, y: 40, w: 100, h: 120 })
     const moved = {
       ...draft,
       spaces: draft.spaces.map((s) =>
-        s.spaceId === added.spaceId || s.spaceId === 'A-01' ? { ...s, rect: { ...s.rect, x: s.rect.x + 30 } } : s,
+        s.spaceId === added.spaceId
+          ? { ...s, rect: { ...s.rect, x: s.rect.x + 30 } }
+          : s.spaceId === 'A-01'
+            ? { ...s, rect: { x: 40, y: 40, w: 200, h: 120 } }
+            : s,
       ),
     }
-    const next = reprojectPending(draft, moved, [added.spaceId, 'A-01'])
-    expect(next.viewpoints[0].outlines[added.spaceId]).not.toEqual(draft.viewpoints[0].outlines[added.spaceId])
-    expect(next.viewpoints[0].outlines['A-01']).toEqual(draft.viewpoints[0].outlines['A-01'])
+    const next = followRects(draft, moved, [added.spaceId, 'A-01'])
+    const v = next.viewpoints[0]
+    // The pending proposal lands where the new rect projects; the accepted outline is stretched to match.
+    expect(v.outlines[added.spaceId][0][0]).toBeCloseTo(outlineOf({ x: 510, y: 40, w: 100, h: 120 })[0][0], 3)
+    expect(v.outlines['A-01'][1][0]).toBeCloseTo(outlineOf({ x: 40, y: 40, w: 200, h: 120 })[1][0], 3)
+    expect(v.outlineReview['A-01']).toEqual({ source: 'drawn', status: 'accepted' })
   })
 
-  it('a pending proposal that is not our projection (a detector\'s, or one dragged) does not move', () => {
-    const { draft, space: added } = addSpaceOnSchematic(gridDraft(), { x: 480, y: 40, w: 100, h: 120 })
-    const id = added.spaceId
-    const theirs: Outline = [
-      [0.5, 0.1],
-      [0.55, 0.1],
-      [0.55, 0.2],
-      [0.5, 0.2],
-    ]
-    const detected = { ...draft, viewpoints: [{ ...draft.viewpoints[0], outlines: { ...draft.viewpoints[0].outlines, [id]: theirs } }] }
-    const moved = { ...detected, spaces: detected.spaces.map((s) => (s.spaceId === id ? { ...s, rect: { ...s.rect, x: 520 } } : s)) }
-    expect(reprojectPending(detected, moved, [id]).viewpoints[0].outlines[id]).toEqual(theirs)
+  it('an outline keeps its own shape and offset from the rect when the rect moves', () => {
+    const draft = gridDraft()
+    const v = draft.viewpoints[0]
+    const nudged = outlineOf({ x: 45, y: 45, w: 90, h: 110 }) // drawn a little inside A-01's rect
+    const before = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'A-01': nudged } }] }
+    const after = { ...before, spaces: before.spaces.map((s) => (s.spaceId === 'A-01' ? { ...s, rect: { ...s.rect, y: 140 } } : s)) }
+    const out = followRects(before, after, ['A-01']).viewpoints[0].outlines['A-01']
+    outlineOf({ x: 45, y: 145, w: 90, h: 110 }).forEach((p, i) => {
+      expect(out[i][0]).toBeCloseTo(p[0], 2)
+      expect(out[i][1]).toBeCloseTo(p[1], 2)
+    })
+  })
+
+  it('moving an outline on the photo moves the rect on the schematic, and the other photos follow', () => {
+    const draft = gridDraft()
+    const v = draft.viewpoints[0]
+    const other = { ...v, viewId: 'V2', name: 'Other' }
+    const before = { ...draft, viewpoints: [v, other] }
+    const after = {
+      ...before,
+      viewpoints: [{ ...v, outlines: { ...v.outlines, 'B-02': outlineOf({ x: 170, y: 270, w: 100, h: 120 }) } }, other],
+    }
+    const { draft: next } = followOutline(before, after, 'V1', 'B-02', null)
+    const rect = next.spaces.find((s) => s.spaceId === 'B-02')!.rect
+    expect(rect.x).toBeCloseTo(170, 0)
+    expect(rect.y).toBeCloseTo(270, 0)
+    expect(next.viewpoints[1].outlines['B-02'][0][0]).toBeCloseTo(outlineOf({ x: 170, y: 270, w: 100, h: 120 })[0][0], 3)
+  })
+
+  it('with snapping, a photo tweak inside the cell leaves the schematic alone; a move to another cell relabels', () => {
+    const draft = gridDraft()
+    const grid = fitGrid(draft.spaces)
+    const v = draft.viewpoints[0]
+    const withOutline = (r: DraftRect) => ({ ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'B-02': outlineOf(r) } }] })
+    expect(followOutline(draft, withOutline({ x: 155, y: 245, w: 100, h: 120 }), 'V1', 'B-02', grid).draft.spaces).toBe(
+      draft.spaces,
+    )
+    const { draft: moved } = followOutline(draft, withOutline({ x: 480, y: 240, w: 100, h: 120 }), 'V1', 'B-02', grid)
+    expect(moved.spaces.find((s) => s.spaceId === 'B-02')).toMatchObject({ label: 'B-05', rect: cellRect(grid, { row: 1, col: 4 }) })
+  })
+
+  it('resizing one side of an outline moves only that side of the rect', () => {
+    const draft = gridDraft()
+    const v = draft.viewpoints[0]
+    const after = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'B-02': outlineOf({ x: 150, y: 240, w: 100, h: 160 }) } }] }
+    const rect = followOutline(draft, after, 'V1', 'B-02', null).draft.spaces.find((s) => s.spaceId === 'B-02')!.rect
+    expect(rect.x).toBeCloseTo(150, 0)
+    expect(rect.y).toBeCloseTo(240, 0)
+    expect(rect.w).toBeCloseTo(100, 0)
+    expect(rect.h).toBeCloseTo(160, 0)
+  })
+
+  it('a first outline does not move the space', () => {
+    const draft = gridDraft()
+    const v = draft.viewpoints[0]
+    const { 'B-02': _, ...rest } = v.outlines
+    const before = { ...draft, viewpoints: [{ ...v, outlines: rest }] }
+    expect(followOutline(before, draft, 'V1', 'B-02', null).draft).toBe(draft)
+  })
+
+  it('a box drawn on the photo with snapping fills its cell and is named for it', () => {
+    const draft = gridDraft()
+    const grid = fitGrid(draft.spaces)
+    const { space: added } = addSpaceFromOutline(draft, 'V1', outlineOf({ x: 485, y: 250, w: 90, h: 100 }), grid)
+    expect(added).toMatchObject({ label: 'B-05', rect: cellRect(grid, { row: 1, col: 4 }) })
+  })
+
+  it('a box across cells on the schematic adds one space per free cell', () => {
+    const draft = gridDraft()
+    const grid = fitGrid(draft.spaces)
+    const cells = [3, 4, 5].map((col) => ({ row: 1, col })) // B-04 (taken), B-05, B-06
+    const { draft: next, spaces } = addSpacesInCells(draft, grid, cells)
+    expect(spaces.map((s) => s.label)).toEqual(['B-05', 'B-06'])
+    expect(next.viewpoints[0].outlineReview[spaces[0].spaceId]).toEqual({ source: 'proposed', status: 'pending' })
   })
 
   it('retiring a space drops its pending proposal', () => {
