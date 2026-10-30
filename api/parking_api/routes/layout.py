@@ -177,14 +177,6 @@ def put_draft(
         for s in body.spaces
     )
     for v in body.viewpoints:
-        existing = stored_views.get(v.view_id)
-        # Keep everything the body does not carry: the reference image fields (set only by
-        # the reference photo endpoints) and the camera fields.
-        base = (
-            existing.model_dump(by_alias=False)
-            if existing
-            else {"lot_id": lot_id, "view_id": v.view_id}
-        )
         edits = {
             "name": v.name,
             "outlines": v.outlines,
@@ -193,7 +185,13 @@ def put_draft(
                 for sid, r in v.outline_review.items()
             },
         }
-        repo.put_viewpoint(Viewpoint.model_validate({**base, **edits}))
+        # Write only what the body carries. The reference image fields (set only by the reference
+        # photo endpoints, possibly while this save runs) and the camera fields stay as stored.
+        if v.view_id in stored_views and repo.update_viewpoint(lot_id, v.view_id, **edits):
+            continue
+        repo.put_viewpoint(
+            Viewpoint.model_validate({"lot_id": lot_id, "view_id": v.view_id, **edits})
+        )
     for space_id in removed:
         repo.delete_space(lot_id, space_id)
 

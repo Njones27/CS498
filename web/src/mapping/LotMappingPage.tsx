@@ -282,7 +282,7 @@ export function LotMappingPage() {
               viewId={viewId}
               onViewChange={setPickedViewId}
               onChange={setDraft}
-              onReferenceUploaded={() => void refreshReferenceImages()}
+              onReferenceUploaded={(uploaded) => void refreshReferenceImages(uploaded)}
               issues={issues}
               onSave={save}
             />

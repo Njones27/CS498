@@ -29,4 +29,3 @@ export function putFile(url: string, file: File, onProgress: (fraction: number) 
     xhr.send(file)
   })
 }
-

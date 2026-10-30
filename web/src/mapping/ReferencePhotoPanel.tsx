@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { api, errorMessage } from '../api/client'
 import { putFile } from '../lib/putFile'
 import { sha256Hex } from '../lib/sha256'
-import { sampleParkingPhoto } from './fixtures/samplePhoto'
 import {
   getSvgPoint,
   orderClockwise,
@@ -21,14 +20,27 @@ import type {
 
 function resolveImageUrl(url: string | null | undefined): string {
   if (!url) return ''
-  if (url.includes('example.com/ref-v1') || url.includes('example.com/ref-v2')) {
-    url = '/api/_test/objects/reference/test-lot/V1/2585ffab2de3.jpg'
-  }
   if (url.startsWith('/api/') || url.startsWith('/_test/')) {
     const base = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '')
     return `${base}${url}`
   }
   return url
+}
+
+/** The object a signed URL points at: the URL without its signature (the query string). */
+function objectOf(url: string | null): string | null {
+  return url?.split('?')[0] ?? null
+}
+
+/** A notice that clears itself after `ms`, so old news does not pile up under the photo. */
+function useTransientNotice(ms: number) {
+  const [notice, setNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (notice === null) return
+    const timer = setTimeout(() => setNotice(null), ms)
+    return () => clearTimeout(timer)
+  }, [notice, ms])
+  return [notice, setNotice] as const
 }
 
 export function ReferencePhotoPanel({
@@ -57,10 +69,24 @@ export function ReferencePhotoPanel({
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [replaceWarning, setReplaceWarning] = useState<string | null>(null)
-  const [statusNotice, setStatusNotice] = useState<string | null>(null)
-  const [photoError, setPhotoError] = useState(false)
-  const [loadedDimensions, setLoadedDimensions] = useState<{ width: number; height: number } | null>(null)
+  const [replaceWarning, setReplaceWarning] = useTransientNotice(8000)
+  const [statusNotice, setStatusNotice] = useTransientNotice(4000)
+
+  // Signed URLs change on every draft GET and PUT, but the photo only changes with its object
+  // (keys are content-addressed). Once a photo has loaded, keep its URL while the object is the
+  // same, so a save neither refetches the photo nor blanks it. Until then, take the newest URL:
+  // it replaces one that failed or expired.
+  const referenceUrl = currentViewpoint?.referenceImage?.url ?? null
+  const [photoSrc, setPhotoSrc] = useState(referenceUrl)
+  const [photoState, setPhotoState] = useState<'loading' | 'loaded' | 'error'>('loading')
+  const [photoAttempt, setPhotoAttempt] = useState(0)
+  if (
+    referenceUrl !== photoSrc &&
+    (photoState !== 'loaded' || objectOf(referenceUrl) !== objectOf(photoSrc))
+  ) {
+    setPhotoSrc(referenceUrl)
+    setPhotoState('loading')
+  }
 
   // Explicit drawing mode state: true when user is placing corners
   const [isDrawing, setIsDrawing] = useState(false)
@@ -81,8 +107,10 @@ export function ReferencePhotoPanel({
     (currentViewpoint && selectedSpaceId && currentViewpoint.outlineReview?.[selectedSpaceId]) || null
   const isSelectedProposedPending = selectedReview?.status === 'pending'
 
-  const svgWidth = currentViewpoint?.referenceImage?.width || loadedDimensions?.width || 1000
-  const svgHeight = currentViewpoint?.referenceImage?.height || loadedDimensions?.height || 750
+  // The server reads the size from the photo itself, so it matches the picture. Every upload and
+  // seeded viewpoint records one; the fallback only covers a viewpoint stored without it.
+  const svgWidth = currentViewpoint?.referenceImage?.width ?? 1000
+  const svgHeight = currentViewpoint?.referenceImage?.height ?? 750
 
   // When selected space or viewpoint changes, reset clicks and set drawing mode accordingly
   useEffect(() => {
@@ -94,22 +122,12 @@ export function ReferencePhotoPanel({
     }
   }, [selectedSpaceId, currentViewId, selectedOutline === null])
 
-  useEffect(() => {
-    setPhotoError(false)
-    if (currentViewpoint?.referenceImage?.width && currentViewpoint?.referenceImage?.height) {
-      setLoadedDimensions({
-        width: currentViewpoint.referenceImage.width,
-        height: currentViewpoint.referenceImage.height,
-      })
-    } else {
-      setLoadedDimensions(null)
-    }
-  }, [
-    currentViewId,
-    currentViewpoint?.referenceImage?.url,
-    currentViewpoint?.referenceImage?.width,
-    currentViewpoint?.referenceImage?.height,
-  ])
+  // US-08 #3 "the change is saved to the draft": an outline change (drawn, dragged, deleted,
+  // accepted or rejected) is saved as soon as it is made, not left for Save or autosave.
+  const commitOutlines = (next: DraftLayout) => {
+    onChange(next)
+    void onSave?.()
+  }
 
   // Keyboard shortcuts:
   // - Esc: cancel clicks, exit drawing mode, or deselect space
@@ -139,8 +157,11 @@ export function ReferencePhotoPanel({
         }
       }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    // Capture phase: this runs before the page's own Ctrl+Z (draft undo) on window, whatever order
+    // the two were registered in, so stopImmediatePropagation keeps one key press from undoing a
+    // corner and a draft edit.
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [clicks.length, isDrawing, selectedOutline, selectedSpaceId, onSelectSpace])
 
   // Global pointer listeners for dragging corner handles
@@ -166,7 +187,9 @@ export function ReferencePhotoPanel({
         const nextVps = draft.viewpoints.map((v) =>
           v.viewId === currentViewpoint.viewId ? { ...v, outlines: nextOutlines } : v,
         )
+        // commitOutlines, spelled out so this effect's dependencies stay listed
         onChange({ ...draft, viewpoints: nextVps })
+        void onSave?.()
       }
       draggingIdxRef.current = null
       dragCornersRef.current = null
@@ -185,7 +208,7 @@ export function ReferencePhotoPanel({
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [draggingIdx, currentViewpoint, selectedSpaceId, draft, onChange, svgWidth, svgHeight])
+  }, [draggingIdx, currentViewpoint, selectedSpaceId, draft, onChange, onSave, svgWidth, svgHeight])
 
   const handleAddViewpoint = (e: React.FormEvent) => {
     e.preventDefault()
@@ -218,9 +241,10 @@ export function ReferencePhotoPanel({
     setIsAddingViewpoint(false)
     onChange(nextDraft)
     onViewChange(nextViewId)
-    if (onSave) {
-      void onSave()
-    }
+    void onSave?.().then((saved) => {
+      // Viewpoints cannot be removed once saved, and a photo upload needs the viewpoint stored.
+      if (!saved) setErrorMsg(`${name} (${nextViewId}) is not saved yet. Save the draft to keep it.`)
+    })
   }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -261,47 +285,32 @@ export function ReferencePhotoPanel({
       // 2. PUT file with progress
       await putFile(slot.uploadUrl, file, (fraction) => setUploadProgress(fraction))
 
-      // 3. Read image dimensions
-      const dims = await new Promise<{ width: number; height: number }>((resolve, reject) => {
-        const img = new Image()
-        const url = URL.createObjectURL(file)
-        img.onload = () => {
-          URL.revokeObjectURL(url)
-          resolve({ width: img.naturalWidth || 1000, height: img.naturalHeight || 750 })
-        }
-        img.onerror = () => {
-          URL.revokeObjectURL(url)
-          reject(new Error('Failed to read image dimensions'))
-        }
-        img.src = url
-      })
-
-      // 4. Complete upload
-      const res = await api.post<ReferenceCompleteResponse>(
+      // 3. Complete upload; the server reads the photo's size from the file
+      const completed = await api.post<ReferenceCompleteResponse>(
         `/admin/lots/${lotId}/views/${currentViewpoint.viewId}/reference/complete`,
-        { sha256, width: dims.width, height: dims.height },
+        { sha256 },
       )
 
       if (hadPreviousImage) {
         setReplaceWarning('Check outlines: the photo changed.')
       }
 
-      setPhotoError(false)
-      setLoadedDimensions(dims)
-      const nextVps = draft.viewpoints.map((v) =>
-        v.viewId === currentViewpoint.viewId
-          ? { ...v, referenceImage: res.referenceImage }
-          : v,
-      )
-      onChange({ ...draft, viewpoints: nextVps })
-
-      onReferenceUploaded()
+      // The page applies the stored photo to its latest draft and refetches the rest. Do not rebuild
+      // the draft here: `draft` is from before the save above, so its revision is stale by now.
+      onReferenceUploaded({ lotId, viewId: completed.viewId, referenceImage: completed.referenceImage })
     } catch (err) {
       setErrorMsg(errorMessage(err))
     } finally {
       setIsUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
+  }
+
+  const handleReloadPhoto = () => {
+    // Remount the image to retry, and fetch fresh signed URLs: an expired one gets a 403.
+    setPhotoState('loading')
+    setPhotoAttempt((n) => n + 1)
+    onReferenceUploaded()
   }
 
   const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -340,7 +349,7 @@ export function ReferencePhotoPanel({
       setClicks([])
       setIsDrawing(false)
       setStatusNotice(`${selectedSpace.label} outlined in ${currentViewpoint.viewId}`)
-      onChange({ ...draft, viewpoints: nextVps })
+      commitOutlines({ ...draft, viewpoints: nextVps })
     }
   }
 
@@ -357,7 +366,7 @@ export function ReferencePhotoPanel({
         ? { ...v, outlines: remOutlines, outlineReview: remReview }
         : v,
     )
-    onChange({ ...draft, viewpoints: nextVps })
+    commitOutlines({ ...draft, viewpoints: nextVps })
     const sp = draft.spaces.find((s) => s.spaceId === spaceId)
     setStatusNotice(`Removed outline for ${sp?.label ?? spaceId}`)
   }
@@ -371,7 +380,7 @@ export function ReferencePhotoPanel({
     const nextVps = draft.viewpoints.map((v) =>
       v.viewId === currentViewpoint.viewId ? { ...v, outlineReview: nextReview } : v,
     )
-    onChange({ ...draft, viewpoints: nextVps })
+    commitOutlines({ ...draft, viewpoints: nextVps })
     const sp = draft.spaces.find((s) => s.spaceId === spaceId)
     setStatusNotice(`Accepted proposed outline for ${sp?.label ?? spaceId}`)
   }
@@ -389,7 +398,7 @@ export function ReferencePhotoPanel({
     const nextVps = draft.viewpoints.map((v) =>
       v.viewId === currentViewpoint.viewId ? { ...v, outlineReview: nextReview } : v,
     )
-    onChange({ ...draft, viewpoints: nextVps })
+    commitOutlines({ ...draft, viewpoints: nextVps })
     const sp = draft.spaces.find((s) => s.spaceId === spaceId)
     setStatusNotice(`Marked outline for ${sp?.label ?? spaceId} as proposed for review`)
   }
@@ -408,7 +417,7 @@ export function ReferencePhotoPanel({
     const nextVps = draft.viewpoints.map((v) =>
       v.viewId === currentViewpoint.viewId ? { ...v, outlineReview: nextReview } : v,
     )
-    onChange({ ...draft, viewpoints: nextVps })
+    commitOutlines({ ...draft, viewpoints: nextVps })
     setStatusNotice(`Accepted ${count} proposed outline${count === 1 ? '' : 's'} in ${currentViewpoint.viewId}`)
   }
 
@@ -417,7 +426,8 @@ export function ReferencePhotoPanel({
     (r) => r.status === 'pending',
   ).length
   const activeSpaces = draft.spaces.filter((s) => !s.retired)
-  const missingCount = Math.max(0, activeSpaces.length - outlinedCount)
+  // Counted per space: an outline kept on a retired space does not stand in for an active one.
+  const missingCount = activeSpaces.filter((s) => !currentViewpoint?.outlines[s.spaceId]).length
 
   // Find next unmapped space for streamlined sequence progression
   const nextUnmappedSpace =
@@ -425,6 +435,38 @@ export function ReferencePhotoPanel({
 
   // When user is actively placing points or in drawing mode, existing polygons MUST NOT intercept clicks!
   const isActivelyDrawing = isDrawing || clicks.length > 0
+
+  // Nothing produces proposed outlines yet (HDD §4.6, wave 3), so "Propose" is a test hook for the
+  // review flow. A production build leaves it out: a pending outline blocks publishing.
+  const canProposeOutlines = import.meta.env.DEV
+
+  const notices = (
+    <>
+      {errorMsg && (
+        <p className="notice notice--error" role="alert">
+          {errorMsg}
+        </p>
+      )}
+      {replaceWarning && (
+        <p className="notice notice--warn" role="status">
+          {replaceWarning}
+        </p>
+      )}
+      {statusNotice && (
+        <p className="notice notice--ok" role="status">
+          {statusNotice}
+        </p>
+      )}
+      {isUploading && (
+        <div className="notice" role="status">
+          <p className="hint">
+            Uploading reference photo… {Math.round(uploadProgress * 100)}%
+          </p>
+          <progress className="progress" value={uploadProgress} max={1} />
+        </div>
+      )}
+    </>
+  )
 
   return (
     <section className="mapping-panel ref-panel" aria-label="Reference photo">
@@ -535,31 +577,8 @@ export function ReferencePhotoPanel({
         </div>
       )}
 
-      {/* Notices and warnings */}
-      {errorMsg && (
-        <p className="notice notice--error" role="alert">
-          {errorMsg}
-        </p>
-      )}
-      {replaceWarning && (
-        <p className="notice notice--warn" role="status">
-          {replaceWarning}
-        </p>
-      )}
-      {statusNotice && (
-        <p className="notice notice--ok" role="status">
-          {statusNotice}
-        </p>
-      )}
-
-      {isUploading && (
-        <div className="notice" role="status">
-          <p className="hint">
-            Uploading reference photo… {Math.round(uploadProgress * 100)}%
-          </p>
-          <progress className="progress" value={uploadProgress} max={1} />
-        </div>
-      )}
+      {/* With a photo, the notices sit under it (see ref-panel__status) */}
+      {!currentViewpoint?.referenceImage && notices}
 
       {!currentViewpoint && (
         <p className="notice" role="status">
@@ -582,246 +601,19 @@ export function ReferencePhotoPanel({
 
       {currentViewpoint && currentViewpoint.referenceImage && (
         <div className="ref-panel__body">
-          {/* Outlining prompt / actions banner with sequence progression and undo/fix controls */}
-          {selectedSpace && !selectedSpace.retired && (
-            <>
-              {/* State A: In progress clicking 4 corners */}
-              {clicks.length > 0 && (
-                <div className="notice ref-prompt" data-testid="outline-prompt" role="status">
-                  <div className="ref-prompt__msg">
-                    <span>Click the 4 corners of {selectedSpace.label} ({clicks.length} of 4)</span>
-                    <span className="ref-prompt__hint">
-                      · Press <strong>Backspace</strong> to undo · <strong>Esc</strong> to cancel
-                    </span>
-                  </div>
-                  <div className="ref-prompt__actions">
-                    <button
-                      type="button"
-                      className="button button--ghost button--sm"
-                      onClick={handleUndoPoint}
-                      title="Undo last placed corner (Backspace)"
-                      data-testid="undo-corner-btn"
-                    >
-                      ↶ Undo point
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--ghost button--sm"
-                      onClick={() => {
-                        setClicks([])
-                        if (selectedOutline) setIsDrawing(false)
-                      }}
-                      title="Cancel outlining (Esc)"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--ghost button--sm"
-                      onClick={() => {
-                        setClicks([])
-                        setIsDrawing(false)
-                        onSelectSpace(null)
-                      }}
-                      title="Done outlining; deselect space"
-                      data-testid="done-drawing-btn"
-                    >
-                      Done
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* State B: In drawing/redraw mode, waiting for 1st click */}
-              {clicks.length === 0 && isDrawing && (
-                <div className="notice ref-prompt" data-testid="outline-prompt" role="status">
-                  <div className="ref-prompt__msg">
-                    <span>Click the 4 corners of {selectedSpace.label} (0 of 4)</span>
-                    {selectedOutline && (
-                      <span className="ref-prompt__hint">
-                        · Redrawing outline · Existing outline will be replaced
-                      </span>
-                    )}
-                  </div>
-                  <div className="ref-prompt__actions">
-                    {selectedOutline && (
-                      <button
-                        type="button"
-                        className="button button--ghost button--sm"
-                        onClick={() => setIsDrawing(false)}
-                      >
-                        Cancel redraw
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="button button--ghost button--sm"
-                      onClick={() => {
-                        setIsDrawing(false)
-                        setClicks([])
-                        onSelectSpace(null)
-                      }}
-                      title="Done outlining; deselect space"
-                      data-testid="done-drawing-btn"
-                    >
-                      Done
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* State C: Space has a proposed outline pending review */}
-              {clicks.length === 0 && !isDrawing && isSelectedProposedPending && selectedOutline && (
-                <div className="notice notice--warn ref-prompt" data-testid="proposed-prompt" role="status">
-                  <div className="ref-prompt__msg">
-                    Proposed outline for <strong>{selectedSpace.label}</strong> in {currentViewpoint.viewId}{' '}
-                    <span className="ref-prompt__hint">(Pending review)</span>
-                  </div>
-                  <div className="ref-prompt__actions">
-                    <button
-                      type="button"
-                      className="button button--primary button--sm"
-                      onClick={() => handleAcceptProposal(selectedSpace.spaceId)}
-                      data-testid="accept-proposal-btn"
-                    >
-                      ✓ Accept proposal
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--ghost button--sm"
-                      onClick={() => handleRejectProposal(selectedSpace.spaceId)}
-                      data-testid="reject-proposal-btn"
-                    >
-                      ✕ Reject
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--ghost button--sm"
-                      onClick={() => {
-                        setIsDrawing(true)
-                        setClicks([])
-                      }}
-                    >
-                      Redraw
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--ghost button--sm"
-                      onClick={() => {
-                        setIsDrawing(false)
-                        setClicks([])
-                        onSelectSpace(null)
-                      }}
-                      title="Done; deselect space"
-                      data-testid="done-drawing-btn"
-                    >
-                      Done
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* State D: Space has an accepted outline */}
-              {clicks.length === 0 && !isDrawing && !isSelectedProposedPending && selectedOutline && (
-                <div className="notice notice--ok ref-prompt" data-testid="outline-prompt" role="status">
-                  <div className="ref-prompt__msg">
-                    <strong>{selectedSpace.label}</strong> outlined in {currentViewpoint.viewId}
-                  </div>
-                  <div className="ref-prompt__actions">
-                    {nextUnmappedSpace && (
-                      <button
-                        type="button"
-                        className="button button--primary button--sm"
-                        onClick={() => onSelectSpace(nextUnmappedSpace.spaceId)}
-                        title={`Outline next space: ${nextUnmappedSpace.label}`}
-                      >
-                        Next space: {nextUnmappedSpace.label} →
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="button button--ghost button--sm"
-                      onClick={() => {
-                        setIsDrawing(true)
-                        setClicks([])
-                      }}
-                      title="Click 4 new points on the photo to redraw"
-                    >
-                      Redraw
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--ghost button--sm"
-                      onClick={() => handleProposeOutline(selectedSpace.spaceId)}
-                      title="Mark outline as proposed for testing review workflow"
-                    >
-                      Propose
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--ghost button--sm"
-                      onClick={() => handleDeleteOutline(selectedSpace.spaceId)}
-                    >
-                      Delete outline
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--ghost button--sm"
-                      onClick={() => {
-                        setIsDrawing(false)
-                        setClicks([])
-                        onSelectSpace(null)
-                      }}
-                      title="Done; deselect space"
-                      data-testid="done-drawing-btn"
-                    >
-                      Done
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {!selectedSpace && (
-            <div className="notice ref-prompt" role="status">
-              <span>Select a space from the table or photo below to outline it.</span>
-              {nextUnmappedSpace && (
-                <button
-                  type="button"
-                  className="button button--primary button--sm"
-                  onClick={() => onSelectSpace(nextUnmappedSpace.spaceId)}
-                >
-                  Outline {nextUnmappedSpace.label} →
-                </button>
-              )}
-            </div>
-          )}
-
           {/* Photo viewer with SVG overlay */}
           <div
             className="photo-view"
             style={{ aspectRatio: `${svgWidth} / ${svgHeight}` }}
           >
             <img
-              key={currentViewpoint.referenceImage.url}
-              src={
-                photoError
-                  ? sampleParkingPhoto
-                  : resolveImageUrl(currentViewpoint.referenceImage.url)
-              }
+              key={photoAttempt}
+              src={resolveImageUrl(photoSrc)}
               alt={`Reference for ${currentViewpoint.name}`}
               className="photo-view__img"
               style={{ aspectRatio: `${svgWidth} / ${svgHeight}`, objectFit: 'contain' }}
-              onLoad={(e) => {
-                if (e.currentTarget.naturalWidth > 0 && e.currentTarget.naturalHeight > 0) {
-                  setLoadedDimensions({
-                    width: e.currentTarget.naturalWidth,
-                    height: e.currentTarget.naturalHeight,
-                  })
-                }
-              }}
-              onError={() => setPhotoError(true)}
+              onLoad={() => setPhotoState('loaded')}
+              onError={() => setPhotoState('error')}
             />
             <svg
               ref={svgRef}
@@ -1011,6 +803,242 @@ export function ReferencePhotoPanel({
                 </g>
               )}
             </svg>
+            {photoState === 'loading' && (
+              <p className="photo-view__loading" role="status">
+                Loading photo…
+              </p>
+            )}
+            {photoState === 'error' && (
+              <div className="photo-view__error" role="alert">
+                <p>The reference photo did not load. Its link may have expired.</p>
+                <button type="button" className="button button--primary button--sm" onClick={handleReloadPhoto}>
+                  Reload photo
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Everything that changes while outlining sits under the photo, so the photo never
+              moves between the corners an admin aims at. */}
+          <div className="ref-panel__status">
+            {/* Outlining prompt / actions banner with sequence progression and undo/fix controls */}
+            {selectedSpace && !selectedSpace.retired && (
+              <>
+                {/* State A: In progress clicking 4 corners */}
+                {clicks.length > 0 && (
+                  <div className="notice ref-prompt" data-testid="outline-prompt" role="status">
+                    <div className="ref-prompt__msg">
+                      <span>Click the 4 corners of {selectedSpace.label} ({clicks.length} of 4)</span>
+                      <span className="ref-prompt__hint">
+                        · Press <strong>Backspace</strong> to undo · <strong>Esc</strong> to cancel
+                      </span>
+                    </div>
+                    <div className="ref-prompt__actions">
+                      <button
+                        type="button"
+                        className="button button--ghost button--sm"
+                        onClick={handleUndoPoint}
+                        title="Undo last placed corner (Backspace)"
+                        data-testid="undo-corner-btn"
+                      >
+                        ↶ Undo point
+                      </button>
+                      <button
+                        type="button"
+                        className="button button--ghost button--sm"
+                        onClick={() => {
+                          setClicks([])
+                          if (selectedOutline) setIsDrawing(false)
+                        }}
+                        title="Cancel outlining (Esc)"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="button button--ghost button--sm"
+                        onClick={() => {
+                          setClicks([])
+                          setIsDrawing(false)
+                          onSelectSpace(null)
+                        }}
+                        title="Done outlining; deselect space"
+                        data-testid="done-drawing-btn"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* State B: In drawing/redraw mode, waiting for 1st click */}
+                {clicks.length === 0 && isDrawing && (
+                  <div className="notice ref-prompt" data-testid="outline-prompt" role="status">
+                    <div className="ref-prompt__msg">
+                      <span>Click the 4 corners of {selectedSpace.label} (0 of 4)</span>
+                      {selectedOutline && (
+                        <span className="ref-prompt__hint">
+                          · Redrawing outline · Existing outline will be replaced
+                        </span>
+                      )}
+                    </div>
+                    <div className="ref-prompt__actions">
+                      {selectedOutline && (
+                        <button
+                          type="button"
+                          className="button button--ghost button--sm"
+                          onClick={() => setIsDrawing(false)}
+                        >
+                          Cancel redraw
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="button button--ghost button--sm"
+                        onClick={() => {
+                          setIsDrawing(false)
+                          setClicks([])
+                          onSelectSpace(null)
+                        }}
+                        title="Done outlining; deselect space"
+                        data-testid="done-drawing-btn"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* State C: Space has a proposed outline pending review */}
+                {clicks.length === 0 && !isDrawing && isSelectedProposedPending && selectedOutline && (
+                  <div className="notice notice--warn ref-prompt" data-testid="proposed-prompt" role="status">
+                    <div className="ref-prompt__msg">
+                      Proposed outline for <strong>{selectedSpace.label}</strong> in {currentViewpoint.viewId}{' '}
+                      <span className="ref-prompt__hint">(Pending review)</span>
+                    </div>
+                    <div className="ref-prompt__actions">
+                      <button
+                        type="button"
+                        className="button button--primary button--sm"
+                        onClick={() => handleAcceptProposal(selectedSpace.spaceId)}
+                        data-testid="accept-proposal-btn"
+                      >
+                        ✓ Accept proposal
+                      </button>
+                      <button
+                        type="button"
+                        className="button button--ghost button--sm"
+                        onClick={() => handleRejectProposal(selectedSpace.spaceId)}
+                        data-testid="reject-proposal-btn"
+                      >
+                        ✕ Reject
+                      </button>
+                      <button
+                        type="button"
+                        className="button button--ghost button--sm"
+                        onClick={() => {
+                          setIsDrawing(true)
+                          setClicks([])
+                        }}
+                      >
+                        Redraw
+                      </button>
+                      <button
+                        type="button"
+                        className="button button--ghost button--sm"
+                        onClick={() => {
+                          setIsDrawing(false)
+                          setClicks([])
+                          onSelectSpace(null)
+                        }}
+                        title="Done; deselect space"
+                        data-testid="done-drawing-btn"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* State D: Space has an accepted outline */}
+                {clicks.length === 0 && !isDrawing && !isSelectedProposedPending && selectedOutline && (
+                  <div className="notice notice--ok ref-prompt" data-testid="outline-prompt" role="status">
+                    <div className="ref-prompt__msg">
+                      <strong>{selectedSpace.label}</strong> outlined in {currentViewpoint.viewId}
+                    </div>
+                    <div className="ref-prompt__actions">
+                      {nextUnmappedSpace && (
+                        <button
+                          type="button"
+                          className="button button--primary button--sm"
+                          onClick={() => onSelectSpace(nextUnmappedSpace.spaceId)}
+                          title={`Outline next space: ${nextUnmappedSpace.label}`}
+                        >
+                          Next space: {nextUnmappedSpace.label} →
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="button button--ghost button--sm"
+                        onClick={() => {
+                          setIsDrawing(true)
+                          setClicks([])
+                        }}
+                        title="Click 4 new points on the photo to redraw"
+                      >
+                        Redraw
+                      </button>
+                      {canProposeOutlines && (
+                        <button
+                          type="button"
+                          className="button button--ghost button--sm"
+                          onClick={() => handleProposeOutline(selectedSpace.spaceId)}
+                          title="Mark outline as proposed for testing review workflow"
+                        >
+                          Propose
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="button button--ghost button--sm"
+                        onClick={() => handleDeleteOutline(selectedSpace.spaceId)}
+                      >
+                        Delete outline
+                      </button>
+                      <button
+                        type="button"
+                        className="button button--ghost button--sm"
+                        onClick={() => {
+                          setIsDrawing(false)
+                          setClicks([])
+                          onSelectSpace(null)
+                        }}
+                        title="Done; deselect space"
+                        data-testid="done-drawing-btn"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {!selectedSpace && (
+              <div className="notice ref-prompt" role="status">
+                <span>Select a space on the photo or in the table to outline it.</span>
+                {nextUnmappedSpace && (
+                  <button
+                    type="button"
+                    className="button button--primary button--sm"
+                    onClick={() => onSelectSpace(nextUnmappedSpace.spaceId)}
+                  >
+                    Outline {nextUnmappedSpace.label} →
+                  </button>
+                )}
+              </div>
+            )}
+            {notices}
           </div>
 
           {/* Counts summary matching SnapshotPhotoPage and LotMapPage */}
