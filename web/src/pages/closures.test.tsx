@@ -2,7 +2,8 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ClosureOut } from '../api/closures'
-import type { LotDetail, LotListItem, LotStatusOut } from '../api/schemas'
+import type { AdminLotOut } from '../api/lotsAdmin'
+import type { LotDetail, LotStatusOut } from '../api/schemas'
 import { closureWindow, compactLabels } from '../lib/closures'
 import { ADMIN, mockFetch, renderApp } from '../test/helpers'
 
@@ -24,6 +25,13 @@ const detail: LotDetail = {
     })),
   },
 }
+
+const adminLot = (lotId: string, name: string, published = true): AdminLotOut => ({
+  lotId, name, location: 'x', staleAfterMinutes: 30, published, layoutVersion: published ? 1 : null,
+  createdAt: '2026-10-01T12:00:00Z',
+})
+const TEST_LOT = adminLot('test-lot', 'Test Lot')
+const NORTH_LOT = adminLot('north-lot', 'North Lot', false)
 
 const status: LotStatusOut = {
   lotId: 'test-lot',
@@ -75,6 +83,7 @@ afterEach(() => {
 
 async function setup(routes: Parameters<typeof mockFetch>[0] = {}, closures: ClosureOut[] = [scheduled, ended]) {
   const fetchMock = mockFetch({
+    'GET /admin/lots': { body: [TEST_LOT] },
     'GET /lots/test-lot': { body: detail },
     'GET /lots/test-lot/status': { body: status },
     [`GET ${URL}`]: { body: closures },
@@ -146,21 +155,35 @@ describe('closures list', () => {
 
   it('falls back to the first published lot when none is remembered', async () => {
     localStorage.clear()
-    const lots: LotListItem[] = [
-      {
-        lotId: 'test-lot', name: 'Test Lot', location: 'x', staleAfterMinutes: 30, layoutVersion: 1,
-        summary: { free: 0, occupied: 0, unknown: 0, closed: 0, total: 0, openPercent: null, hasRecentData: false, isStale: false },
-      },
-    ]
-    await setup({ 'GET /lots': { body: lots } })
+    await setup({ 'GET /admin/lots': { body: [NORTH_LOT, TEST_LOT] } })
     expect(await screen.findByRole('heading', { name: 'Closures: Test Lot' })).toBeInTheDocument()
+  })
+
+  it('follows the picker, not a remembered lot that no longer exists', async () => {
+    localStorage.setItem('parking.admin.lotId', 'deleted-lot')
+    const { fetchMock } = await setup()
+    expect(screen.getByRole('heading', { name: 'Closures: Test Lot' })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('deleted-lot'))).toBe(false)
+  })
+
+  it('an unpublished lot says to publish it first instead of failing to load', async () => {
+    localStorage.setItem('parking.admin.lotId', 'north-lot')
+    const fetchMock = mockFetch({ 'GET /admin/lots': { body: [NORTH_LOT, TEST_LOT] } })
+    renderApp('/admin/closures', ADMIN)
+    expect(await screen.findByText(/Publish the lot before closing spaces/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Closures: North Lot' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open the map editor' })).toHaveAttribute('href', '/admin/lots/north-lot/map')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Close spaces…' })).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('north-lot'))).toBe(false)
   })
 
   it('says "No lots yet" when there are no lots', async () => {
     localStorage.clear()
-    mockFetch({ 'GET /lots': { body: [] } })
+    mockFetch({ 'GET /admin/lots': { body: [] } })
     renderApp('/admin/closures', ADMIN)
-    expect(await screen.findByText('No lots yet')).toBeInTheDocument()
+    expect(await within(screen.getByRole('main')).findByText('No lots yet')).toBeInTheDocument()
   })
 })
 

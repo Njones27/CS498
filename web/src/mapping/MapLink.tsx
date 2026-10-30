@@ -1,30 +1,13 @@
-import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '../api/client'
-import type { LotListItem } from '../api/schemas'
-import { useFetch } from '../lib/useFetch'
-import { ADMIN_LOT_KEY } from '../admin/adminLot'
+import { useAdminLot } from '../admin/AdminLotContext'
 
-function rememberedLot(): string {
-  try {
-    return localStorage.getItem(ADMIN_LOT_KEY) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-/** Admin home "Map" link: the picked lot (`parking.admin.lotId`), else the first lot (brief §8.1). */
+/** Admin home "Map" link: the picked lot's mapping page (brief §8.1). */
 export function MapLink() {
-  const [storedLotId] = useState(rememberedLot)
-  const lots = useFetch<LotListItem[] | null>(
-    () => (storedLotId ? Promise.resolve(null) : api.get<LotListItem[]>('/lots')),
-    `map-link-lots:${storedLotId}`,
-  )
-  const lotId = storedLotId || lots.data?.[0]?.lotId || ''
+  const { lotId, lots } = useAdminLot()
   if (!lotId) {
     return (
       <span className="admin-link admin-link--disabled" aria-disabled="true">
-        Map {!lots.loading && <span className="muted">(no lots yet)</span>}
+        Map {lots && <span className="muted">(no lots yet)</span>}
       </span>
     )
   }
