@@ -1,0 +1,914 @@
+<!doctype html>
+<!--
+  Pilot photo labeler: open a drone photo and its PKLot-format .xml (written by
+  eval/prefill_labels.py), click each stall to mark it occupied / empty / unset, and save the
+  .xml back. Unset stalls carry no `occupied` attribute, so eval/benchmark.py does not score
+  them. One self-contained file: no build step, no network (its CSP allows none), works
+  from file://.
+
+  Only the `occupied` attribute of each <space> is changed; ids, rotatedRect and contours are
+  written back as they were read. Self-test (used by tests/eval/test_label_html.py):
+  open label.html#selftest; the result is JSON in <pre id="selftest-result">.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src blob: data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pilot Labeler</title>
+<style>
+  :root {
+    --bg: #f4f4f2;
+    --panel: #ffffff;
+    --text: #1d1d1b;
+    --muted: #6b6b66;
+    --border: #d8d8d2;
+    --accent: #2b5fd9;
+    --accent-text: #ffffff;
+    --warn-bg: #fff4d6;
+    --warn-text: #6b4e00;
+    --error-bg: #fde3e1;
+    --error-text: #8a1c12;
+    --occupied: #e0321f;
+    --empty: #1f9d4a;
+    --unset: #f2c200;
+    --stage: #2a2a28;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161615;
+      --panel: #222220;
+      --text: #ecece8;
+      --muted: #9d9d97;
+      --border: #3a3a37;
+      --accent: #6d95f2;
+      --accent-text: #0d0d0c;
+      --warn-bg: #3d3214;
+      --warn-text: #f5d98a;
+      --error-bg: #46201c;
+      --error-text: #f7b3ab;
+      --stage: #0e0e0d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161615;
+    --panel: #222220;
+    --text: #ecece8;
+    --muted: #9d9d97;
+    --border: #3a3a37;
+    --accent: #6d95f2;
+    --accent-text: #0d0d0c;
+    --warn-bg: #3d3214;
+    --warn-text: #f5d98a;
+    --error-bg: #46201c;
+    --error-text: #f7b3ab;
+    --stage: #0e0e0d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  .bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .bar .spacer { flex: 1; }
+  button, .button, select {
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button[aria-pressed="true"] { border-color: var(--accent); }
+  .primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  select { max-width: 260px; }
+  .counts { display: flex; gap: 12px; font-variant-numeric: tabular-nums; }
+  .count::before {
+    content: "";
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 5px;
+    border-radius: 2px;
+    vertical-align: -1px;
+  }
+  .count.occupied::before { background: var(--occupied); }
+  .count.empty::before { background: var(--empty); }
+  .count.unset::before { border: 2px dashed var(--unset); }
+  .count.total::before { display: none; }
+  .count b { font-weight: 600; }
+  #messages:empty { display: none; }
+  #messages { padding: 6px 16px; display: flex; flex-direction: column; gap: 4px; }
+  .msg { padding: 4px 10px; border-radius: 6px; }
+  .msg.warn { background: var(--warn-bg); color: var(--warn-text); }
+  .msg.error { background: var(--error-bg); color: var(--error-text); }
+  #stage { flex: 1; overflow: auto; background: var(--stage); position: relative; min-height: 0; }
+  #stage.dragging { outline: 3px dashed var(--accent); outline-offset: -6px; }
+  .empty-state {
+    color: #d8d8d2;
+    max-width: 520px;
+    margin: 64px auto;
+    padding: 0 16px;
+    text-align: center;
+  }
+  .empty-state code { background: rgba(255, 255, 255, 0.1); padding: 1px 4px; border-radius: 3px; }
+  #overlay { display: block; margin: 0 auto; }
+  #overlay.fit { width: 100%; height: calc(100vh - 110px); }
+  .stall {
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+    cursor: pointer;
+  }
+  .stall.occupied { fill: var(--occupied); fill-opacity: 0.35; stroke: var(--occupied); }
+  .stall.empty { fill: var(--empty); fill-opacity: 0.35; stroke: var(--empty); }
+  .stall.unset { fill: transparent; stroke: var(--unset); stroke-dasharray: 6 4; }
+  .stall:hover { stroke-width: 4px; }
+  .label {
+    fill: #ffffff;
+    stroke: #000000;
+    stroke-width: 3px;
+    paint-order: stroke;
+    vector-effect: non-scaling-stroke;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+    font-family: system-ui, sans-serif;
+  }
+  #overlay.hide-outlines .outlines, #overlay.hide-outlines .labels,
+  #overlay.hide-labels .labels { display: none; }
+  .help {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .help[hidden], svg[hidden] { display: none; }
+  .help-card {
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 16px 20px;
+    max-width: 480px;
+    width: 100%;
+    max-height: 100%;
+    overflow: auto;
+  }
+  .help-card h2 { margin: 0 0 8px; font-size: 16px; }
+  .help-card table { border-collapse: collapse; width: 100%; }
+  .help-card td { padding: 3px 0; vertical-align: top; }
+  .help-card td:first-child { white-space: nowrap; padding-right: 16px; }
+  kbd {
+    font: 12px ui-monospace, Menlo, monospace;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 0 4px;
+  }
+  .help-card p { color: var(--muted); margin: 10px 0 0; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <label class="button primary" title="Open .jpg and .xml files">Open files
+    <input id="files" type="file" multiple accept=".jpg,.jpeg,.xml" hidden>
+  </label>
+  <button id="prev" title="Previous photo (p)" disabled>&lsaquo;</button>
+  <select id="pair-select" aria-label="Photo" disabled></select>
+  <button id="next" title="Next photo (n)" disabled>&rsaquo;</button>
+  <div id="counts" class="counts" aria-live="polite"></div>
+  <span class="spacer"></span>
+  <button id="toggle-labels" aria-pressed="true" title="Stall ids (l)">Ids</button>
+  <button id="toggle-zoom" aria-pressed="false" title="Fit / 100% (z)">100%</button>
+  <button id="save" class="primary" title="Save .xml (Ctrl/Cmd+S)" disabled>Save .xml</button>
+  <button id="help-button" title="Keyboard help (?)">?</button>
+</header>
+<div id="messages"></div>
+<main id="stage">
+  <div id="empty-state" class="empty-state">
+    <p>Drop a folder's <code>.jpg</code> and <code>.xml</code> files here, or use
+      <b>Open files</b>. Photos and labels are paired by name
+      (<code>DJI_0001.JPG</code> with <code>DJI_0001.xml</code>).</p>
+    <p>Click a stall to cycle unset &rarr; occupied &rarr; empty. Press <kbd>?</kbd> for keys.</p>
+  </div>
+  <svg id="overlay" class="fit" xmlns="http://www.w3.org/2000/svg" hidden></svg>
+</main>
+<div id="help" class="help" hidden>
+  <div class="help-card" role="dialog" aria-label="Keyboard help">
+    <h2>Keys</h2>
+    <table>
+      <tr><td>click</td><td>cycle unset &rarr; occupied &rarr; empty</td></tr>
+      <tr><td><kbd>o</kbd> / <kbd>1</kbd></td><td>stall under the mouse: occupied</td></tr>
+      <tr><td><kbd>e</kbd> / <kbd>0</kbd></td><td>stall under the mouse: empty</td></tr>
+      <tr><td><kbd>u</kbd> / <kbd>Backspace</kbd></td><td>stall under the mouse: unset (not scored)</td></tr>
+      <tr><td><kbd>Shift</kbd>+<kbd>E</kbd></td><td>every unset stall: empty</td></tr>
+      <tr><td><kbd>Shift</kbd>+<kbd>O</kbd></td><td>every unset stall: occupied</td></tr>
+      <tr><td><kbd>h</kbd></td><td>hide / show outlines</td></tr>
+      <tr><td><kbd>l</kbd></td><td>hide / show stall ids</td></tr>
+      <tr><td><kbd>z</kbd></td><td>fit / 100% zoom</td></tr>
+      <tr><td><kbd>n</kbd> / <kbd>p</kbd></td><td>next / previous photo</td></tr>
+      <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>S</kbd></td><td>save this photo's .xml</td></tr>
+      <tr><td><kbd>?</kbd> / <kbd>Esc</kbd></td><td>show / close this help</td></tr>
+    </table>
+    <p>Leave a stall unset when you cannot tell. Saving downloads the .xml under its own name;
+      move it back over the prefilled file. Changes to other photos are kept while the page is
+      open (marked * in the list).</p>
+  </div>
+</div>
+<pre id="selftest-result" hidden></pre>
+<script>
+"use strict";
+(function () {
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const STATES = ["unset", "occupied", "empty"];
+  const ATTR = { occupied: "1", empty: "0" };
+  const DECLARATION = '<?xml version="1.0"?>\n';
+
+  // --- pure helpers (window.Labeler; exercised by the #selftest run) -------------------------
+
+  function childElements(el, tag) {
+    return Array.from(el.children).filter((c) => c.localName === tag);
+  }
+
+  /** Mirrors eval/benchmark.py read_labels: fewer than 3 contour points is skipped, and
+   *  `occupied` must be "1" or "0" to count; anything else is unset (not scored). */
+  function parseLabels(xmlText) {
+    const doc = new DOMParser().parseFromString(xmlText, "application/xml");
+    if (doc.getElementsByTagName("parsererror").length || !doc.documentElement) {
+      throw new Error("not a well-formed XML file");
+    }
+    if (doc.documentElement.localName !== "parking") {
+      throw new Error("not a PKLot label file (root is <" + doc.documentElement.localName + ">)");
+    }
+    const spaces = [];
+    let skipped = 0;
+    for (const el of Array.from(doc.getElementsByTagName("space"))) {
+      const contour = childElements(el, "contour")[0];
+      const points = contour
+        ? childElements(contour, "point").map((p) => [
+            parseFloat(p.getAttribute("x")),
+            parseFloat(p.getAttribute("y")),
+          ])
+        : [];
+      if (points.length < 3 || points.some((p) => !isFinite(p[0]) || !isFinite(p[1]))) {
+        skipped += 1;
+        continue;
+      }
+      const occ = el.getAttribute("occupied");
+      const state = occ === "1" ? "occupied" : occ === "0" ? "empty" : "unset";
+      spaces.push({ el, id: el.getAttribute("id") || "", points, state });
+    }
+    return { doc, source: doc.documentElement.getAttribute("id") || "unknown", spaces, skipped };
+  }
+
+  function nextState(state) {
+    return STATES[(STATES.indexOf(state) + 1) % STATES.length];
+  }
+
+  /** Sets the state and the element's `occupied` attribute (removed for unset). */
+  function setState(space, state) {
+    if (!STATES.includes(state)) throw new Error("unknown state " + state);
+    if (state === "unset") space.el.removeAttribute("occupied");
+    else space.el.setAttribute("occupied", ATTR[state]);
+    space.state = state;
+    if (space.poly) space.poly.setAttribute("class", "stall " + state);
+  }
+
+  /** Every unset stall to `state`; returns how many changed. */
+  function setAllUnset(spaces, state) {
+    let n = 0;
+    for (const s of spaces) {
+      if (s.state === "unset") {
+        setState(s, state);
+        n += 1;
+      }
+    }
+    return n;
+  }
+
+  function countStates(spaces) {
+    const c = { occupied: 0, empty: 0, unset: 0, total: spaces.length };
+    for (const s of spaces) c[s.state] += 1;
+    return c;
+  }
+
+  /** The document as text, with the PKLot declaration on its own line. Browsers differ on
+   *  whether XMLSerializer writes a declaration at all (it is not a DOM node), and Chrome's
+   *  has no newline after it, so it is always replaced. */
+  function serializeLabels(doc) {
+    const text = new XMLSerializer().serializeToString(doc).replace(/^<\?xml[^?]*\?>\s*/, "");
+    return DECLARATION + (text.endsWith("\n") ? text : text + "\n");
+  }
+
+  function stemOf(name) {
+    const dot = name.lastIndexOf(".");
+    return dot > 0 ? name.slice(0, dot) : name;
+  }
+
+  function extOf(name) {
+    const dot = name.lastIndexOf(".");
+    return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+  }
+
+  function xmlNameFor(photoName) {
+    return stemOf(photoName) + ".xml";
+  }
+
+  /** Pairs photos with label files by case-insensitive stem. Other file types are ignored. */
+  function pairFiles(files) {
+    const groups = new Map();
+    for (const f of files) {
+      const ext = extOf(f.name);
+      const kind = ext === "jpg" || ext === "jpeg" ? "image" : ext === "xml" ? "xml" : null;
+      if (!kind) continue;
+      const key = stemOf(f.name).toLowerCase();
+      if (!groups.has(key)) groups.set(key, { image: [], xml: [] });
+      groups.get(key)[kind].push(f);
+    }
+    const pairs = [];
+    const unpaired = [];
+    for (const key of Array.from(groups.keys()).sort()) {
+      const g = groups.get(key);
+      if (g.image.length && g.xml.length) {
+        pairs.push({ stem: stemOf(g.image[0].name), image: g.image[0], xml: g.xml[0] });
+        unpaired.push(...g.image.slice(1), ...g.xml.slice(1));
+      } else {
+        unpaired.push(...g.image, ...g.xml);
+      }
+    }
+    return { pairs, unpaired };
+  }
+
+  /** Stalls with a corner outside a w x h photo (1 px slack): a sign of the wrong pair. */
+  function outOfBounds(spaces, w, h) {
+    return spaces.filter((s) => s.points.some(([x, y]) => x < -1 || y < -1 || x > w + 1 || y > h + 1));
+  }
+
+  function centroid(points) {
+    let area = 0, cx = 0, cy = 0;
+    for (let i = 0; i < points.length; i++) {
+      const [x0, y0] = points[i];
+      const [x1, y1] = points[(i + 1) % points.length];
+      const cross = x0 * y1 - x1 * y0;
+      area += cross;
+      cx += (x0 + x1) * cross;
+      cy += (y0 + y1) * cross;
+    }
+    if (Math.abs(area) < 1e-9) {
+      return [
+        points.reduce((a, p) => a + p[0], 0) / points.length,
+        points.reduce((a, p) => a + p[1], 0) / points.length,
+      ];
+    }
+    return [cx / (3 * area), cy / (3 * area)];
+  }
+
+  function svgEl(tag, attrs) {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, String(v));
+    return el;
+  }
+
+  /** Draws the photo (optional) and one polygon + id label per space into `svg`. A click on a
+   *  polygon cycles its state and calls onChange(space). `space.poly` is set for repainting. */
+  function renderOverlay(svg, spaces, w, h, onChange, imageHref) {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    svg.style.aspectRatio = `${w} / ${h}`;
+    if (imageHref) svg.appendChild(svgEl("image", { href: imageHref, x: 0, y: 0, width: w, height: h }));
+    const outlines = svgEl("g", { class: "outlines" });
+    const labels = svgEl("g", { class: "labels" });
+    const sizes = spaces
+      .map((s) => {
+        const xs = s.points.map((p) => p[0]), ys = s.points.map((p) => p[1]);
+        return Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+      })
+      .sort((a, b) => a - b);
+    const fontSize = Math.max(8, 0.22 *(sizes[Math.floor(sizes.length / 2)] || 40));
+    spaces.forEach((space, i) => {
+      const poly = svgEl("polygon", {
+        points: space.points.map((p) => p.join(",")).join(" "),
+        class: "stall " + space.state,
+        "data-index": i,
+      });
+      const title = svgEl("title");
+      title.textContent = space.id;
+      poly.appendChild(title);
+      poly.addEventListener("click", () => {
+        setState(space, nextState(space.state));
+        if (onChange) onChange(space);
+      });
+      space.poly = poly;
+      outlines.appendChild(poly);
+      const [cx, cy] = centroid(space.points);
+      const text = svgEl("text", { x: cx, y: cy, class: "label", "font-size": fontSize.toFixed(1) });
+      text.textContent = space.id;
+      labels.appendChild(text);
+    });
+    svg.appendChild(outlines);
+    svg.appendChild(labels);
+  }
+
+  function renderCounts(el, counts) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+    for (const k of ["occupied", "empty", "unset", "total"]) {
+      const span = document.createElement("span");
+      span.className = "count " + k;
+      const b = document.createElement("b");
+      b.dataset.k = k;
+      b.textContent = String(counts[k]);
+      span.append(b, " " + k);
+      el.appendChild(span);
+    }
+  }
+
+  /** What a keydown means, or null. Stall keys act on the stall under the mouse. Letters are
+   *  matched lowercased and the bulk keys by e.shiftKey, so Caps Lock changes nothing. */
+  function keyAction(e) {
+    if (e.altKey) return null;
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (e.ctrlKey || e.metaKey) return key === "s" ? { type: "save" } : null;
+    if (e.shiftKey && key === "e") return { type: "setAll", state: "empty" };
+    if (e.shiftKey && key === "o") return { type: "setAll", state: "occupied" };
+    switch (key) {
+      case "o": case "1": return { type: "set", state: "occupied" };
+      case "e": case "0": return { type: "set", state: "empty" };
+      case "u": case "Backspace": return { type: "set", state: "unset" };
+      case "h": return { type: "toggle", what: "outlines" };
+      case "l": return { type: "toggle", what: "labels" };
+      case "z": return { type: "toggle", what: "zoom" };
+      case "n": return { type: "nav", delta: 1 };
+      case "p": return { type: "nav", delta: -1 };
+      case "?": return { type: "help" };
+      case "Escape": return { type: "closeHelp" };
+      default: return null;
+    }
+  }
+
+  window.Labeler = {
+    parseLabels, nextState, setState, setAllUnset, countStates, serializeLabels, xmlNameFor,
+    pairFiles, outOfBounds, centroid, renderOverlay, renderCounts, keyAction,
+  };
+
+  // --- app -----------------------------------------------------------------------------------
+
+  const $ = (id) => document.getElementById(id);
+  const ui = {
+    files: $("files"), prev: $("prev"), next: $("next"), select: $("pair-select"),
+    counts: $("counts"), labels: $("toggle-labels"), zoom: $("toggle-zoom"), save: $("save"),
+    helpButton: $("help-button"), messages: $("messages"), stage: $("stage"),
+    empty: $("empty-state"), svg: $("overlay"), help: $("help"),
+  };
+  const app = { pairs: [], unpaired: [], index: -1, imageUrl: null, hovered: null, loading: 0 };
+
+  function message(text, level) {
+    const div = document.createElement("div");
+    div.className = "msg " + (level || "warn");
+    div.textContent = text;
+    ui.messages.appendChild(div);
+  }
+
+  function clearMessages() {
+    while (ui.messages.firstChild) ui.messages.removeChild(ui.messages.firstChild);
+  }
+
+  function current() {
+    return app.pairs[app.index] || null;
+  }
+
+  function refreshList() {
+    const sel = ui.select;
+    while (sel.firstChild) sel.removeChild(sel.firstChild);
+    app.pairs.forEach((p, i) => {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = `${i + 1}/${app.pairs.length}  ${p.stem}${p.dirty ? " *" : ""}`;
+      sel.appendChild(opt);
+    });
+    sel.value = String(app.index);
+    sel.disabled = app.pairs.length === 0;
+    ui.prev.disabled = app.index <= 0;
+    ui.next.disabled = app.index < 0 || app.index >= app.pairs.length - 1;
+    ui.save.disabled = !(current() && current().labels);
+  }
+
+  function refreshCounts() {
+    const p = current();
+    if (p && p.labels) renderCounts(ui.counts, countStates(p.labels.spaces));
+  }
+
+  /** Marks `pair` (by default the shown one) as having unsaved changes. */
+  function changed(pair) {
+    const p = pair || current();
+    if (p) p.dirty = true;
+    refreshCounts();
+    refreshList();
+  }
+
+  function unpairedWarnings() {
+    for (const f of app.unpaired) {
+      const ext = extOf(f.name);
+      const want = ext === "xml" ? "no matching .jpg" : `no ${xmlNameFor(f.name)}`;
+      message(`${f.name}: ${want} (run eval/prefill_labels.py first?)`);
+    }
+  }
+
+  function loadImage(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("the photo could not be decoded"));
+      img.src = url;
+    });
+  }
+
+  async function show(index) {
+    if (index < 0 || index >= app.pairs.length) return;
+    const token = ++app.loading;
+    app.index = index;
+    app.hovered = null;
+    ui.svg.toggleAttribute("hidden", true); // the old photo's stalls are not clickable while the new one loads
+    const pair = current();
+    clearMessages();
+    unpairedWarnings();
+    refreshList();
+    try {
+      if (!pair.labels) pair.labels = parseLabels(await pair.xml.text());
+      const url = URL.createObjectURL(pair.image);
+      const img = await loadImage(url);
+      if (token !== app.loading) {
+        URL.revokeObjectURL(url);
+        return; // a newer show() won
+      }
+      if (app.imageUrl) URL.revokeObjectURL(app.imageUrl);
+      app.imageUrl = url;
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const { spaces, skipped, source } = pair.labels;
+      renderOverlay(ui.svg, spaces, w, h, () => changed(pair), url);
+      for (const s of spaces) {
+        s.poly.addEventListener("mouseenter", () => { app.hovered = s; });
+        s.poly.addEventListener("mouseleave", () => { if (app.hovered === s) app.hovered = null; });
+      }
+      ui.svg.toggleAttribute("hidden", false);
+      ui.empty.hidden = true;
+      applyZoom();
+      const bad = outOfBounds(spaces, w, h);
+      if (bad.length) {
+        message(`${bad.length} stalls lie outside this ${w}x${h} photo: is ${pair.xml.name} ` +
+          `the right file for ${pair.image.name}?`, "error");
+      }
+      if (skipped) message(`${skipped} spaces have fewer than 3 contour points and are not shown.`);
+      if (!spaces.length) message(`${pair.xml.name} has no stalls.`, "error");
+      document.title = `${pair.stem} (${source}) - Pilot Labeler`;
+    } catch (err) {
+      if (token !== app.loading) return;
+      ui.svg.toggleAttribute("hidden", true);
+      message(`${pair.stem}: ${err.message}`, "error");
+    }
+    refreshCounts();
+    refreshList();
+  }
+
+  function applyZoom() {
+    const full = ui.zoom.getAttribute("aria-pressed") === "true";
+    const vb = ui.svg.viewBox.baseVal;
+    ui.svg.classList.toggle("fit", !full);
+    ui.svg.style.width = full && vb ? vb.width + "px" : "";
+    ui.svg.style.height = full && vb ? vb.height + "px" : "";
+  }
+
+  function toggle(button, apply) {
+    const on = button.getAttribute("aria-pressed") !== "true";
+    button.setAttribute("aria-pressed", String(on));
+    apply(on);
+  }
+
+  function toggleLabels() {
+    toggle(ui.labels, (on) => ui.svg.classList.toggle("hide-labels", !on));
+  }
+
+  function toggleZoom() {
+    toggle(ui.zoom, applyZoom);
+  }
+
+  function save() {
+    const pair = current();
+    if (!pair || !pair.labels) return;
+    const blob = new Blob([serializeLabels(pair.labels.doc)], { type: "application/xml" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = pair.xml.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    pair.dirty = false;
+    refreshList();
+  }
+
+  function openFiles(files) {
+    const unsaved = app.pairs.filter((p) => p.dirty).map((p) => p.stem);
+    if (unsaved.length && !confirm(`Discard unsaved changes to ${unsaved.join(", ")}?`)) return;
+    const { pairs, unpaired } = pairFiles(files);
+    app.pairs = pairs.map((p) => Object.assign(p, { labels: null, dirty: false }));
+    app.unpaired = unpaired;
+    app.index = -1;
+    clearMessages();
+    if (!pairs.length) {
+      ui.svg.toggleAttribute("hidden", true);
+      ui.empty.hidden = false;
+      while (ui.counts.firstChild) ui.counts.removeChild(ui.counts.firstChild);
+      message("No .jpg + .xml pairs among the opened files.", "error");
+      unpairedWarnings();
+      refreshList();
+      return;
+    }
+    show(0);
+  }
+
+  /** Files from a drop, walking dropped folders (entries must be taken before any await). */
+  async function droppedFiles(dt) {
+    const entries = Array.from(dt.items || [])
+      .map((it) => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null))
+      .filter(Boolean);
+    if (!entries.length) return Array.from(dt.files || []);
+    const out = [];
+    async function walk(entry) {
+      if (entry.isFile) {
+        out.push(await new Promise((res, rej) => entry.file(res, rej)));
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        for (;;) {
+          const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+          if (!batch.length) break;
+          for (const e of batch) await walk(e);
+        }
+      }
+    }
+    for (const e of entries) await walk(e);
+    return out;
+  }
+
+  function onKey(e) {
+    const target = e.target;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+    const action = keyAction(e);
+    if (!action) return;
+    const helpOpen = !ui.help.hidden;
+    if (action.type === "help") { ui.help.hidden = helpOpen; e.preventDefault(); return; }
+    if (action.type === "closeHelp") { ui.help.hidden = true; return; }
+    if (helpOpen) return;
+    if (target && target.tagName === "SELECT" && action.type !== "save") target.blur();
+    const pair = current();
+    const spaces = pair && pair.labels ? pair.labels.spaces : null;
+    switch (action.type) {
+      case "save": e.preventDefault(); save(); break;
+      case "set":
+        if (spaces && app.hovered && app.hovered.state !== action.state) {
+          setState(app.hovered, action.state);
+          changed(pair);
+        }
+        if (e.key === "Backspace") e.preventDefault();
+        break;
+      case "setAll": {
+        const n = spaces ? countStates(spaces).unset : 0;
+        if (n && confirm(`Mark ${n} unset stalls ${action.state}?`)) {
+          setAllUnset(spaces, action.state);
+          changed(pair);
+        }
+        break;
+      }
+      case "toggle":
+        if (action.what === "outlines") {
+          // hidden stalls get no mouseleave: forget the hovered one so o / e cannot edit it
+          if (ui.svg.classList.toggle("hide-outlines")) app.hovered = null;
+        } else if (action.what === "labels") toggleLabels();
+        else toggleZoom();
+        break;
+      case "nav": show(app.index + action.delta); break;
+    }
+  }
+
+  function initApp() {
+    ui.files.addEventListener("change", () => {
+      openFiles(Array.from(ui.files.files || []));
+      ui.files.value = "";
+    });
+    ui.prev.addEventListener("click", () => show(app.index - 1));
+    ui.next.addEventListener("click", () => show(app.index + 1));
+    ui.select.addEventListener("change", () => {
+      show(Number(ui.select.value));
+      ui.select.blur();
+    });
+    ui.labels.addEventListener("click", toggleLabels);
+    ui.zoom.addEventListener("click", toggleZoom);
+    ui.save.addEventListener("click", save);
+    ui.helpButton.addEventListener("click", () => { ui.help.hidden = !ui.help.hidden; });
+    ui.help.addEventListener("click", (e) => { if (e.target === ui.help) ui.help.hidden = true; });
+    document.addEventListener("keydown", onKey);
+    let depth = 0;
+    window.addEventListener("dragenter", (e) => {
+      e.preventDefault();
+      depth += 1;
+      ui.stage.classList.add("dragging");
+    });
+    window.addEventListener("dragleave", () => {
+      depth = Math.max(0, depth - 1);
+      if (!depth) ui.stage.classList.remove("dragging");
+    });
+    window.addEventListener("dragover", (e) => e.preventDefault());
+    window.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      depth = 0;
+      ui.stage.classList.remove("dragging");
+      openFiles(await droppedFiles(e.dataTransfer));
+    });
+    window.addEventListener("beforeunload", (e) => {
+      if (app.pairs.some((p) => p.dirty)) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    });
+  }
+
+  // --- self-test (label.html#selftest) -------------------------------------------------------
+
+  const SAMPLE = [
+    '<?xml version="1.0"?>',
+    '<parking id="selftest-V1">',
+    '  <!-- comments and layout are kept -->',
+    '  <space id="1" occupied="1">',
+    '    <rotatedRect><center x="25" y="25"/><size w="30" h="30"/><angle d="0"/></rotatedRect>',
+    '    <contour><point x="10" y="10"/><point x="40" y="10"/><point x="40" y="40"/><point x="10" y="40"/></contour>',
+    '  </space>',
+    '  <space id="2" occupied="0">',
+    '    <rotatedRect><center x="75" y="25"/><size w="30" h="30"/><angle d="0"/></rotatedRect>',
+    '    <contour><point x="60" y="10"/><point x="90" y="10"/><point x="90" y="40"/><point x="60" y="40"/></contour>',
+    '  </space>',
+    '  <space id="3">',
+    '    <rotatedRect><center x="125" y="25"/><size w="30" h="30"/><angle d="0"/></rotatedRect>',
+    '    <contour><point x="110" y="10"/><point x="140" y="10"/><point x="140" y="40"/><point x="110" y="40"/></contour>',
+    '  </space>',
+    '  <space id="4" occupied="1">',
+    '    <contour><point x="150" y="60"/><point x="190" y="60"/></contour>',
+    '  </space>',
+    '</parking>',
+    '',
+  ].join("\n");
+
+  function selfTest() {
+    const checks = [];
+    const check = (name, ok, detail) =>
+      checks.push({ name, ok: Boolean(ok), detail: detail === undefined ? "" : String(detail) });
+    let xml = "";
+    try {
+      const parsed = parseLabels(SAMPLE);
+      const c0 = countStates(parsed.spaces);
+      check("parse counts", c0.occupied === 1 && c0.empty === 1 && c0.unset === 1 &&
+        c0.total === 3 && parsed.skipped === 1, JSON.stringify({ ...c0, skipped: parsed.skipped }));
+      check("parse source and ids", parsed.source === "selftest-V1" &&
+        parsed.spaces.map((s) => s.id).join() === "1,2,3",
+        parsed.source + " " + parsed.spaces.map((s) => s.id).join());
+      check("cycle", nextState("unset") === "occupied" && nextState("occupied") === "empty" &&
+        nextState("empty") === "unset");
+
+      const svg = document.createElementNS(SVG_NS, "svg");
+      const countsEl = document.createElement("div");
+      let changes = 0;
+      const onChange = () => { changes += 1; renderCounts(countsEl, countStates(parsed.spaces)); };
+      renderOverlay(svg, parsed.spaces, 200, 100, onChange);
+      renderCounts(countsEl, countStates(parsed.spaces));
+      const polys = svg.querySelectorAll("polygon");
+      const count = (k) => countsEl.querySelector(`[data-k="${k}"]`).textContent;
+      check("render polygons", polys.length === 3 && svg.querySelectorAll("text").length === 3 &&
+        svg.getAttribute("viewBox") === "0 0 200 100", polys.length);
+      polys[2].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      const s3 = parsed.spaces[2];
+      check("click unset -> occupied", s3.state === "occupied" &&
+        s3.el.getAttribute("occupied") === "1" && polys[2].getAttribute("class") === "stall occupied",
+        s3.state + " " + polys[2].getAttribute("class"));
+      check("click updates counts", changes === 1 && count("occupied") === "2" &&
+        count("unset") === "0" && count("total") === "3", countsEl.textContent);
+      polys[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      check("click occupied -> empty", parsed.spaces[0].el.getAttribute("occupied") === "0" &&
+        count("empty") === "2", countsEl.textContent);
+      polys[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      check("click empty -> unset removes the attribute",
+        parsed.spaces[0].state === "unset" && !parsed.spaces[0].el.hasAttribute("occupied") &&
+        count("unset") === "1", countsEl.textContent);
+
+      const other = parseLabels(SAMPLE);
+      const n = setAllUnset(other.spaces, "empty");
+      check("set all unset", n === 1 && other.spaces[2].el.getAttribute("occupied") === "0" &&
+        other.spaces[0].state === "occupied", n);
+      check("out of bounds", outOfBounds(parsed.spaces, 200, 100).length === 0 &&
+        outOfBounds(parsed.spaces, 100, 100).map((s) => s.id).join() === "3");
+
+      const k = (key, extra) => keyAction(Object.assign({ key, shiftKey: false, ctrlKey: false,
+        metaKey: false, altKey: false }, extra));
+      check("keys", JSON.stringify([k("o"), k("0"), k("Backspace"), k("E", { shiftKey: true }),
+        k("s", { metaKey: true }), k("n"), k("x")]) === JSON.stringify([
+        { type: "set", state: "occupied" }, { type: "set", state: "empty" },
+        { type: "set", state: "unset" }, { type: "setAll", state: "empty" },
+        { type: "save" }, { type: "nav", delta: 1 }, null]));
+      // Caps Lock on: letters arrive uppercase without Shift, and lowercase with it.
+      check("keys with Caps Lock", JSON.stringify([k("E"), k("O"), k("H"),
+        k("e", { shiftKey: true }), k("o", { shiftKey: true }), k("S", { ctrlKey: true })]) ===
+        JSON.stringify([{ type: "set", state: "empty" }, { type: "set", state: "occupied" },
+          { type: "toggle", what: "outlines" }, { type: "setAll", state: "empty" },
+          { type: "setAll", state: "occupied" }, { type: "save" }]));
+
+      // Bulk keys and h through the app's own keydown handler, with window.confirm stubbed.
+      const bulk = parseLabels(SAMPLE);
+      const asked = [];
+      let answer = false;
+      const realConfirm = window.confirm;
+      const saved = { pairs: app.pairs, index: app.index };
+      const press = (key, shiftKey) =>
+        document.dispatchEvent(new KeyboardEvent("keydown", { key, shiftKey: Boolean(shiftKey) }));
+      window.confirm = (question) => { asked.push(question); return answer; };
+      try {
+        app.pairs = [{ stem: "selftest", labels: bulk, dirty: false }];
+        app.index = 0;
+        press("E", true);
+        check("bulk asks first; answering no changes nothing",
+          asked.join() === "Mark 1 unset stalls empty?" && bulk.spaces[2].state === "unset" &&
+          !app.pairs[0].dirty, asked.join(" | "));
+        answer = true;
+        press("o", true); // Shift with Caps Lock on
+        check("bulk after yes", asked[1] === "Mark 1 unset stalls occupied?" &&
+          bulk.spaces.map((s) => s.state).join() === "occupied,empty,occupied" &&
+          bulk.spaces[2].el.getAttribute("occupied") === "1" && app.pairs[0].dirty,
+          asked.join(" | ") + " " + bulk.spaces.map((s) => s.state).join());
+        press("E", true);
+        check("bulk with nothing unset does not ask", asked.length === 2, asked.length);
+
+        app.hovered = bulk.spaces[0];
+        press("h");
+        press("e");
+        check("hiding outlines forgets the hovered stall", app.hovered === null &&
+          ui.svg.classList.contains("hide-outlines") && bulk.spaces[0].state === "occupied",
+          bulk.spaces[0].state);
+        press("h");
+        check("h shows outlines again", !ui.svg.classList.contains("hide-outlines"));
+      } finally {
+        window.confirm = realConfirm;
+        Object.assign(app, saved, { hovered: null });
+        ui.svg.classList.remove("hide-outlines");
+        while (ui.counts.firstChild) ui.counts.removeChild(ui.counts.firstChild);
+        refreshList();
+      }
+
+      xml = serializeLabels(parsed.doc);
+      check("declaration", xml.startsWith('<?xml version="1.0"?>\n<parking id="selftest-V1">') &&
+        xml.endsWith("</parking>\n"), xml.slice(0, 40));
+      const again = parseLabels(xml);
+      check("round trip states", again.skipped === 1 &&
+        again.spaces.map((s) => s.state).join() === "unset,empty,occupied",
+        again.spaces.map((s) => s.state).join());
+      const kept = SAMPLE.match(/<rotatedRect>.*?<\/rotatedRect>|<contour>.*?<\/contour>|<!--.*?-->/g);
+      const missing = kept.filter((part) => !xml.includes(part));
+      check("ids, rotatedRect, contours and comments unchanged", kept.length === 8 &&
+        !missing.length && xml.includes('<space id="2" occupied="0">') &&
+        xml.includes('<space id="1">'), missing.join(" | "));
+
+      check("xmlNameFor", xmlNameFor("DJI_0001.JPG") === "DJI_0001.xml" &&
+        xmlNameFor("a.b.jpeg") === "a.b.xml", xmlNameFor("DJI_0001.JPG"));
+      const paired = pairFiles([{ name: "a.JPG" }, { name: "b.jpg" }, { name: "A.xml" },
+        { name: "c.xml" }, { name: ".DS_Store" }, { name: "notes.txt" }]);
+      check("pairFiles", paired.pairs.length === 1 && paired.pairs[0].image.name === "a.JPG" &&
+        paired.pairs[0].xml.name === "A.xml" && paired.pairs[0].stem === "a" &&
+        paired.unpaired.map((f) => f.name).join() === "b.jpg,c.xml",
+        JSON.stringify(paired.unpaired.map((f) => f.name)));
+      let threw = false;
+      try { parseLabels("<parking><space>"); } catch (err) { threw = true; }
+      check("malformed XML throws", threw);
+    } catch (err) {
+      check("no exception", false, (err && err.stack) || err);
+    }
+    $("selftest-result").textContent =
+      JSON.stringify({ ok: checks.every((c) => c.ok), checks, xml });
+  }
+
+  initApp();
+  if (location.hash === "#selftest") selfTest();
+})();
+</script>
+</body>
+</html>
