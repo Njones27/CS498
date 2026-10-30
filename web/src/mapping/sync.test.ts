@@ -239,6 +239,18 @@ describe('photo <-> schematic sync', () => {
     expect(res.note).toMatch(/already has a space/)
   })
 
+  it('with snapping off, a photo move into another cell moves the rect freely and renames it', () => {
+    const draft = gridDraft()
+    const grid = fitGrid(draft.spaces)
+    const v = draft.viewpoints[0]
+    const after = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, 'B-02': outlineOf({ x: 485, y: 245, w: 100, h: 120 }) } }] }
+    const { draft: next, note } = followOutline(draft, after, 'V1', 'B-02', grid, false)
+    const b02 = next.spaces.find((s) => s.spaceId === 'B-02')!
+    expect(b02.label).toBe('B-05')
+    expect(b02.rect.x).toBeCloseTo(485, 0)
+    expect(note).toBe('Now B-05')
+  })
+
   it('a first outline does not move the space', () => {
     const draft = gridDraft()
     const v = draft.viewpoints[0]

@@ -1,6 +1,6 @@
 import { MIN_SIDE, clearOf, medianSize } from './schematic/geometry'
 import { addSpace, addSpaceAt, addSpacesAt, fitSchematic, updateSpace, type Grown } from './schematic/edits'
-import { cellAt, cellLabel, cellRect, cellTaken, labelDigits, relabelForCell, snapMove, type Cell, type Grid } from './schematic/grid'
+import { applyLabels, cellAt, cellLabel, cellRect, cellTaken, labelDigits, relabelMoved, type Cell, type Grid } from './schematic/grid'
 import { isValidQuad, orderClockwise } from './photo/geom'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, Outline, Point } from './types'
 
@@ -363,8 +363,9 @@ const r2 = (v: number) => Math.round(v * 100) / 100
 /**
  * After `spaceId`'s outline in `viewId` was moved or reshaped on the photo (`before` -> `after`), its
  * schematic rect moves and resizes the same way, through the view's map; then its outlines in the other
- * views follow the rect. With a `grid` (snapping on), the rect only changes when the outline moved it into
- * another cell: it then fills that cell and takes its label (`note` says which, or why it was kept).
+ * views follow the rect. With a `grid`, landing in another cell renames the space for that cell; with
+ * `snap` too, the rect only changes when the outline moved it into another cell, and then fills it.
+ * `note` says what was renamed.
  * A first outline moves nothing: it says where the space is on the photo, not that it moved.
  */
 export function followOutline(
@@ -373,6 +374,7 @@ export function followOutline(
   viewId: string,
   spaceId: string,
   grid: Grid | null,
+  snap = true,
 ): Grown & { note?: string } {
   const unchanged = { draft: after, dx: 0, dy: 0 }
   const vBefore = before.viewpoints.find((v) => v.viewId === viewId)
@@ -393,23 +395,25 @@ export function followOutline(
   const bottom = y + h + (b1.y + b1.h - (b0.y + b0.h))
   let rect: DraftRect = { x: r2(left), y: r2(top), w: r2(Math.max(MIN_SIDE, right - left)), h: r2(Math.max(MIN_SIDE, bottom - top)) }
   if (!plausibleRect(after, rect)) return unchanged
-  let patch: Partial<DraftSpace> = { rect }
+  let labels = new Map<string, string>()
   let note: string | undefined
   if (grid) {
     const from = cellAt(grid, rectCenter(space.rect))
-    const snapped = snapMove(grid, rect)
-    if (snapped.cell.row === from.row && snapped.cell.col === from.col) return unchanged
-    // Never stack two spaces in one cell: the schematic stays, the outline change still stands.
-    if (cellTaken(grid, after.spaces, snapped.cell, null, spaceId)) {
-      return { ...unchanged, note: `The schematic cell there already has a space; ${space.label} stays where it is` }
+    const to = cellAt(grid, rectCenter(rect))
+    const changedCell = to.row !== from.row || to.col !== from.col
+    if (snap) {
+      if (!changedCell) return unchanged
+      // Never stack two spaces in one cell: the schematic stays, the outline change still stands.
+      if (cellTaken(grid, after.spaces, to, null, spaceId)) {
+        return { ...unchanged, note: `The schematic cell there already has a space; ${space.label} stays where it is` }
+      }
+      rect = cellRect(grid, to)
     }
-    rect = snapped.rect
-    const relabel = relabelForCell(after.spaces, spaceId, snapped.cell)
-    patch = relabel.label ? { rect, label: relabel.label } : { rect }
-    note = relabel.label ? `Now ${relabel.label}` : relabel.note
+    // Landing in another cell renames the space for it (row letter, column number).
+    if (changedCell) ({ labels, note } = relabelMoved(grid, after.spaces, spaceId, to))
   }
-  if (sameRect(rect, space.rect) && !patch.label) return unchanged
-  const moved = updateSpace(after, spaceId, patch)
+  if (sameRect(rect, space.rect) && labels.size === 0) return unchanged
+  const moved = applyLabels(updateSpace(after, spaceId, { rect }), labels)
   return { ...fitSchematic(followRects(after, moved, [spaceId], viewId)), note }
 }
 

@@ -122,8 +122,10 @@ export function ReferencePhotoPanel({
   hoveredSpaceId,
   onHoverSpace,
   onSave,
-  snapGrid = null,
+  grid = null,
+  snap = false,
 }: ReferencePhotoPanelProps) {
+  const snapGrid = snap ? grid : null
   const currentViewId = viewId ?? draft.viewpoints[0]?.viewId ?? null
   const currentViewpoint = draft.viewpoints.find((v) => v.viewId === currentViewId) ?? null
 
@@ -379,7 +381,7 @@ export function ReferencePhotoPanel({
           v.viewId === currentViewpoint.viewId ? { ...v, outlines: nextOutlines, outlineReview: nextReview } : v,
         )
         // The schematic rect (and the other photos) follow the outline.
-        const followed = followOutline(draft, { ...draft, viewpoints: nextVps }, currentViewpoint.viewId, selectedSpaceId, snapGrid)
+        const followed = followOutline(draft, { ...draft, viewpoints: nextVps }, currentViewpoint.viewId, selectedSpaceId, grid, snap)
         if (followed.note) setStatusNotice(followed.note)
         // commitOutlines, spelled out so this effect's dependencies stay listed
         onChange(followed.draft, followed.dx !== 0 || followed.dy !== 0 ? { dx: followed.dx, dy: followed.dy } : undefined)
@@ -402,7 +404,7 @@ export function ReferencePhotoPanel({
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [dragging, currentViewpoint, selectedSpaceId, draft, onChange, onSave, svgWidth, svgHeight, snapGrid, setStatusNotice])
+  }, [dragging, currentViewpoint, selectedSpaceId, draft, onChange, onSave, svgWidth, svgHeight, grid, snap, setStatusNotice])
 
   /** Start reshaping the selected outline from a handle or the outline itself. */
   const startOutlineDrag = (e: React.PointerEvent, kind: 'corner' | 'side' | 'body', idx: number) => {
@@ -552,7 +554,7 @@ export function ReferencePhotoPanel({
         : v,
     )
     // A redrawn outline moves the space on the schematic the same way; a first outline moves nothing.
-    const followed = followOutline(draft, { ...draft, viewpoints: nextVps }, currentViewpoint.viewId, selectedSpace.spaceId, snapGrid)
+    const followed = followOutline(draft, { ...draft, viewpoints: nextVps }, currentViewpoint.viewId, selectedSpace.spaceId, grid, snap)
     setStatusNotice(followed.note ?? `${selectedSpace.label} outlined in ${currentViewpoint.viewId}`)
     commitOutlines(followed.draft, followed)
   }

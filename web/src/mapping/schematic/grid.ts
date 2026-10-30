@@ -188,38 +188,125 @@ export function cellTaken(g: Grid, spaces: DraftSpace[], cell: Cell, label: stri
   })
 }
 
+/** Whether a label may be replaced by a cell label: a row-number label or a blank one, never a name like "Gate". */
+const renamable = (label: string) => !label.trim() || parseLabel(label) !== null
+
+const sameCell = (a: Cell, b: Cell) => a.row === b.row && a.col === b.col
+
 /**
- * The label a space moved into `cell` should take: the cell's, unless the space has a name that isn't a
- * row-number label, the cell is outside the lettered rows and numbered columns, or another active space
- * already uses it. `note` says why a label was kept.
+ * The labels after `spaceId` lands in `cell`. It takes the cell's label (row letter and column number).
+ * Another active space that already had that label is renamed for the cell it sits in, when that label
+ * is free; otherwise both keep it and the editor flags the duplicate. A name like "Gate", and a cell above
+ * row A or left of column 1, keep their label. `note` says what happened.
  */
-export function relabelForCell(spaces: DraftSpace[], spaceId: string, cell: Cell): { label?: string; note?: string } {
+export function relabelMoved(g: Grid, spaces: DraftSpace[], spaceId: string, cell: Cell): { labels: Map<string, string>; note?: string } {
+  const labels = new Map<string, string>()
   const space = spaces.find((s) => s.spaceId === spaceId)
-  if (!space) return {}
-  const parsed = parseLabel(space.label)
-  if (!parsed && space.label.trim()) return {} // a custom name such as "Gate" is the admin's
-  const target = cellLabel(cell, Math.max(2, parsed?.digits ?? 2))
-  if (!target) return { note: `Outside the lettered rows; kept ${space.label.trim() || 'the label'}` }
-  if (normalizeLabel(target) === normalizeLabel(space.label)) return {}
+  if (!space || !renamable(space.label)) return { labels }
+  const digits = Math.max(2, parseLabel(space.label)?.digits ?? labelDigits(spaces))
+  const target = cellLabel(cell, digits)
+  if (!target) return { labels, note: `Outside the lettered rows; kept ${space.label.trim() || 'the label'}` }
   const key = normalizeLabel(target)
-  if (spaces.some((s) => !s.retired && s.spaceId !== spaceId && normalizeLabel(s.label) === key)) {
-    return { note: `${target} is already used; kept ${space.label}` }
+  if (key === normalizeLabel(space.label)) return { labels }
+  labels.set(spaceId, target)
+  const notes = [`Now ${target}`]
+  for (const other of spaces) {
+    if (other.retired || other.spaceId === spaceId || normalizeLabel(other.label) !== key) continue
+    const own = cellLabel(cellAt(g, center(other.rect)), Math.max(2, parseLabel(other.label)?.digits ?? digits))
+    // Labels in use once the move is done: the moved space's old label is free, its new one is taken.
+    const used = new Set(
+      spaces
+        .filter((s) => !s.retired && s.spaceId !== spaceId && s.spaceId !== other.spaceId)
+        .map((s) => normalizeLabel(s.label)),
+    )
+    used.add(key)
+    if (own && !used.has(normalizeLabel(own))) {
+      labels.set(other.spaceId, own)
+      notes.push(`the space that was ${target} is now ${own}`)
+    } else {
+      notes.push(`another space is also ${target}; rename one of them`)
+    }
   }
-  return { label: target }
+  return { labels, note: notes.join('; ') }
 }
 
-/** Every active row-number-labeled space moved into its label's cell and given the grid's box size. */
-export function arrangeByLabels(draft: DraftLayout, g: Grid): { draft: DraftLayout; spaceIds: string[] } {
-  const spaceIds: string[] = []
+/** The draft with `labels` (space id -> label) applied. */
+export function applyLabels(draft: DraftLayout, labels: Map<string, string>): DraftLayout {
+  if (labels.size === 0) return draft
+  return { ...draft, spaces: draft.spaces.map((s) => (labels.has(s.spaceId) ? { ...s, label: labels.get(s.spaceId)! } : s)) }
+}
+
+/**
+ * Align all to grid: every active space snaps into the cell it already sits in (by its middle), at the
+ * grid's box size, and takes that cell's label. When two spaces would share a cell, the later one (top to
+ * bottom, left to right) takes the nearest free cell within two columns, or is left where it is. Names
+ * like "Gate" are kept, and so is a label another space keeps.
+ */
+export function alignToCells(draft: DraftLayout, g: Grid): { draft: DraftLayout; moved: number; renamed: number; left: number } {
+  const active = draft.spaces
+    .filter((s) => !s.retired)
+    .map((s) => ({ s, c: center(s.rect) }))
+    .sort((a, b) => a.c[1] - b.c[1] || a.c[0] - b.c[0])
+  const taken: Cell[] = []
+  const placed = new Map<string, Cell>()
+  let left = 0
+  for (const { s, c } of active) {
+    const home = cellAt(g, c)
+    const options = [0, -1, 1, -2, 2]
+      .map((d) => ({ row: home.row, col: home.col + d }))
+      .sort((a, b) => Math.abs(cellRect(g, a).x + g.boxW / 2 - c[0]) - Math.abs(cellRect(g, b).x + g.boxW / 2 - c[0]))
+    const cell = options.find((o) => !taken.some((t) => sameCell(t, o)))
+    if (!cell) {
+      left++
+      continue
+    }
+    taken.push(cell)
+    placed.set(s.spaceId, cell)
+  }
+  // Labels kept as they are: names, spaces left in place, and cells outside the lettered rows.
+  const digits = labelDigits(draft.spaces)
+  const next = new Map<string, string>()
+  for (const { s } of active) {
+    const cell = placed.get(s.spaceId)
+    const label = cell && renamable(s.label) ? cellLabel(cell, Math.max(2, parseLabel(s.label)?.digits ?? digits)) : null
+    if (label) next.set(s.spaceId, label)
+  }
+  const kept = new Set(active.filter(({ s }) => !next.has(s.spaceId)).map(({ s }) => normalizeLabel(s.label)))
+  let moved = 0
+  let renamed = 0
   const spaces = draft.spaces.map((s) => {
-    const p = s.retired ? null : parseLabel(s.label)
-    if (!p) return s
-    const rect = cellRect(g, { row: rowIndex(p.row), col: p.num - 1 })
-    if (rect.x === s.rect.x && rect.y === s.rect.y && rect.w === s.rect.w && rect.h === s.rect.h) return s
-    spaceIds.push(s.spaceId)
-    return { ...s, rect }
+    const cell = placed.get(s.spaceId)
+    if (!cell) return s
+    const rect = cellRect(g, cell)
+    const label = next.get(s.spaceId)
+    const relabel = label && !kept.has(normalizeLabel(label)) && normalizeLabel(label) !== normalizeLabel(s.label) ? label : null
+    const shifted = rect.x !== s.rect.x || rect.y !== s.rect.y || rect.w !== s.rect.w || rect.h !== s.rect.h
+    if (!shifted && !relabel) return s
+    if (shifted) moved++
+    if (relabel) renamed++
+    return { ...s, rect, ...(relabel ? { label: relabel } : {}) }
   })
-  return { draft: spaceIds.length ? { ...draft, spaces } : draft, spaceIds }
+  return { draft: moved || renamed ? { ...draft, spaces } : draft, moved, renamed, left }
+}
+
+/**
+ * Fit grid to one space: the grid shifts and resizes so `rect` exactly fills the cell it sits in (its
+ * row and column stay the same); the gaps are kept.
+ */
+export function anchorGrid(g: Grid, rect: DraftRect): Grid {
+  const gapX = g.cellW - g.boxW
+  const gapY = g.cellH - g.boxH
+  const cellW = rect.w + gapX
+  const cellH = rect.h + gapY
+  const { row, col } = cellAt(g, center(rect))
+  return {
+    x0: r2(rect.x - col * cellW - gapX / 2),
+    y0: r2(rect.y - row * cellH - gapY / 2),
+    cellW: r2(cellW),
+    cellH: r2(cellH),
+    boxW: rect.w,
+    boxH: rect.h,
+  }
 }
 
 /** Most grid lines drawn per direction; zoomed far out, the grid is left out rather than drawn as a blur. */

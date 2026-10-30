@@ -316,7 +316,8 @@ export function LotMappingPage() {
               onReferenceUploaded={(uploaded) => void refreshReferenceImages(uploaded)}
               issues={issues}
               onSave={save}
-              snapGrid={grid?.snap ? grid.grid : null}
+              grid={grid?.grid ?? null}
+              snap={grid?.snap ?? false}
             />
           </div>
           <ValidationPanel report={report} draft={draft} onSelectSpace={setSelectedSpaceId} />

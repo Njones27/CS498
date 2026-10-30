@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { davidFixture, space } from '../fixtures/david'
 import {
-  arrangeByLabels,
+  alignToCells,
+  anchorGrid,
   cellAt,
   cellLabel,
   cellRect,
@@ -11,7 +12,7 @@ import {
   gridInView,
   gridSizes,
   labelDigits,
-  relabelForCell,
+  relabelMoved,
   rowIndex,
   rowLetter,
   snapMove,
@@ -98,28 +99,81 @@ describe('cells', () => {
 })
 
 describe('relabel by cell', () => {
-  const spaces = [space('a', 0, 0, { label: 'B-01' }), space('b', 0, 0, { label: 'C-07' }), space('g', 0, 0, { label: 'Gate' })]
+  // G: column c's box starts at x 32.5 + 45c, row r's at y -56 + 90r (row B at 34).
+  const at = (id: string, label: string, row: number, col: number) =>
+    space(id, 0, 0, { label, rect: cellRect(G, { row, col }) })
 
   it('takes the cell label when free', () => {
-    expect(relabelForCell(spaces, 'a', { row: 3, col: 4 })).toEqual({ label: 'D-05' })
+    const spaces = [at('a', 'B-01', 1, 0)]
+    expect([...relabelMoved(G, spaces, 'a', { row: 3, col: 4 }).labels]).toEqual([['a', 'D-05']])
   })
-  it('keeps the label when another space uses it, or the cell is outside the rows', () => {
-    expect(relabelForCell(spaces, 'a', { row: 2, col: 6 })).toEqual({ note: 'C-07 is already used; kept B-01' })
-    expect(relabelForCell(spaces, 'a', { row: -1, col: 0 }).note).toMatch(/Outside the lettered rows/)
+
+  it('renames a space elsewhere that had the label, for the cell it sits in', () => {
+    // 'm' is labeled C-07 but sits in C-09's cell.
+    const spaces = [at('a', 'B-01', 1, 0), at('m', 'C-07', 2, 8)]
+    const { labels, note } = relabelMoved(G, spaces, 'a', { row: 2, col: 6 })
+    expect([...labels]).toEqual([
+      ['a', 'C-07'],
+      ['m', 'C-09'],
+    ])
+    expect(note).toBe('Now C-07; the space that was C-07 is now C-09')
   })
-  it('never renames a custom name', () => {
-    expect(relabelForCell(spaces, 'g', { row: 3, col: 4 })).toEqual({})
+
+  it('leaves a duplicate (flagged) when the other space\'s own cell label is taken too', () => {
+    const spaces = [at('a', 'B-01', 1, 0), at('m', 'C-07', 2, 8), at('n', 'C-09', 3, 3)]
+    const { labels, note } = relabelMoved(G, spaces, 'a', { row: 2, col: 6 })
+    expect([...labels]).toEqual([['a', 'C-07']])
+    expect(note).toMatch(/another space is also C-07/)
+  })
+
+  it('keeps names and cells outside the lettered rows', () => {
+    const spaces = [at('g', 'Gate', 1, 0), at('a', 'B-01', 1, 1)]
+    expect(relabelMoved(G, spaces, 'g', { row: 3, col: 4 }).labels.size).toBe(0)
+    expect(relabelMoved(G, spaces, 'a', { row: -1, col: 0 }).note).toMatch(/Outside the lettered rows/)
   })
 })
 
-describe('arrangeByLabels', () => {
-  it('puts every labeled space in its cell at the grid size', () => {
-    const draft = davidFixture() // A-01..A-05 at pitch 110, box 100 x 120; A-05 retired
-    const g = { ...G, y0: 0 }
-    const { draft: next, spaceIds } = arrangeByLabels(draft, g)
-    expect(next.spaces.find((s) => s.spaceId === 'A-03')!.rect).toEqual(cellRect(g, { row: 0, col: 2 }))
-    expect(spaceIds).not.toContain('A-05')
-    expect(next.spaces.find((s) => s.spaceId === 'A-05')!.rect).toEqual(draft.spaces[4].rect)
+describe('alignToCells', () => {
+  it('snaps every space into the cell it is in and names it for that cell, without moving it far', () => {
+    // A-01..A-04 at pitch 110 with G's 45 pitch: each lands in the cell under its middle.
+    const draft = davidFixture()
+    const { draft: next, moved, renamed } = alignToCells(draft, G)
+    const a03 = next.spaces.find((s) => s.spaceId === 'A-03')!
+    const cell = cellAt(G, [260 + 50, 40 + 60]) // where A-03 already was
+    expect(a03.rect).toEqual(cellRect(G, cell))
+    expect(a03.label).toBe('B-07')
+    expect(moved).toBe(4)
+    expect(renamed).toBe(4)
+    expect(next.spaces.find((s) => s.spaceId === 'A-05')).toEqual(draft.spaces[4]) // retired: untouched
+  })
+
+  it('gives a space whose cell is taken the nearest free cell, and keeps names', () => {
+    const spaces = [
+      space('p', 32, 34, { label: 'B-01', rect: { x: 32, y: 34, w: 40, h: 72 } }),
+      space('q', 40, 34, { label: 'X-09', rect: { x: 40, y: 34, w: 40, h: 72 } }), // same cell as p
+      space('g', 300, 34, { label: 'Gate', rect: { x: 300, y: 34, w: 40, h: 72 } }),
+    ]
+    const { draft: next } = alignToCells(davidFixture({ spaces }), G)
+    expect(next.spaces.map((s) => [s.label, s.rect.x])).toEqual([
+      ['B-01', 32.5],
+      ['B-02', 77.5],
+      ['Gate', cellRect(G, cellAt(G, [320, 70])).x],
+    ])
+  })
+
+  it('leaves a draft already on the grid alone', () => {
+    const draft = davidFixture({ spaces: [space('B-01', 0, 0, { rect: cellRect(G, { row: 1, col: 0 }) })] })
+    expect(alignToCells(draft, G).draft).toBe(draft)
+  })
+})
+
+describe('anchorGrid', () => {
+  it('lines the grid up with one space: it fills its cell exactly and the gaps stay', () => {
+    const rect = { x: 100, y: 120, w: 50, h: 80 }
+    const g = anchorGrid(G, rect)
+    expect([g.boxW, g.boxH, g.cellW - g.boxW, g.cellH - g.boxH]).toEqual([50, 80, 5, 18])
+    expect(cellRect(g, cellAt(g, [125, 160]))).toEqual(rect)
+    expect(cellAt(g, [125, 160])).toEqual(cellAt(G, [125, 160])) // same row and column as before
   })
 })
 

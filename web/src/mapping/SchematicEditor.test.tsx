@@ -479,13 +479,14 @@ describe('SchematicEditor', () => {
       expect(screen.getByText('That cell already has A-02; nothing moved')).toBeInTheDocument()
     })
 
-    it('keeps the label when another space elsewhere already uses the cell\'s label', () => {
+    it('takes the cell\'s label even when a space elsewhere has it; that one is renamed for its own cell', () => {
       // A misplaced B-05 sits in row B, column 9; the B-05 cell itself is empty.
       const draft = davidFixture({ spaces: [...davidFixture().spaces, space('far', 920, 170, { label: 'B-05' })] })
       const { last } = setup({ draft, withGrid: true })
       drag(spaceEl('A-03'), 220, 130)
-      expect(byId(last(), 'A-03')).toMatchObject({ label: 'A-03', rect: { x: 480, y: 170 } })
-      expect(screen.getByText('B-05 is already used; kept A-03')).toBeInTheDocument()
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'B-05', rect: { x: 480, y: 170 } })
+      expect(byId(last(), 'far').label).toBe('B-09')
+      expect(screen.getByText('Now B-05; the space that was B-05 is now B-09')).toBeInTheDocument()
     })
 
     it('arrow keys move one cell at a time', async () => {
@@ -510,11 +511,25 @@ describe('SchematicEditor', () => {
       expect(screen.getByText('Added 3 spaces, B-01 to B-03')).toBeInTheDocument()
     })
 
-    it('with Snap to grid off, moves are free and labels stay', async () => {
+    it('with Snap to grid off, moves are free, and landing in another cell still renames', async () => {
       const { last, user } = setup({ withGrid: true })
       await user.click(screen.getByRole('checkbox', { name: 'Snap to grid' }))
       drag(spaceEl('A-03'), 225, 130)
-      expect(byId(last(), 'A-03')).toMatchObject({ label: 'A-03', rect: { x: 485, y: 170 } })
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'B-05', rect: { x: 485, y: 170 } })
+      drag(spaceEl('A-03'), 5, 0) // still in B-05's cell: no rename, no snap
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'B-05', rect: { x: 490, y: 170 } })
+    })
+
+    it('Fit grid with a space selected lines the grid up with that space', async () => {
+      const spaces = davidFixture().spaces.map((s) => (s.spaceId === 'A-03' ? { ...s, rect: { x: 265, y: 45, w: 90, h: 110 } } : s))
+      const { last, user } = setup({ draft: davidFixture({ spaces }), withGrid: true, selectedSpaceId: 'A-03' })
+      await user.click(screen.getByRole('button', { name: 'Fit grid to A-03' }))
+      expect(screen.getByRole('spinbutton', { name: 'Space width' })).toHaveValue(90)
+      expect(screen.getByRole('spinbutton', { name: 'Space height' })).toHaveValue(110)
+      // A-03 now sits exactly in its cell, so snapping it changes nothing; A-01 aligns in place.
+      await user.click(screen.getByRole('button', { name: 'Align all to grid' }))
+      expect(byId(last(), 'A-03').rect).toEqual({ x: 265, y: 45, w: 90, h: 110 })
+      expect(byId(last(), 'A-01')).toMatchObject({ label: 'A-01', rect: { w: 90, h: 110 } })
     })
 
     it('shows the grid with row letters, and can hide it', async () => {

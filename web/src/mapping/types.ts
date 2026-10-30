@@ -57,6 +57,8 @@ export interface ReferencePhotoPanelProps extends MappingSelection {
   onReferenceUploaded: (uploaded?: UploadedReference) => void
   issues: Issue[]
   onSave?: () => Promise<DraftLayout | null>
-  /** The schematic grid while snapping is on: spaces added or moved from the photo land in its cells. */
-  snapGrid?: Grid | null
+  /** The schematic grid: a space moved from the photo into another cell is renamed for it. */
+  grid?: Grid | null
+  /** Snapping on: spaces added or moved from the photo also land squarely in the grid's cells. */
+  snap?: boolean
 }

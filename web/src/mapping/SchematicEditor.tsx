@@ -22,14 +22,15 @@ import {
   type Corner,
 } from './schematic/geometry'
 import {
-  arrangeByLabels,
+  alignToCells,
+  applyLabels,
   cellAt,
   cellRect,
   cellTaken,
   cellsIn,
   gridInView,
   gridSizes,
-  relabelForCell,
+  relabelMoved,
   rowLetter,
   snapMove,
   snapResize,
@@ -146,9 +147,9 @@ export function SchematicEditor({
   const noteId = useId()
 
   // A drag listens on window; it reads the latest draft and callback when the pointer is released.
-  const latest = useRef({ draft, onChange, snapGrid })
+  const latest = useRef({ draft, onChange, snapGrid, grid: grid?.grid ?? null })
   useEffect(() => {
-    latest.current = { draft, onChange, snapGrid }
+    latest.current = { draft, onChange, snapGrid, grid: grid?.grid ?? null }
   })
   const stopDrag = useRef<(() => void) | null>(null)
   useEffect(() => () => stopDrag.current?.(), [])
@@ -290,8 +291,9 @@ export function SchematicEditor({
   }
 
   /**
-   * Commit a moved or resized space: its photo outlines follow and the map grows to hold it. A move with
-   * snapping on also takes the label of the cell it lands in (see relabelForCell).
+   * Commit a moved or resized space: its photo outlines follow and the map grows to hold it. A space that
+   * lands in another cell (or is snapped into one) is renamed for it, row letter and column number; see
+   * relabelMoved. `cell` is the cell a snapped move put it in.
    */
   function commitRect(current: DraftLayout, emit: SchematicEditorProps['onChange'], spaceId: string, rect: DraftRect, cell: Cell | null) {
     // Never stack two spaces in one cell.
@@ -304,12 +306,15 @@ export function SchematicEditor({
       })
       return setNote(`That cell already has ${there?.label.trim() || 'a space'}; nothing moved`)
     }
-    const relabel = cell ? relabelForCell(current.spaces, spaceId, cell) : {}
-    const patch = relabel.label ? { rect, label: relabel.label } : { rect }
-    const grown = afterRectChange(current, updateSpace(current, spaceId, patch), [spaceId])
+    const was = current.spaces.find((s) => s.spaceId === spaceId)
+    const gr = latest.current.grid
+    const to = cell ?? (gr && cellAt(gr, [rect.x + rect.w / 2, rect.y + rect.h / 2]))
+    const from = gr && was && cellAt(gr, [was.rect.x + was.rect.w / 2, was.rect.y + was.rect.h / 2])
+    const rename = gr && to && (cell !== null || !from || from.row !== to.row || from.col !== to.col)
+    const relabel = rename ? relabelMoved(gr, current.spaces, spaceId, to) : { labels: new Map<string, string>() }
+    const grown = afterRectChange(current, applyLabels(updateSpace(current, spaceId, { rect }), relabel.labels), [spaceId])
     emitGrown(grown, emit)
     // followRects leaves an outline as it was when the new spot is off that photo (or would fold it).
-    const was = current.spaces.find((s) => s.spaceId === spaceId)
     const stuck =
       was &&
       !sameRect(was.rect, rect) &&
@@ -319,7 +324,7 @@ export function SchematicEditor({
         // Without a fit (too few outlined spaces) nothing follows, which is not about the spot.
         return unmoved && photoToSchematic(current, v) !== null
       })
-    const notes = [relabel.label ? `Now ${relabel.label}` : relabel.note]
+    const notes = [relabel.note]
     if (stuck) notes.push('its photo outline stays where it is: the new spot is off the photo')
     setNote(notes.filter(Boolean).join('; '))
   }
@@ -388,13 +393,19 @@ export function SchematicEditor({
     if (!sameRect(rect, selected.rect)) commitRect(draft, onChange, selected.spaceId, rect, null)
   }
 
-  /** Every row-number-labeled space into its label's cell at the grid's size. The photo outlines stay put. */
+  /**
+   * Every space snaps into the cell it already sits in and is renamed for it (alignToCells). Spaces stay
+   * where they are on the photos.
+   */
   function onAlignAll() {
     if (!grid) return
-    const { draft: next, spaceIds } = arrangeByLabels(draft, grid.grid)
-    if (spaceIds.length === 0) return setNote('Every labeled space is already on the grid')
+    const { draft: next, moved, renamed, left } = alignToCells(draft, grid.grid)
+    if (next === draft) return setNote('Every space is already in its cell, with its cell\'s label')
     emitGrown(fitSchematic(next))
-    setNote(`Aligned ${spaceIds.length} space${spaceIds.length === 1 ? '' : 's'} to the grid`)
+    const parts = [`Aligned ${moved} space${moved === 1 ? '' : 's'}`]
+    if (renamed) parts.push(`renamed ${renamed}`)
+    if (left) parts.push(`${left} had no free cell nearby and stayed`)
+    setNote(parts.join('; '))
   }
 
   /** Esc clears the selection, except while typing in a field. */
@@ -466,7 +477,7 @@ export function SchematicEditor({
         </span>
         <span className="hint">{summary}</span>
       </div>
-      {grid && <GridBar controls={grid} onAlignAll={onAlignAll} />}
+      {grid && <GridBar controls={grid} selected={selected && !selected.retired ? selected : null} onAlignAll={onAlignAll} />}
       {rowOpen && (
         <RowDialog
           initialStart={nextRowStart(draft.spaces)}
@@ -812,7 +823,7 @@ const SIZE_FIELDS: { key: keyof GridSizes; label: string }[] = [
 ]
 
 /** Snap and grid toggles, the grid's sizes (schematic units), Fit grid, and Align all. */
-function GridBar({ controls, onAlignAll }: { controls: GridControls; onAlignAll: () => void }) {
+function GridBar({ controls, selected, onAlignAll }: { controls: GridControls; selected: DraftSpace | null; onAlignAll: () => void }) {
   const sizes = gridSizes(controls.grid)
   return (
     <div className="schematic-gridbar" role="group" aria-label="Grid">
@@ -827,14 +838,23 @@ function GridBar({ controls, onAlignAll }: { controls: GridControls; onAlignAll:
       {SIZE_FIELDS.map(({ key, label }) => (
         <SizeField key={key} label={label} value={sizes[key]} min={key.startsWith('gap') ? 0 : MIN_SIDE} onCommit={(v) => controls.setSizes({ [key]: v })} />
       ))}
-      <button type="button" className="button button--sm" onClick={controls.refit} title="Fit the grid to the spaces' labels again">
-        Fit grid
+      <button
+        type="button"
+        className="button button--sm"
+        onClick={() => controls.fitTo(selected?.rect ?? null)}
+        title={
+          selected
+            ? `Line the grid up with ${selected.label.trim() || 'the selected space'}: its cell and size`
+            : "Fit the grid to all the spaces' labels"
+        }
+      >
+        {selected ? `Fit grid to ${selected.label.trim() || 'selected'}` : 'Fit grid'}
       </button>
       <button
         type="button"
         className="button button--sm"
         onClick={onAlignAll}
-        title="Move every labeled space into its label's cell, at the grid's size"
+        title="Snap every space into the cell it is in, at the grid's size, and name it for that cell"
       >
         Align all to grid
       </button>

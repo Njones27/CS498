@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { fitGrid, gridSizes, shiftGrid, type Grid, type GridSizes } from './schematic/grid'
-import type { DraftLayout } from './types'
+import { anchorGrid, fitGrid, gridSizes, shiftGrid, type Grid, type GridSizes } from './schematic/grid'
+import type { DraftLayout, DraftRect } from './types'
 
 /** The schematic grid as the mapping page keeps it, and its controls. */
 export interface GridControls {
@@ -11,8 +11,11 @@ export interface GridControls {
   show: boolean
   setShow: (on: boolean) => void
   setSizes: (sizes: Partial<GridSizes>) => void
-  /** Fit the grid to the spaces' labels again, at the sizes they suggest. */
-  refit: () => void
+  /**
+   * Fit grid: to one space (it then exactly fills the cell it sits in; the grid takes its size and keeps
+   * the gaps), or with none given, to all the spaces' labels at the sizes they suggest.
+   */
+  fitTo: (rect: DraftRect | null) => void
   /**
    * An edit that grew the map left or up moved every space by (dx, dy) on its way to `next`: move the grid
    * with them. Edits say so exactly; undo and redo, which don't, are recognised by uniformShift.
@@ -108,9 +111,14 @@ export function useSchematicGrid(lotId: string, draft: DraftLayout | null): Grid
       update({ ...current, sizes: next })
       setState({ ...state, grid: fitGrid(draft.spaces, next) })
     },
-    refit: () => {
-      update({ ...current, sizes: {} })
-      setState({ ...state, grid: fitGrid(draft.spaces) })
+    fitTo: (rect) => {
+      if (!rect) {
+        update({ ...current, sizes: {} })
+        return setState({ ...state, grid: fitGrid(draft.spaces) })
+      }
+      const grid = anchorGrid(state.grid, rect)
+      update({ ...current, sizes: gridSizes(grid) })
+      setState({ ...state, grid })
     },
     shiftBy: (next, dx, dy) => setState({ ...state, seen: next, grid: shiftGrid(state.grid, dx, dy) }),
   }
