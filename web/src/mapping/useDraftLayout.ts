@@ -126,6 +126,8 @@ export function useDraftLayout(lotId: string, options?: UseDraftLayoutOptions): 
   })
   const editsRef = useRef(0)
   const inFlight = useRef<Promise<DraftLayout | null> | null>(null)
+  /** editsRef when the in-flight save started: the edits it carries. */
+  const inFlightEdits = useRef(0)
   const lotRef = useRef(lotId)
   useEffect(() => {
     lotRef.current = lotId
@@ -233,12 +235,18 @@ export function useDraftLayout(lotId: string, options?: UseDraftLayoutOptions): 
     setSavedNote(null)
   }, [])
 
-  const save = useCallback((): Promise<DraftLayout | null> => {
-    if (inFlight.current) return inFlight.current
+  const save = useCallback(function saveDraft(): Promise<DraftLayout | null> {
+    if (inFlight.current) {
+      // Join the save in flight, unless edits were made after it started (an outline committed
+      // right after the last one): those go out in one more save once it lands.
+      if (editsRef.current === inFlightEdits.current) return inFlight.current
+      return inFlight.current.then((saved) => (saved ? saveDraft() : null))
+    }
     const current = draftRef.current
     if (!current) return Promise.resolve(null)
     const savedLot = lotRef.current
     const editsAtStart = editsRef.current
+    inFlightEdits.current = editsAtStart
     setSaving(true)
     setSaveError(null)
     const run = api

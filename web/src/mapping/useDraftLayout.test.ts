@@ -153,6 +153,43 @@ describe('useDraftLayout', () => {
     expect(fetchMock.mock.calls.filter((c) => c[1]?.method === 'PUT')).toHaveLength(1)
   })
 
+  it('a save asked for after an edit made during a save sends that edit once the first lands', async () => {
+    const hold = deferred<Reply>()
+    let puts = 0
+    const { fetchMock, hook } = await loaded({
+      [`PUT ${URL}`]: (init) => {
+        if (puts++ === 0) return hold.promise
+        const body = JSON.parse(String(init?.body)) as DraftLayout
+        return { body: saved({ ...draftFixture(), ...body }) }
+      },
+    })
+    const first = renamed(draftFixture(), 'first')
+    act(() => hook.result.current.setDraft(first))
+    let pending!: Promise<DraftLayout | null>
+    act(() => {
+      pending = hook.result.current.save()
+    })
+    const second = renamed(first, 'second') // e.g. an outline committed right after another
+    act(() => hook.result.current.setDraft(second))
+    let followUp!: Promise<DraftLayout | null>
+    act(() => {
+      followUp = hook.result.current.save()
+    })
+    expect(followUp).not.toBe(pending)
+
+    await act(async () => {
+      hold.resolve({ body: saved(first) })
+      await followUp
+    })
+    const putBodies = fetchMock.mock.calls.filter((c) => c[1]?.method === 'PUT').map((c) => JSON.parse(String(c[1]?.body)))
+    expect(putBodies.map((b: DraftLayout) => [b.revision, b.spaces[1].label])).toEqual([
+      [0, 'first'],
+      [1, 'second'],
+    ])
+    expect(hook.result.current.draft?.revision).toBe(2)
+    expect(hook.result.current.dirty).toBe(false)
+  })
+
   it('refreshReferenceImages picks up a new photo and keeps local edits', async () => {
     const uploaded = draftFixture({
       viewpoints: draftFixture().viewpoints.map((v) =>

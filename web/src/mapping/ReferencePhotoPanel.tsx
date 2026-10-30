@@ -122,6 +122,12 @@ export function ReferencePhotoPanel({
     }
   }, [selectedSpaceId, currentViewId, selectedOutline === null])
 
+  // US-08 #3 "the change is saved to the draft": an outline change (drawn, dragged, deleted,
+  // accepted or rejected) is saved as soon as it is made, not left for Save or autosave.
+  const commitOutlines = (next: DraftLayout) => {
+    onChange(next)
+    void onSave?.()
+  }
 
   // Keyboard shortcuts:
   // - Esc: cancel clicks, exit drawing mode, or deselect space
@@ -178,7 +184,9 @@ export function ReferencePhotoPanel({
         const nextVps = draft.viewpoints.map((v) =>
           v.viewId === currentViewpoint.viewId ? { ...v, outlines: nextOutlines } : v,
         )
+        // commitOutlines, spelled out so this effect's dependencies stay listed
         onChange({ ...draft, viewpoints: nextVps })
+        void onSave?.()
       }
       draggingIdxRef.current = null
       dragCornersRef.current = null
@@ -197,7 +205,7 @@ export function ReferencePhotoPanel({
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [draggingIdx, currentViewpoint, selectedSpaceId, draft, onChange, svgWidth, svgHeight])
+  }, [draggingIdx, currentViewpoint, selectedSpaceId, draft, onChange, onSave, svgWidth, svgHeight])
 
   const handleAddViewpoint = (e: React.FormEvent) => {
     e.preventDefault()
@@ -230,9 +238,10 @@ export function ReferencePhotoPanel({
     setIsAddingViewpoint(false)
     onChange(nextDraft)
     onViewChange(nextViewId)
-    if (onSave) {
-      void onSave()
-    }
+    void onSave?.().then((saved) => {
+      // Viewpoints cannot be removed once saved, and a photo upload needs the viewpoint stored.
+      if (!saved) setErrorMsg(`${name} (${nextViewId}) is not saved yet. Save the draft to keep it.`)
+    })
   }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -337,7 +346,7 @@ export function ReferencePhotoPanel({
       setClicks([])
       setIsDrawing(false)
       setStatusNotice(`${selectedSpace.label} outlined in ${currentViewpoint.viewId}`)
-      onChange({ ...draft, viewpoints: nextVps })
+      commitOutlines({ ...draft, viewpoints: nextVps })
     }
   }
 
@@ -354,7 +363,7 @@ export function ReferencePhotoPanel({
         ? { ...v, outlines: remOutlines, outlineReview: remReview }
         : v,
     )
-    onChange({ ...draft, viewpoints: nextVps })
+    commitOutlines({ ...draft, viewpoints: nextVps })
     const sp = draft.spaces.find((s) => s.spaceId === spaceId)
     setStatusNotice(`Removed outline for ${sp?.label ?? spaceId}`)
   }
@@ -368,7 +377,7 @@ export function ReferencePhotoPanel({
     const nextVps = draft.viewpoints.map((v) =>
       v.viewId === currentViewpoint.viewId ? { ...v, outlineReview: nextReview } : v,
     )
-    onChange({ ...draft, viewpoints: nextVps })
+    commitOutlines({ ...draft, viewpoints: nextVps })
     const sp = draft.spaces.find((s) => s.spaceId === spaceId)
     setStatusNotice(`Accepted proposed outline for ${sp?.label ?? spaceId}`)
   }
@@ -386,7 +395,7 @@ export function ReferencePhotoPanel({
     const nextVps = draft.viewpoints.map((v) =>
       v.viewId === currentViewpoint.viewId ? { ...v, outlineReview: nextReview } : v,
     )
-    onChange({ ...draft, viewpoints: nextVps })
+    commitOutlines({ ...draft, viewpoints: nextVps })
     const sp = draft.spaces.find((s) => s.spaceId === spaceId)
     setStatusNotice(`Marked outline for ${sp?.label ?? spaceId} as proposed for review`)
   }
@@ -405,7 +414,7 @@ export function ReferencePhotoPanel({
     const nextVps = draft.viewpoints.map((v) =>
       v.viewId === currentViewpoint.viewId ? { ...v, outlineReview: nextReview } : v,
     )
-    onChange({ ...draft, viewpoints: nextVps })
+    commitOutlines({ ...draft, viewpoints: nextVps })
     setStatusNotice(`Accepted ${count} proposed outline${count === 1 ? '' : 's'} in ${currentViewpoint.viewId}`)
   }
 

@@ -538,4 +538,49 @@ describe('Reference photo panel with the real draft (US-08)', () => {
     expect(await screen.findByText('Draft saved')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
+
+  /** Click the four corners of a 500x500 photo box, as an admin outlining the selected space. */
+  function outlineOnPhoto() {
+    const svg = screen.getByTestId('photo-svg')
+    for (const [x, y] of [
+      [100, 100],
+      [200, 100],
+      [200, 200],
+      [100, 200],
+    ]) {
+      fireEvent.click(svg, { clientX: x, clientY: y })
+    }
+  }
+
+  // US-08 #3 and #4: each outline reaches the stored draft without Save, and one space keeps a
+  // polygon in each of two views.
+  it('saves each outline to the draft as it is drawn, one space in two views', async () => {
+    const rect = vi.spyOn(SVGElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 500, 500))
+    try {
+      const twoPhotos = draftFixture()
+      twoPhotos.viewpoints[1] = {
+        ...twoPhotos.viewpoints[1],
+        referenceImage: { url: '/api/_test/objects/reference/test-lot/V2/def', width: 640, height: 360 },
+      }
+      const server = draftServer(twoPhotos)
+      mockFetch({ 'GET /lots/test-lot': { body: detail }, ...server.routes })
+      renderApp('/admin/lots/test-lot/map', ADMIN)
+      await screen.findByText('Revision 0')
+
+      await userEvent.click(screen.getByTestId('space-item-A-02'))
+      outlineOnPhoto()
+      await waitFor(() => expect(server.puts).toHaveLength(1))
+      expect(server.stored().viewpoints[0].outlines['A-02']).toHaveLength(4)
+
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Viewpoint' }), 'V2')
+      outlineOnPhoto()
+      await waitFor(() => expect(server.puts).toHaveLength(2))
+      expect(server.puts.map((p) => p.revision)).toEqual([0, 1])
+      expect(server.stored().viewpoints.map((v) => v.outlines['A-02']?.length)).toEqual([4, 4])
+      expect(screen.getByTestId('space-item-A-02')).toHaveTextContent('A-02: 2 views')
+      expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+    } finally {
+      rect.mockRestore()
+    }
+  })
 })

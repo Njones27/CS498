@@ -190,7 +190,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
 
   // --- US-08 #2: Outline a Space -------------------------------------------
   it('US-08 #2: clicking 4 corners outlines selected space and shows message', async () => {
-    const { onChange } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a03' })
+    const { onChange, onSave } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a03' })
 
     // Prompt shows initial state
     expect(screen.getByText('Click the 4 corners of A-03 (0 of 4)')).toBeInTheDocument()
@@ -209,10 +209,13 @@ describe('ReferencePhotoPanel (US-08)', () => {
     fireEvent.click(svg, { clientX: 150, clientY: 150 })
     expect(screen.getByText(/Click the 4 corners of A-03 \(3 of 4\)/)).toBeInTheDocument()
 
+    expect(onSave).not.toHaveBeenCalled() // a partial outline is not saved
+
     // Click 4 (completes outline)
     fireEvent.click(svg, { clientX: 50, clientY: 150 })
 
     expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledTimes(1) // the finished outline is saved to the draft
     const updatedDraft: DraftLayout = onChange.mock.calls[0][0]
     const v1 = updatedDraft.viewpoints.find((v) => v.viewId === 'V1')!
     expect(v1.outlines['sp_a03']).toHaveLength(4)
@@ -224,7 +227,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
 
   // --- US-08 #3: Adjust a Polygon ------------------------------------------
   it('US-08 #3: dragging a corner handle emits updated polygon on pointer up', async () => {
-    const { onChange } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
+    const { onChange, onSave } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
 
     // A-01 already has an outline in V1; corner handles are shown
     const handle0 = screen.getByTestId('corner-handle-0')
@@ -235,6 +238,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
 
     // Move to new position (200, 200) -> 200/500 = 0.4
     fireEvent.pointerMove(window, { clientX: 200, clientY: 200 })
+    expect(onSave).not.toHaveBeenCalled()
 
     // Pointer up saves to draft
     fireEvent.pointerUp(window)
@@ -247,6 +251,8 @@ describe('ReferencePhotoPanel (US-08)', () => {
     expect(screen.queryByTestId('partial-clicks')).not.toBeInTheDocument()
 
     expect(onChange).toHaveBeenCalledTimes(1)
+    // US-08 #3: "the change is saved to the draft", on pointer up, without pressing Save
+    expect(onSave).toHaveBeenCalledTimes(1)
     const updatedDraft: DraftLayout = onChange.mock.calls[0][0]
     const v1 = updatedDraft.viewpoints.find((v) => v.viewId === 'V1')!
     expect(v1.outlines['sp_a01']).toBeDefined()
@@ -343,6 +349,18 @@ describe('ReferencePhotoPanel (US-08)', () => {
     expect(onViewChange).toHaveBeenCalledWith('V4')
   })
 
+  it('says so when a new viewpoint could not be saved', async () => {
+    const { user } = renderPanel({ viewId: 'V1', onSave: async () => null })
+
+    await user.click(screen.getByRole('button', { name: '+ Viewpoint' }))
+    await user.type(screen.getByPlaceholderText('e.g. South Corner'), 'South Gate')
+    await user.click(screen.getByRole('button', { name: 'Add Viewpoint' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'South Gate (V4) is not saved yet. Save the draft to keep it.',
+    )
+  })
+
   // --- Forward-Compatible Proposed Outlines --------------------------------
   it('allows accepting or rejecting proposed outlines', async () => {
     const { user, onChange } = renderPanel({ viewId: 'V1' })
@@ -362,12 +380,13 @@ describe('ReferencePhotoPanel (US-08)', () => {
   })
 
   it('rejecting a proposed outline removes it', async () => {
-    const { user, onChange } = renderPanel({ viewId: 'V1' })
+    const { user, onChange, onSave } = renderPanel({ viewId: 'V1' })
 
     const rejectBtn = screen.getByRole('button', { name: 'Reject' })
     await user.click(rejectBtn)
 
     expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledTimes(1)
     const updatedDraft: DraftLayout = onChange.mock.calls[0][0]
     const v1 = updatedDraft.viewpoints.find((v) => v.viewId === 'V1')!
     expect(v1.outlines['sp_a02']).toBeUndefined()
@@ -376,12 +395,13 @@ describe('ReferencePhotoPanel (US-08)', () => {
 
   // --- Delete outline ------------------------------------------------------
   it('allows deleting an existing outline', async () => {
-    const { user, onChange } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
+    const { user, onChange, onSave } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
 
     const deleteBtn = screen.getByRole('button', { name: 'Delete outline' })
     await user.click(deleteBtn)
 
     expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledTimes(1)
     const updatedDraft: DraftLayout = onChange.mock.calls[0][0]
     const v1 = updatedDraft.viewpoints.find((v) => v.viewId === 'V1')!
     expect(v1.outlines['sp_a01']).toBeUndefined()
