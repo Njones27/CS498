@@ -1,6 +1,7 @@
 import { fitSchematic, updateSpace, type Grown } from './schematic/edits'
 import { cellLabel, cellRect, cellTaken, insertAtRowStart, labelDigits, rowIndex, rowLetter, type Cell, type Grid } from './schematic/grid'
 import { formatLabel, normalizeLabel, parseLabel } from './schematic/labels'
+import { cutByBorder } from './photo/geom'
 import type { DraftLayout, DraftViewpoint, Outline } from './types'
 
 // Which grid cell a photo outline is in, read off the photo itself: its row from the rows of outlines
@@ -63,7 +64,8 @@ function markers(draft: DraftLayout, view: DraftViewpoint, except?: string | Ite
   return draft.spaces.flatMap((s) => {
     const raw = view.outlines[s.spaceId]
     const p = parseLabel(s.label)
-    if (s.retired || !raw || !p || skip.has(s.spaceId)) return []
+    // A cut-off stall's outline (up to the photo's border) would skew its row's height and place.
+    if (s.retired || !raw || !p || skip.has(s.spaceId) || cutByBorder(raw)) return []
     const outline = inProportion(view, raw)
     return [{ spaceId: s.spaceId, row: rowIndex(p.row), col: p.num - 1, outline, ...box(outline) }]
   })
@@ -208,16 +210,20 @@ function photoColumn(lay: Layout, row: number, x: number, y: number): number {
  * The row at photo y, counted from the nearest row's middle (`at` before rounding): within half a row of
  * it, that row; further out (past the outermost row), rows on by the row step.
  */
-function photoRow(lay: Layout, y: number): { row: number; at: number } {
+function photoRow(lay: Layout, x: number, y: number): { row: number; at: number } {
   const [row, rowY] = [...lay.rowY].reduce((a, b) => (Math.abs(b[1] - y) < Math.abs(a[1] - y) ? b : a))
   const off = (y - rowY) / lay.rowStep
   const step = Math.sign(off) * Math.round(Math.abs(off))
   // Past the outermost row by more than half a space is a new row beyond it, even where the rows are
-  // not evenly spaced (back-to-back rows between wide aisles make the median row step too big).
+  // not evenly spaced (back-to-back rows between wide aisles make the median row step too big). "Past"
+  // is measured from the row's own line at x, so the far end of a tilted row (perspective) still reads
+  // as that row.
   const rows = [...lay.rowY.keys()]
-  const side = Math.sign(y - rowY) // which way from the nearest row, on the photo
+  const ms = lay.byRow.get(row) ?? []
+  const lineY = ms.length > 1 ? rowY + slope(ms) * (x - median(ms.map((m) => m.x))!) : rowY
+  const side = Math.sign(y - lineY) // which way from the nearest row, on the photo
   const beyond =
-    Math.abs(y - rowY) > lay.height / 2 &&
+    Math.abs(y - lineY) > lay.height / 2 &&
     ((row === Math.min(...rows) && side === -Math.sign(lay.rowStep)) ||
       (row === Math.max(...rows) && side === Math.sign(lay.rowStep)))
   return { row: beyond && step === 0 ? row + Math.sign(off) : row + step, at: row + off }
@@ -251,7 +257,7 @@ export function photoCell(draft: DraftLayout, view: DraftViewpoint, outline: Out
   const lay = layout(markers(draft, view, exceptId))
   if (!lay) return null
   const me = box(lay.level(inProportion(view, outline)))
-  const { row, at: rowAt } = photoRow(lay, me.y)
+  const { row, at: rowAt } = photoRow(lay, me.x, me.y)
   const at = photoColumn(lay, row, me.x, me.y)
   return { row, col: Math.round(at), at, rowAt, named: Math.round(at + offsetNear(lay, row, me.x)) }
 }

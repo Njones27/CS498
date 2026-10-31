@@ -31,6 +31,7 @@ from .models import (
     Rect,
     Schematic,
     Viewpoint,
+    touches_photo_edge,
 )
 
 
@@ -345,6 +346,24 @@ def validate_draft(draft: Draft, published: PublishedLayout | None) -> Validatio
                 f"{name} is retired but still outlined in {_views_text(in_views)}",
                 [s.space_id],
                 in_views[0] if len(in_views) == 1 else None,
+            )
+
+    for v in views:
+        active_ids = {a.space_id for a in active}
+        flush = sorted(
+            sid
+            for sid, poly in v.outlines.items()
+            # An outline past the border is already an error (polygon_outside_photo).
+            if sid in active_ids and touches_photo_edge(poly) and _inside_photo(poly)
+        )
+        if flush:
+            n = len(flush)
+            warn(
+                "outline_on_photo_edge",
+                f"{n} {_plural(n, 'outline reaches', 'outlines reach')} the edge of the "
+                f"{v.view_id} photo: treated as cut off, never shown Free from {v.view_id}",
+                flush,
+                v.view_id,
             )
 
     for v in views:

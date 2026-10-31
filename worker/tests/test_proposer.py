@@ -303,3 +303,23 @@ def test_coordinates_are_rounded():
     assert stalls
     for s in stalls:
         assert all(round(v, 4) == v for p in s.polygon for v in p)
+
+
+@pytest.mark.parametrize("angle", [0, 7, 15, 30, -20])
+def test_cut_off_stalls_are_valid_outlines_up_to_the_border(angle):
+    """On a turned photo the border cuts stalls at an angle: the outline is the part in view
+    (a real intersection, not corners pushed onto the border), always a valid four-sided shape,
+    and `partial` is exactly the worker's rule (an outline reaching the border)."""
+    from parking_core.layouts import is_valid_quad
+    from parking_core.models import touches_photo_edge
+
+    bgr = cv2.imread(str(DRONE))
+    h, w = bgr.shape[:2]
+    turn = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+    turned = cv2.warpAffine(bgr, turn, (w, h), borderMode=cv2.BORDER_REPLICATE)
+    stalls = proposer().propose(jpeg(turned))
+    assert stalls
+    assert all(is_valid_quad(s.polygon) for s in stalls)
+    assert all(s.partial == touches_photo_edge(s.polygon) for s in stalls)
+    assert all(0 <= v <= 1 for s in stalls for p in s.polygon for v in p)
+    assert all((s.whole_polygon is not None) == s.partial for s in stalls)

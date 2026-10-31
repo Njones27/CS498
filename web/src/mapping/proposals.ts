@@ -3,6 +3,7 @@ import { MARGIN, MIN_SIDE, yBelowAll } from './schematic/geometry'
 import { addSpacesAt, deleteSpace, type Grown } from './schematic/edits'
 import { formatLabel, nextRowStart, parseLabel } from './schematic/labels'
 import { type Grid, shiftGrid } from './schematic/grid'
+import { touchesPhotoEdge } from './photo/geom'
 import { addSpaceFromOutline, centroid, outlineToRect, photoToSchematic } from './sync'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, OutlineReview, Outline, Point } from './types'
 
@@ -195,18 +196,6 @@ export function mergeProposals(
 }
 
 /** The view's outlines still waiting for review, weakest evidence first (those without a score last). */
-/** Matches `PHOTO_EDGE` in parking_core.models: a corner this close to the border is on it. */
-const PHOTO_EDGE = 0.001
-
-/**
- * An outline drawn up to the photo's border: a stall the photo cuts off, outlined only where it is
- * in view. The worker never calls such a stall Free (`touches_photo_edge` on the server); another
- * viewpoint that sees it whole decides it.
- */
-export function touchesPhotoEdge(outline: Point[]): boolean {
-  return outline.some(([x, y]) => x <= PHOTO_EDGE || x >= 1 - PHOTO_EDGE || y <= PHOTO_EDGE || y >= 1 - PHOTO_EDGE)
-}
-
 export function pendingProposals(
   view: DraftViewpoint,
 ): { spaceId: string; evidence: number | null; partial: boolean }[] {
@@ -278,3 +267,5 @@ export function rejectProposals(
   }
   return { draft: next, removedSpaces }
 }
+
+export { touchesPhotoEdge }
