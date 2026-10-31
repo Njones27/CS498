@@ -52,6 +52,13 @@ class DraftSpace(CamelModel):
 class OutlineReviewOut(CamelModel):
     source: OutlineSource
     status: OutlineStatus
+    evidence: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        exclude_if=lambda v: v is None,
+        description="For a proposed outline, how strongly the photo supports it (0 to 1)",
+    )
 
 
 class ReferenceImageOut(CamelModel):

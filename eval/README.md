@@ -154,3 +154,26 @@ model load time, peak memory, per-camera results, a low/high cutoff sweep, and w
 `--outline-shift` how often ACPDS's call flips when outlines move by 5-30% of a stall's width.
 It never changes the default cutoffs. PKLot is an end-to-end check of the code, not the pilot:
 the pilot uses the team's labeled drone photos in the layout above.
+
+## Layout proposer benchmark
+
+`propose_benchmark.py` runs the worker's layout proposer (HDD §4.6) on a photo and compares its
+stall outlines with a hand-drawn layout:
+
+    uv run --no-sync python eval/propose_benchmark.py eval/fixtures/drone-lot.jpg \
+        seed/lots/drone-lot.json [--view V1] [--cars] [--out overlay.jpg]
+    uv run --no-sync python eval/propose_benchmark.py eval/data/pklot [--limit N]   # PKLot pairs
+
+Ground truth is a lot JSON (a viewpoint's `outlines`) or a PKLot-format `.xml`; a directory
+runs every `<name>.jpg` + `<name>.xml` pair. Proposals match ground truth one to one at IoU 0.5
+or more. It prints precision, recall, mean corner error of matched stalls (% of photo width),
+stall counts and run time. `--cars` adds the production YOLO26m detector (vision extra and
+weights needed; its time is printed apart). `--out` draws ground truth in white and proposals
+coloured by evidence (red 0 to green 1), unmatched proposals thick.
+
+On `drone-lot.jpg` (Oct 2026): lines only, precision 93.8% and recall 97.6% (129 proposed, 124
+drawn), corner error 0.27% of width, 0.2 s on one core; with cars, 93.8% and 98.4% (130
+proposed), plus 0.6 s of YOLO. The extra proposals are real stalls the hand-drawn layout leaves
+out (the left column beside the hatched islands, row B's two ends); the two misses are row B's
+four wide stalls, which the layout draws as six regular ones. Oblique pole cameras (PKLot) are
+not what the proposer is for and score near zero.

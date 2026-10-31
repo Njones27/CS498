@@ -94,7 +94,7 @@ def _viewpoint_out(v: Viewpoint, store: ObjectStore) -> DraftViewpoint:
         reference_image=reference,
         outlines={sid: list(poly) for sid, poly in v.outlines.items()},
         outline_review={
-            sid: OutlineReviewOut(source=r.source, status=r.status)
+            sid: OutlineReviewOut(source=r.source, status=r.status, evidence=r.evidence)
             for sid, r in v.outline_review.items()
         },
     )
@@ -199,7 +199,7 @@ def put_draft(
             "name": v.name,
             "outlines": v.outlines,
             "outline_review": {
-                sid: OutlineReview(source=r.source, status=r.status)
+                sid: OutlineReview(source=r.source, status=r.status, evidence=r.evidence)
                 for sid, r in v.outline_review.items()
             },
         }

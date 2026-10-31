@@ -29,11 +29,14 @@ from ..models import (
     Message,
     ObjectInfo,
     ParkingSpace,
+    ProposalRun,
+    ProposalStatus,
     PublishedLayout,
     Snapshot,
     SpaceObservation,
     SpaceStatus,
     Viewpoint,
+    check_proposal_run_fields,
     utcnow,
 )
 from ..settings import Adapters, Settings
@@ -182,6 +185,7 @@ class MemoryRepository:
         self._statuses: dict[tuple[str, str], SpaceStatus] = {}
         self._closures: dict[tuple[str, str], Closure] = {}
         self._drafts: dict[str, DraftMeta] = {}
+        self._proposals: dict[tuple[str, str], ProposalRun] = {}
 
     # Lots and layouts
     def put_lot(self, lot: Lot) -> None:
@@ -414,6 +418,37 @@ class MemoryRepository:
     def delete_space(self, lot_id: str, space_id: str) -> None:
         with self._lock:
             self._spaces.pop((lot_id, space_id), None)
+
+    # Layout proposer runs
+    def put_proposal_run(self, run: ProposalRun) -> None:
+        with self._lock:
+            self._proposals[(run.lot_id, run.view_id)] = run.model_copy(deep=True)
+
+    def get_proposal_run(self, lot_id: str, view_id: str) -> ProposalRun | None:
+        with self._lock:
+            run = self._proposals.get((lot_id, view_id))
+            return run.model_copy(deep=True) if run else None
+
+    def transition_proposal_run(
+        self,
+        lot_id: str,
+        view_id: str,
+        run_id: str,
+        from_statuses: Iterable[ProposalStatus],
+        to_status: ProposalStatus,
+        **fields: object,
+    ) -> bool:
+        check_proposal_run_fields(fields)
+        allowed = set(from_statuses)
+        with self._lock:
+            run = self._proposals.get((lot_id, view_id))
+            if run is None or run.run_id != run_id or run.status not in allowed:
+                return False
+            data = run.model_dump(by_alias=False)
+            data.update(fields)
+            data["status"] = to_status
+            self._proposals[(lot_id, view_id)] = ProposalRun.model_validate(data)
+            return True
 
 
 def build_memory_adapters(settings: Settings) -> Adapters:

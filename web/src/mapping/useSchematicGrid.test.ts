@@ -1,6 +1,8 @@
+import { renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { davidFixture, space } from './fixtures/david'
-import { uniformShift } from './useSchematicGrid'
+import { gridSizes } from './schematic/grid'
+import { uniformShift, useSchematicGrid } from './useSchematicGrid'
 
 describe('uniformShift', () => {
   it('finds the shift every space took when the map grew left or up', () => {
@@ -30,5 +32,25 @@ describe('uniformShift', () => {
     expect(uniformShift(a, moved)).toBeNull()
     const grown = { ...moved, schematic: { width: 1080, height: 600 } }
     expect(uniformShift(a, grown)).toBeNull()
+  })
+})
+
+describe('useSchematicGrid', () => {
+  it('fits the grid again when an empty lot gets its first spaces (found stalls)', () => {
+    localStorage.clear()
+    const empty = davidFixture({ spaces: [] })
+    const { result, rerender } = renderHook(({ d }) => useSchematicGrid('lot-x', d), { initialProps: { d: empty } })
+    const before = result.current!.grid
+    const small = { label: '', rect: { x: 0, y: 0, w: 40, h: 80 } }
+    const found = davidFixture({
+      spaces: [
+        space('a', 0, 0, { ...small, label: 'A-01', rect: { x: 20, y: 20, w: 40, h: 80 } }),
+        space('b', 0, 0, { ...small, label: 'A-02', rect: { x: 60, y: 20, w: 40, h: 80 } }),
+      ],
+    })
+    rerender({ d: { ...found, lotId: empty.lotId, basedOnVersion: empty.basedOnVersion } })
+    const after = result.current!.grid
+    expect(after).not.toEqual(before)
+    expect(gridSizes(after).boxW).toBeLessThan(gridSizes(before).boxW)
   })
 })

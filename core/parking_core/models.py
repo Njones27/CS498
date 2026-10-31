@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 from pydantic.alias_generators import to_camel
@@ -108,6 +109,10 @@ class OutlineReview(CamelModel):
 
     source: OutlineSource
     status: OutlineStatus
+    evidence: float | None = Field(default=None, ge=0, le=1, exclude_if=lambda v: v is None)
+    """For a proposed outline, how strongly the photo supports it (0 to 1): painted lines on
+    both sides and a parked car each add to it. The review list shows the weakest first.
+    Left out when unset, so drawn outlines store and serialize as before."""
 
 
 class Viewpoint(CamelModel):
@@ -303,6 +308,64 @@ class Message(CamelModel):
 
 class JobMessage(CamelModel):
     image_id: str
+
+
+class ProposedStall(CamelModel):
+    """One stall outline the layout proposer found on a reference photo (HDD §4.6)."""
+
+    polygon: Polygon
+    """4 corners as photo fractions, clockwise."""
+    evidence: float = Field(ge=0, le=1)
+    row: int = Field(ge=0)
+    """Row index, rows ordered top to bottom on the photo (in the divider frame)."""
+    col: int = Field(ge=0)
+    """Stall index within its row, left to right."""
+    map_rect: Rect
+    """The stall flattened to a top-down map, in photo-width units (0..1 across): position
+    along its row and the row's place among the others. The web scales it to the schematic."""
+
+
+class ProposalStatus(StrEnum):
+    QUEUED = "QUEUED"
+    PROCESSING = "PROCESSING"
+    COMPLETE = "COMPLETE"
+    FAILED = "FAILED"
+
+
+class ProposalRun(CamelModel):
+    """The latest layout proposer run on one viewpoint's reference photo. One per viewpoint:
+    a new run replaces the old one."""
+
+    lot_id: str
+    view_id: str
+    run_id: str
+    status: ProposalStatus = ProposalStatus.QUEUED
+    reference_image_key: str
+    """The reference photo the run was asked for. A run whose viewpoint photo changed since
+    fails rather than propose outlines for a different photo."""
+    requested_by: str
+    requested_at: datetime
+    completed_at: datetime | None = None
+    attempts: int = 0
+    error: str | None = None
+    model_version: str | None = None
+    proposals: list[ProposedStall] = Field(default_factory=list)
+
+
+def check_proposal_run_fields(fields: dict[str, object]) -> None:
+    """Fields a proposal run transition may set: any but the run's identity and status."""
+    bad = set(fields) - (set(ProposalRun.model_fields) - {"lot_id", "view_id", "run_id", "status"})
+    if bad:
+        raise ValueError(f"not updatable proposal run fields: {sorted(bad)}")
+
+
+class ProposalJobMessage(CamelModel):
+    """Queue message for a layout proposer run. Told apart from `JobMessage` by `kind`."""
+
+    kind: Literal["propose"] = "propose"
+    lot_id: str
+    view_id: str
+    run_id: str
 
 
 class ClaimResult(CamelModel):

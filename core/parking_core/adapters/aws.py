@@ -39,11 +39,14 @@ from ..models import (
     Message,
     ObjectInfo,
     ParkingSpace,
+    ProposalRun,
+    ProposalStatus,
     PublishedLayout,
     Snapshot,
     SpaceObservation,
     SpaceStatus,
     Viewpoint,
+    check_proposal_run_fields,
 )
 from ..settings import Adapters, Settings
 
@@ -170,6 +173,38 @@ def draft_meta_condition(expected_revision: int | None) -> dict[str, Any]:
         "ConditionExpression": "#rev = :rev",
         "ExpressionAttributeNames": {"#rev": "revision"},
         "ExpressionAttributeValues": {":rev": expected_revision},
+    }
+
+
+def proposal_run_item(run: ProposalRun) -> dict[str, Any]:
+    return model_to_item(run, k.lot_pk(run.lot_id), k.proposal_sk(run.view_id))
+
+
+def proposal_transition_update(
+    run_id: str,
+    from_statuses: Iterable[ProposalStatus],
+    to_status: ProposalStatus,
+    fields: dict[str, object],
+) -> dict[str, Any]:
+    """UpdateItem kwargs for `transition_proposal_run` (pure, so it is unit-testable)."""
+    names: dict[str, str] = {"#st": "status", "#run": "runId"}
+    values: dict[str, Any] = {":to": to_status.value, ":run": run_id}
+    sets = ["#st = :to"]
+    for i, (name, value) in enumerate(sorted(fields.items())):
+        names[f"#f{i}"] = to_camel(name)
+        values[f":f{i}"] = to_dynamo(value)
+        sets.append(f"#f{i} = :f{i}")
+    placeholders = []
+    for i, status in enumerate(sorted(st.value for st in from_statuses)):
+        values[f":s{i}"] = status
+        placeholders.append(f":s{i}")
+    return {
+        "UpdateExpression": "SET " + ", ".join(sets),
+        "ConditionExpression": (
+            f"attribute_exists(PK) AND #run = :run AND #st IN ({', '.join(placeholders)})"
+        ),
+        "ExpressionAttributeNames": names,
+        "ExpressionAttributeValues": values,
     }
 
 
@@ -597,6 +632,38 @@ class DynamoRepository:
 
     def delete_space(self, lot_id: str, space_id: str) -> None:
         self._table.delete_item(Key={k.PK: k.lot_pk(lot_id), k.SK: k.space_sk(space_id)})
+
+    # Layout proposer runs
+    def put_proposal_run(self, run: ProposalRun) -> None:
+        self._table.put_item(Item=proposal_run_item(run))
+
+    def get_proposal_run(self, lot_id: str, view_id: str) -> ProposalRun | None:
+        item = self._get(k.lot_pk(lot_id), k.proposal_sk(view_id))
+        return item_to_model(item, ProposalRun) if item else None
+
+    def transition_proposal_run(
+        self,
+        lot_id: str,
+        view_id: str,
+        run_id: str,
+        from_statuses: Iterable[ProposalStatus],
+        to_status: ProposalStatus,
+        **fields: object,
+    ) -> bool:
+        check_proposal_run_fields(fields)
+        allowed = set(from_statuses)
+        if not allowed:
+            return False
+        update = proposal_transition_update(run_id, allowed, to_status, fields)
+        try:
+            self._table.update_item(
+                Key={k.PK: k.lot_pk(lot_id), k.SK: k.proposal_sk(view_id)}, **update
+            )
+            return True
+        except ClientError as exc:
+            if is_conditional_failure(exc):
+                return False
+            raise
 
 
 def transition_update(

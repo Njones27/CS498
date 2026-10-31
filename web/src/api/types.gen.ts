@@ -177,6 +177,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/lots/{lot_id}/views/{view_id}/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The latest layout proposer run on this viewpoint, with its stalls once complete */
+        get: operations["get_proposals_admin_lots__lot_id__views__view_id__proposals_get"];
+        put?: never;
+        /** Find stalls on the viewpoint's reference photo (queues a layout proposer run) */
+        post: operations["request_proposals_admin_lots__lot_id__views__view_id__proposals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/lots/{lot_id}/views/{view_id}/reference": {
         parameters: {
             query?: never;
@@ -900,6 +918,11 @@ export interface components {
         };
         /** OutlineReviewOut */
         OutlineReviewOut: {
+            /**
+             * Evidence
+             * @description For a proposed outline, how strongly the photo supports it (0 to 1)
+             */
+            evidence?: number | null;
             source: components["schemas"]["OutlineSource"];
             status: components["schemas"]["OutlineStatus"];
         };
@@ -913,6 +936,65 @@ export interface components {
          * @enum {string}
          */
         OutlineStatus: "pending" | "accepted";
+        /**
+         * ProposalRunOut
+         * @description The latest layout proposer run on a viewpoint's reference photo.
+         */
+        ProposalRunOut: {
+            /** Completedat */
+            completedAt?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Lotid */
+            lotId: string;
+            /** Modelversion */
+            modelVersion?: string | null;
+            /**
+             * Photochanged
+             * @description The viewpoint's reference photo changed since this run was requested
+             */
+            photoChanged: boolean;
+            /**
+             * Requestedat
+             * Format: date-time
+             */
+            requestedAt: string;
+            /** Requestedby */
+            requestedBy: string;
+            /** Runid */
+            runId: string;
+            /**
+             * Stalls
+             * @description Proposed stall outlines, once COMPLETE
+             */
+            stalls?: components["schemas"]["ProposedStall"][];
+            status: components["schemas"]["ProposalStatus"];
+            /** Viewid */
+            viewId: string;
+        };
+        /**
+         * ProposalStatus
+         * @enum {string}
+         */
+        ProposalStatus: "QUEUED" | "PROCESSING" | "COMPLETE" | "FAILED";
+        /**
+         * ProposedStall
+         * @description One stall outline the layout proposer found on a reference photo (HDD §4.6).
+         */
+        ProposedStall: {
+            /** Col */
+            col: number;
+            /** Evidence */
+            evidence: number;
+            mapRect: components["schemas"]["Rect"];
+            /** Polygon */
+            polygon: [
+                number,
+                number
+            ][];
+            /** Row */
+            row: number;
+        };
         /** PublishRequest */
         PublishRequest: {
             /**
@@ -920,6 +1002,20 @@ export interface components {
              * @description The draft revision being published, else 409 stale_revision
              */
             revision: number;
+        };
+        /**
+         * Rect
+         * @description Schematic rectangle in schematic units (see `Schematic`). Finite only, like `Point`.
+         */
+        Rect: {
+            /** H */
+            h: number;
+            /** W */
+            w: number;
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
         };
         /** RectOut */
         RectOut: {
@@ -2026,6 +2122,137 @@ export interface operations {
             };
             /** @description snapshot_missing */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_proposals_admin_lots__lot_id__views__view_id__proposals_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lot_id: string;
+                view_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalRunOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    request_proposals_admin_lots__lot_id__views__view_id__proposals_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lot_id: string;
+                view_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalRunOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description no_reference_photo | proposal_running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

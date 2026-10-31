@@ -712,3 +712,39 @@ button.validation-issue__button:hover, button.validation-issue__button:focus-vis
 .versions-table { width: 100%; border-collapse: collapse; background: var(--surface); }
 .versions-table th, .versions-table td { text-align: left; vertical-align: middle; padding: 0.5rem; border-bottom: 1px solid var(--border); }
 .versions-live { font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+
+/* --- Layout proposer review (HDD §4.6): proposed outlines, weakest evidence first --- */
+.ref-proposals {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--filling);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.ref-proposals__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+}
+.ref-proposals__head h2 { margin: 0; font-size: 1rem; }
+.ref-proposals__bulk { display: flex; gap: 0.35rem; margin-left: auto; }
+.ref-proposals__list { list-style: none; margin: 0.5rem 0; padding: 0; }
+.ref-proposals__item {
+  display: grid;
+  grid-template-columns: minmax(4rem, 1fr) minmax(5rem, auto) auto auto;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0;
+  border-top: 1px solid var(--border);
+}
+.ref-proposals__item.is-selected { background: color-mix(in srgb, var(--filling) 10%, transparent); }
+.ref-proposals__name {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ref-proposals__evidence { font-size: 0.875rem; }

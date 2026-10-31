@@ -31,7 +31,7 @@ from parking_api.main import create_app  # noqa: E402
 from parking_core.settings import Settings, build_adapters  # noqa: E402
 from parking_seed.loader import DEFAULT_LOT, FIXTURES_DIR, load_lot_file, seed_lot  # noqa: E402
 from parking_worker.aligners import build_aligner  # noqa: E402
-from parking_worker.poller import run_forever  # noqa: E402
+from parking_worker.poller import build_layout_proposer, run_forever  # noqa: E402
 from parking_worker.scorers import build_scorer  # noqa: E402
 
 
@@ -45,15 +45,11 @@ def main(lot: str = DEFAULT_LOT, port: int = 8000) -> None:
     print(f"Dev admin: {settings.dev_admin_email} / {settings.dev_admin_password}")
 
     stop = threading.Event()
+    scorer = build_scorer(settings)
     worker = threading.Thread(
         target=run_forever,
-        args=(
-            adapters,
-            build_aligner(settings, adapters),
-            build_scorer(settings),
-            settings.cutoffs,
-            stop,
-        ),
+        args=(adapters, build_aligner(settings, adapters), scorer, settings.cutoffs, stop),
+        kwargs={"proposer": build_layout_proposer(settings, scorer)},
         daemon=True,
         name="worker",
     )
