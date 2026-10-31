@@ -73,9 +73,11 @@ def request_proposals(
     if view.reference_image_key is None:
         raise error(409, "no_reference_photo", "Upload a reference photo first")
     current = repo.get_proposal_run(lot_id, view_id)
+    # A run for an older photo is not worth waiting for: the worker would only fail it.
     if (
         current is not None
         and current.status in {ProposalStatus.QUEUED, ProposalStatus.PROCESSING}
+        and current.reference_image_key == view.reference_image_key
         and now - current.requested_at < RUN_STALE_AFTER
     ):
         raise error(

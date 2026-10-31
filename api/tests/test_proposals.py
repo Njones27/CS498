@@ -81,6 +81,14 @@ def test_second_request_while_running_is_refused(client, admin_headers, clock):
     assert r.status_code == 202 and r.json()["runId"] != first["runId"]
 
 
+def test_run_for_a_replaced_photo_does_not_block_a_new_one(client, admin_headers, adapters):
+    first = client.post(URL, headers=admin_headers).json()
+    adapters.repository.update_viewpoint("test-lot", "V1", reference_image_key="reference/x/V1/new")
+    r = client.post(URL, headers=admin_headers)
+    assert r.status_code == 202 and r.json()["runId"] != first["runId"]
+    assert r.json()["photoChanged"] is False
+
+
 def test_finished_run_can_be_rerun(client, admin_headers, adapters, settings):
     client.post(URL, headers=admin_headers)
     work(adapters, settings)
