@@ -177,6 +177,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/lots/{lot_id}/overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every state override for a lot, including ended ones, latest start first */
+        get: operations["list_overrides_admin_lots__lot_id__overrides_get"];
+        put?: never;
+        /** Set spaces Free or Occupied over the cameras, now or on a schedule */
+        post: operations["create_override_admin_lots__lot_id__overrides_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/lots/{lot_id}/overrides/{override_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** End an override now (the cameras decide again); the record is kept */
+        delete: operations["end_override_admin_lots__lot_id__overrides__override_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/lots/{lot_id}/views/{view_id}/proposals": {
         parameters: {
             query?: never;
@@ -941,6 +976,88 @@ export interface components {
          * @enum {string}
          */
         OutlineStatus: "pending" | "accepted";
+        /** OverrideCreate */
+        OverrideCreate: {
+            /**
+             * Endsat
+             * @description Null until an admin ends it; must be after startsAt
+             */
+            endsAt?: string | null;
+            /**
+             * Note
+             * @description Shown to drivers
+             * @default
+             */
+            note: string;
+            /**
+             * Spaceids
+             * @description Spaces to set; duplicates dropped
+             */
+            spaceIds: string[];
+            /**
+             * Startsat
+             * @description Omit to start now (the server's clock, so an admin's clock never delays it); a later time schedules it
+             */
+            startsAt?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "FREE" | "OCCUPIED";
+        };
+        /** OverrideInfo */
+        OverrideInfo: {
+            /** Endsat */
+            endsAt: string | null;
+            /** Note */
+            note: string;
+            state: components["schemas"]["SpaceState"];
+        };
+        /** OverrideOut */
+        OverrideOut: {
+            /**
+             * Active
+             * @description In effect right now
+             */
+            active: boolean;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Createdby */
+            createdBy: string;
+            /**
+             * Endedat
+             * @description Set when an admin ended it early
+             */
+            endedAt: string | null;
+            /** Endsat */
+            endsAt: string | null;
+            /** Lotid */
+            lotId: string;
+            /** Note */
+            note: string;
+            /** Overrideid */
+            overrideId: string;
+            /** Spaceids */
+            spaceIds: string[];
+            /**
+             * Startsat
+             * Format: date-time
+             */
+            startsAt: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "FREE" | "OCCUPIED";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "SCHEDULED" | "ACTIVE" | "ENDED";
+        };
         /**
          * ProposalRunOut
          * @description The latest layout proposer run on a viewpoint's reference photo.
@@ -992,6 +1109,11 @@ export interface components {
             /** Evidence */
             evidence: number;
             mapRect: components["schemas"]["Rect"];
+            /**
+             * Partial
+             * @default false
+             */
+            partial: boolean;
             /** Polygon */
             polygon: [
                 number,
@@ -999,6 +1121,11 @@ export interface components {
             ][];
             /** Row */
             row: number;
+            /** Wholepolygon */
+            wholePolygon?: [
+                number,
+                number
+            ][] | null;
         };
         /** PublishRequest */
         PublishRequest: {
@@ -1214,16 +1341,28 @@ export interface components {
              * @description Capture time of the photo behind this state
              */
             observedAt: string | null;
+            /** @description The admin override in effect (not while closed) */
+            override?: components["schemas"]["OverrideInfo"] | null;
             /**
              * Score
              * @description ACPDS occupied score, for tooltips and admin views
              */
             score: number | null;
+            /**
+             * Source
+             * @description What decided the state: an active closure, an admin override, or the readings of every viewpoint fused (null when nothing has been seen)
+             */
+            source?: ("camera" | "admin" | "closure") | null;
             /** Spaceid */
             spaceId: string;
             /** Stale */
             stale: boolean;
             state: components["schemas"]["SpaceState"];
+            /**
+             * Views
+             * @description Viewpoints whose latest readings agree with the state
+             */
+            views?: string[];
         };
         /**
          * SpaceType
@@ -2137,6 +2276,209 @@ export interface operations {
             };
             /** @description snapshot_missing */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_overrides_admin_lots__lot_id__overrides_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverrideOut"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_override_admin_lots__lot_id__overrides_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OverrideCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverrideOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_published: lot has no layout */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_window, unknown_space, or validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    end_override_admin_lots__lot_id__overrides__override_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lot_id: string;
+                override_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverrideOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description already_ended */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

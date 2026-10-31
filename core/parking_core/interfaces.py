@@ -32,6 +32,7 @@ from .models import (
     SpaceObservation,
     SpaceScore,
     SpaceStatus,
+    StateOverride,
     Viewpoint,
 )
 
@@ -154,6 +155,10 @@ class Repository(Protocol):
     # Closures (read side used by status; CRUD arrives in wave 2)
     def put_closure(self, closure: Closure) -> None: ...
     def list_closures(self, lot_id: str) -> list[Closure]: ...
+
+    # Admin state overrides (shown over the cameras; a closure still wins)
+    def put_override(self, override: StateOverride) -> None: ...
+    def list_overrides(self, lot_id: str) -> list[StateOverride]: ...
 
     # Draft layout (US-07 #7). Draft spaces and viewpoints are the SPACE# / VIEW# items.
     def get_draft_meta(self, lot_id: str) -> DraftMeta | None: ...

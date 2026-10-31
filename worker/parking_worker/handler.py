@@ -22,6 +22,7 @@ from parking_core.models import (
     Snapshot,
     SpaceObservation,
     SpaceStatus,
+    touches_photo_edge,
     utcnow,
 )
 from parking_core.settings import Adapters
@@ -199,8 +200,18 @@ def _run(
     image = adapters.object_store.get(snapshot.s3_key)
 
     outlines = aligner.align(image, viewpoint)  # AlignmentError is a PermanentJobError
+    # A stall the reference photo cuts off is outlined only up to the border: never wholly in
+    # view, whatever the aligner says, so it is never called Free on the part we can see.
+    cut_off = {sid for sid, poly in viewpoint.outlines.items() if touches_photo_edge(poly)}
+    outlines = [
+        o.model_copy(update={"in_frame": False}) if o.space_id in cut_off else o for o in outlines
+    ]
     in_view = set(viewpoint.outlines)
-    scores = [s for s in scorer.score(image, outlines) if s.space_id in in_view]
+    scores = [
+        s.model_copy(update={"in_frame": False}) if s.space_id in cut_off else s
+        for s in scorer.score(image, outlines)
+        if s.space_id in in_view
+    ]  # enforced on the scores too, whatever the scorer reports
     outline_by_id = {o.space_id: o for o in outlines}
 
     observations: list[SpaceObservation] = []
@@ -229,6 +240,7 @@ def _run(
                 confidence=score.acpds_score,
                 observed_at=snapshot.capture_time,
                 source_image_id=image_id,
+                view_id=snapshot.view_id,
                 layout_version=layout.version,
             )
         )

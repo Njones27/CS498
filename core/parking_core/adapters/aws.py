@@ -45,6 +45,7 @@ from ..models import (
     Snapshot,
     SpaceObservation,
     SpaceStatus,
+    StateOverride,
     Viewpoint,
     check_proposal_run_fields,
 )
@@ -154,7 +155,9 @@ def item_to_detections(item: dict[str, Any] | None) -> list[CarBox]:
 
 
 def status_item(status: SpaceStatus) -> dict[str, Any]:
-    return model_to_item(status, k.lot_pk(status.lot_id), k.status_sk(status.space_id))
+    return model_to_item(
+        status, k.lot_pk(status.lot_id), k.status_sk(status.space_id, status.view_id)
+    )
 
 
 def status_condition(status: SpaceStatus) -> dict[str, Any]:
@@ -177,6 +180,10 @@ def status_condition(status: SpaceStatus) -> dict[str, Any]:
 
 def closure_item(closure: Closure) -> dict[str, Any]:
     return model_to_item(closure, k.lot_pk(closure.lot_id), k.closure_sk(closure.closure_id))
+
+
+def override_item(override: StateOverride) -> dict[str, Any]:
+    return model_to_item(override, k.lot_pk(override.lot_id), k.override_sk(override.override_id))
 
 
 def draft_meta_item(meta: DraftMeta) -> dict[str, Any]:
@@ -624,6 +631,13 @@ class DynamoRepository:
     # Closures
     def put_closure(self, closure: Closure) -> None:
         self._table.put_item(Item=closure_item(closure))
+
+    def put_override(self, override: StateOverride) -> None:
+        self._table.put_item(Item=override_item(override))
+
+    def list_overrides(self, lot_id: str) -> list[StateOverride]:
+        items = self._query_prefix(k.lot_pk(lot_id), "OVERRIDE#")
+        return [item_to_model(i, StateOverride) for i in items]
 
     def list_closures(self, lot_id: str) -> list[Closure]:
         return [item_to_model(i, Closure) for i in self._query_prefix(k.lot_pk(lot_id), "CLOSURE#")]

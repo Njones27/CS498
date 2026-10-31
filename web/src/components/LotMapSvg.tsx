@@ -40,6 +40,9 @@ export function LotMapSvg({ layout, statusById, selectedId, onSelect, describe, 
         const icon = Math.min(w, h) * 0.6
         const text = describe(space.spaceId)
         const selected = selectedId === space.spaceId || (selectedIds?.has(space.spaceId) ?? false)
+        // A closure wins over an override, and the server then reports source 'closure'.
+        const byAdmin = status?.source === 'admin'
+        const badgeFont = Math.max(6, Math.min(w, h) * 0.14)
         return (
           <g
             key={space.spaceId}
@@ -47,6 +50,7 @@ export function LotMapSvg({ layout, statusById, selectedId, onSelect, describe, 
             data-testid={`space-${space.spaceId}`}
             data-state={state}
             data-stale={stale ? 'true' : 'false'}
+            data-source={status?.source ?? undefined}
             tabIndex={0}
             role="button"
             aria-label={text}
@@ -75,9 +79,56 @@ export function LotMapSvg({ layout, statusById, selectedId, onSelect, describe, 
             >
               {space.label}
             </text>
+            {byAdmin && (
+              <AdminBadge
+                x={x + 3}
+                y={y + 3}
+                width={Math.min(w - 6, badgeFont * 3.9)}
+                fontSize={badgeFont}
+                testId={`admin-badge-${space.spaceId}`}
+              />
+            )}
           </g>
         )
       })}
+    </svg>
+  )
+}
+
+interface BadgeProps {
+  x: number
+  y: number
+  width: number
+  fontSize: number
+  testId?: string
+}
+
+/** "ADMIN" tag: text, not color alone, marks a space whose state an admin set (NFR-8). */
+function AdminBadge({ x, y, width, fontSize, testId }: BadgeProps) {
+  const height = fontSize * 1.45
+  return (
+    <g className="space__badge" data-testid={testId} aria-hidden="true">
+      <rect x={x} y={y} width={width} height={height} rx={height * 0.25} className="space__badge-bg" />
+      <text
+        x={x + width / 2}
+        y={y + height * 0.74}
+        textAnchor="middle"
+        fontSize={fontSize}
+        textLength={width - fontSize * 0.5}
+        lengthAdjust="spacingAndGlyphs"
+        className="space__badge-text"
+      >
+        ADMIN
+      </text>
+    </g>
+  )
+}
+
+/** The map's "ADMIN" tag at legend size. */
+export function AdminBadgeIcon() {
+  return (
+    <svg viewBox="0 0 40 22" width="40" height="22" aria-hidden="true" className="legend-swatch">
+      <AdminBadge x={1} y={4} width={38} fontSize={9.5} />
     </svg>
   )
 }

@@ -3,6 +3,7 @@ import { MARGIN, MIN_SIDE, yBelowAll } from './schematic/geometry'
 import { addSpacesAt, deleteSpace, type Grown } from './schematic/edits'
 import { formatLabel, nextRowStart, parseLabel } from './schematic/labels'
 import { type Grid, shiftGrid } from './schematic/grid'
+import { touchesPhotoEdge } from './photo/geom'
 import { addSpaceFromOutline, centroid, outlineToRect, photoToSchematic } from './sync'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, OutlineReview, Outline, Point } from './types'
 
@@ -93,6 +94,9 @@ export interface MergeResult extends Grown {
   blocked?: string
 }
 
+/** Where a stall is, for placing it on the map: the whole stall, even past the photo's border. */
+const placement = (stall: ProposedStall): Outline => (stall.wholePolygon ?? stall.polygon) as Outline
+
 const contains = (r: DraftRect, [x, y]: Point) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h
 
 /**
@@ -138,7 +142,7 @@ export function mergeProposals(
     const free = new Set(unmatched.map((sp) => sp.spaceId))
     const rest: ProposedStall[] = []
     for (const stall of fresh) {
-      const rect = outlineToRect(fit, stall.polygon as Outline)
+      const rect = outlineToRect(fit, placement(stall))
       const mid: Point | null = rect && [rect.x + rect.w / 2, rect.y + rect.h / 2]
       const space: DraftSpace | undefined = mid
         ? unmatched.find((sp) => free.has(sp.spaceId) && contains(sp.rect, mid))
@@ -152,7 +156,8 @@ export function mergeProposals(
     }
     rest.sort((a, b) => centroid(b.polygon as Outline)[0] - centroid(a.polygon as Outline)[0])
     for (const stall of rest) {
-      const placed = addSpaceFromOutline(next, viewId, stall.polygon as Outline, grid && shiftGrid(grid, dx, dy))
+      // Placed by the whole stall; its outline becomes the part in view just below.
+      const placed = addSpaceFromOutline(next, viewId, placement(stall), grid && shiftGrid(grid, dx, dy))
       next = placed.draft
       dx += placed.dx
       dy += placed.dy
@@ -191,10 +196,16 @@ export function mergeProposals(
 }
 
 /** The view's outlines still waiting for review, weakest evidence first (those without a score last). */
-export function pendingProposals(view: DraftViewpoint): { spaceId: string; evidence: number | null }[] {
+export function pendingProposals(
+  view: DraftViewpoint,
+): { spaceId: string; evidence: number | null; partial: boolean }[] {
   return Object.entries(view.outlineReview ?? {})
     .filter(([sid, r]) => r.status === 'pending' && view.outlines[sid])
-    .map(([spaceId, r]) => ({ spaceId, evidence: r.evidence ?? null }))
+    .map(([spaceId, r]) => ({
+      spaceId,
+      evidence: r.evidence ?? null,
+      partial: touchesPhotoEdge(view.outlines[spaceId] as Point[]),
+    }))
     .sort((a, b) => (a.evidence ?? Infinity) - (b.evidence ?? Infinity) || a.spaceId.localeCompare(b.spaceId))
 }
 
@@ -256,3 +267,5 @@ export function rejectProposals(
   }
   return { draft: next, removedSpaces }
 }
+
+export { touchesPhotoEdge }

@@ -22,8 +22,10 @@ def view_sk(view_id: str) -> str:
     return f"VIEW#{view_id}"
 
 
-def status_sk(space_id: str) -> str:
-    return f"STATUS#{space_id}"
+def status_sk(space_id: str, view_id: str | None = None) -> str:
+    """One reading per space and viewpoint: views never overwrite each other's readings, and
+    the API fuses them (`fusion.fuse`). Readings stored before that have no view part."""
+    return f"STATUS#{space_id}" if view_id is None else f"STATUS#{space_id}#{view_id}"
 
 
 def layout_sk(version: int) -> str:
@@ -32,6 +34,11 @@ def layout_sk(version: int) -> str:
 
 def closure_sk(closure_id: str) -> str:
     return f"CLOSURE#{closure_id}"
+
+
+def override_sk(override_id: str) -> str:
+    """An admin's override of some spaces' state (`StateOverride`)."""
+    return f"OVERRIDE#{override_id}"
 
 
 def draft_sk() -> str:

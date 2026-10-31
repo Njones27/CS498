@@ -120,13 +120,30 @@ class ClosureInfo(CamelModel):
     ends_at: datetime | None
 
 
+class OverrideInfo(CamelModel):
+    state: SpaceState
+    ends_at: datetime | None
+    note: str
+
+
 class SpaceStatusOut(CamelModel):
     space_id: str
     state: SpaceState
     observed_at: datetime | None = Field(description="Capture time of the photo behind this state")
     score: float | None = Field(description="ACPDS occupied score, for tooltips and admin views")
     stale: bool
+    source: Literal["camera", "admin", "closure"] | None = Field(
+        default=None,
+        description="What decided the state: an active closure, an admin override, or the "
+        "readings of every viewpoint fused (null when nothing has been seen)",
+    )
+    views: list[str] = Field(
+        default_factory=list, description="Viewpoints whose latest readings agree with the state"
+    )
     closure: ClosureInfo | None
+    override: OverrideInfo | None = Field(
+        default=None, description="The admin override in effect (not while closed)"
+    )
 
 
 class StatusCounts(CamelModel):

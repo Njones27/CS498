@@ -393,3 +393,59 @@ describe('outlineLike', () => {
     expect(copy[0][0]).toBeCloseTo(at(4, ROW_Y.C)[0][0], 3) // from C-03 (accepted), not the shifted proposal
   })
 })
+
+describe('rows past the outermost one', () => {
+  /** Rows A and B, 20 stalls each, 0.045 wide and 0.06 deep, 0.2 apart, both tilting by `tilt` (photo
+   * y per x, a converging perspective). Labels A-01.., B-01... */
+  function tilted(tilt: number): DraftLayout {
+    const spaces = ['A', 'B'].flatMap((r, ri) =>
+      Array.from({ length: 20 }, (_, c) => space(`${r}${c + 1}`, c * 50, ri * 150, { label: `${r}-${String(c + 1).padStart(2, '0')}` })),
+    )
+    const outlines: Record<string, Outline> = {}
+    for (const s of spaces) {
+      const c = Number(s.label.slice(2)) - 1
+      const x = 0.05 + c * 0.045
+      const y = 0.2 + (s.label[0] === 'B' ? 0.2 : 0) + tilt * (x - 0.5) * (s.label[0] === 'B' ? 1 : -1)
+      outlines[s.spaceId] = [[x, y], [x + 0.045, y], [x + 0.045, y + 0.06], [x, y + 0.06]]
+    }
+    const draft = davidFixture({ spaces })
+    return { ...draft, viewpoints: [{ ...draft.viewpoints[0], viewId: 'V1', outlines, outlineReview: {} }] }
+  }
+
+  it("the far end of a tilted outer row stays in that row", () => {
+    const draft = tilted(0.07)
+    const x = 0.05 + 20 * 0.045 // just past B-20, on B's tilted line
+    const y = 0.4 + 0.07 * (x - 0.5)
+    const cell = photoCell(draft, draft.viewpoints[0], [[x, y], [x + 0.045, y], [x + 0.045, y + 0.06], [x, y + 0.06]])
+    expect(cell?.row).toBe(1) // row B, not a new row C
+  })
+
+  it('a stall a whole row past the outer row is a new row', () => {
+    const draft = tilted(0)
+    const y = 0.4 + 0.08 // right under row B (0.40-0.46), closer than the row step
+    const cell = photoCell(draft, draft.viewpoints[0], [[0.1, y], [0.145, y], [0.145, y + 0.06], [0.1, y + 0.06]])
+    expect(cell?.row).toBe(2) // row C
+  })
+
+  it('outlines cut off at the photo border do not count as markers', () => {
+    const draft = tilted(0)
+    const v = draft.viewpoints[0]
+    // Clip every row A outline at the top border: row A no longer reads from the photo.
+    for (const s of draft.spaces.filter((sp) => sp.label.startsWith('A-'))) {
+      v.outlines[s.spaceId] = v.outlines[s.spaceId].map(([x, y]) => [x, Math.max(0, y - 0.21)])
+    }
+    const y = 0.4
+    const cell = photoCell(draft, v, [[0.1, y], [0.145, y], [0.145, y + 0.06], [0.1, y + 0.06]])
+    expect(cell?.row).toBe(1) // still B, read from row B alone
+  })
+})
+
+describe('cutByBorder', () => {
+  it('the part in view of a cut-off stall has a side on the border', async () => {
+    const { cutByBorder } = await import('./photo/geom')
+    expect(cutByBorder([[0.1, 0], [0.15, 0], [0.15, 0.04], [0.1, 0.04]])).toBe(true)
+    expect(cutByBorder([[0.1, 0], [0.15, 0.01], [0.15, 0.1], [0.1, 0.1]])).toBe(false) // flush corner
+    // A whole stall running past the border (while being placed) is not cut.
+    expect(cutByBorder([[0.1, -0.05], [0.15, -0.05], [0.15, 0.04], [0.1, 0.04]])).toBe(false)
+  })
+})
