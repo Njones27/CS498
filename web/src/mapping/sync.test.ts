@@ -318,6 +318,37 @@ describe('photo <-> schematic sync', () => {
     expect(a02.label).toBe('B-02')
   })
 
+  it('a space moved to a row off the photo and back lands where it started', () => {
+    // Row G, five rows below B, is past the bottom of the photo.
+    const draft = gridDraft()
+    const grid = fitGrid(draft.spaces)
+    const v = draft.viewpoints[0]
+    const start = v.outlines['B-02']
+    const down = { ...draft, spaces: draft.spaces.map((s) => (s.spaceId === 'B-02' ? { ...s, label: 'G-02', rect: cellRect(grid, { row: 6, col: 1 }) } : s)) }
+    const away = followRects(draft, down, ['B-02'])
+    expect(away.viewpoints[0].outlines['B-02']).toBe(start) // could not follow: stays, for now
+    const back = { ...away, spaces: away.spaces.map((s) => (s.spaceId === 'B-02' ? { ...s, label: 'B-02', rect: cellRect(grid, { row: 1, col: 1 }) } : s)) }
+    const home = followRects(away, back, ['B-02']).viewpoints[0].outlines['B-02']
+    home.forEach((p, i) => {
+      expect(p[0]).toBeCloseTo(start[i][0], 2)
+      expect(p[1]).toBeCloseTo(start[i][1], 2)
+    })
+  })
+
+  it('a space renamed for another cell goes beside that row\'s outlines, keeping its own shape', () => {
+    const draft = gridDraft()
+    const grid = fitGrid(draft.spaces)
+    const v = draft.viewpoints[0]
+    // A-02 moved to the end of row B (becomes B-05).
+    const moved = { ...draft, spaces: draft.spaces.map((s) => (s.spaceId === 'A-02' ? { ...s, label: 'B-05', rect: cellRect(grid, { row: 1, col: 4 }) } : s)) }
+    const out = followRects(draft, moved, ['A-02']).viewpoints[0].outlines['A-02']
+    const [b3, b4] = [v.outlines['B-03'], v.outlines['B-04']]
+    const expectMid = [0, 1].map((k) => b4.reduce((t, p) => t + p[k], 0) / 4 + (b4.reduce((t, p) => t + p[k], 0) - b3.reduce((t, p) => t + p[k], 0)) / 4)
+    const mid = [0, 1].map((k) => out.reduce((t, p) => t + p[k], 0) / 4)
+    expect(mid[0]).toBeCloseTo(expectMid[0], 2)
+    expect(mid[1]).toBeCloseTo(expectMid[1], 2)
+  })
+
   it('a first outline does not move the space', () => {
     const draft = gridDraft()
     const v = draft.viewpoints[0]

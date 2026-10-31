@@ -317,10 +317,13 @@ function onPhoto(pts: (Point | null)[]): Outline | null {
 
 /**
  * After `spaceIds` moved or resized on the schematic (`before` -> `after`), their outlines on the photos
- * move and resize the same way: each corner moves with the rect's edges (edgeCarry), carried through the
- * view's photo <-> schematic map (fitted on `before`). An outline that would leave the photo or fold
- * stays where it was, except a proposal still waiting for review, which is dropped. `skipViewId` is left
- * alone (the view the change came from).
+ * follow. A space renamed for another cell goes where that cell is on the photo, next to the row's other
+ * outlines (outlineLike), keeping its own shape: so a round trip away and back lands it where it was, and
+ * an outline that once failed to follow (its spot was off the photo) is put right by the next move.
+ * Otherwise each corner moves with the rect's edges (edgeCarry), carried through the view's photo <->
+ * schematic map (fitted on `before`). An outline that would leave the photo or fold stays where it was,
+ * except a proposal still waiting for review, which is dropped. `skipViewId` is left alone (the view the
+ * change came from).
  */
 export function followRects(before: DraftLayout, after: DraftLayout, spaceIds: string[], skipViewId?: string): DraftLayout {
   let changed = false
@@ -328,9 +331,9 @@ export function followRects(before: DraftLayout, after: DraftLayout, spaceIds: s
     const vBefore = before.viewpoints.find((b) => b.viewId === v.viewId)
     if (v.viewId === skipViewId || !vBefore) return v
     const ids = spaceIds.filter((id) => v.outlines[id])
-    const toSchematic = ids.length ? photoToSchematic(before, vBefore) : null
+    if (ids.length === 0) return v
+    const toSchematic = photoToSchematic(before, vBefore)
     const toPhoto = toSchematic && invert(toSchematic)
-    if (!toSchematic || !toPhoto) return v
     const outlines = { ...v.outlines }
     const outlineReview = { ...v.outlineReview }
     let touched = false
@@ -338,13 +341,24 @@ export function followRects(before: DraftLayout, after: DraftLayout, spaceIds: s
       const was = before.spaces.find((s) => s.spaceId === id)
       const now = after.spaces.find((s) => s.spaceId === id)
       if (!was || !now || now.retired || sameRect(was.rect, now.rect)) continue
-      const carry = edgeCarry(was.rect, now.rect)
-      const moved = onPhoto(
-        v.outlines[id].map((p) => {
-          const q = applyMat(toSchematic, p)
-          return q && applyMat(toPhoto, carry(q))
-        }),
-      )
+      const moved = (() => {
+        // Renamed for another cell: its outline goes where that cell is beside the row's others.
+        const p = was.label !== now.label ? parseLabel(now.label) : null
+        const spot = p && outlineLike(after, v, rowIndex(p.row), p.num - 1, id)
+        if (spot) {
+          const [ox, oy] = centroid(v.outlines[id])
+          const [sx, sy] = centroid(spot)
+          return onPhoto(v.outlines[id].map(([x, y]): Point => [x + sx - ox, y + sy - oy]))
+        }
+        if (!toSchematic || !toPhoto) return null
+        const carry = edgeCarry(was.rect, now.rect)
+        return onPhoto(
+          v.outlines[id].map((q) => {
+            const r = applyMat(toSchematic, q)
+            return r && applyMat(toPhoto, carry(r))
+          }),
+        )
+      })()
       if (moved) {
         outlines[id] = moved
       } else if (v.outlineReview?.[id]?.status === 'pending') {
