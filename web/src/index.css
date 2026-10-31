@@ -748,3 +748,12 @@ button.validation-issue__button:hover, button.validation-issue__button:focus-vis
   cursor: pointer;
 }
 .ref-proposals__evidence { font-size: 0.875rem; }
+
+/* ---- Admin state overrides: "ADMIN" tag on the map, state picker in the dialog ---- */
+.space__badge { pointer-events: none; }
+.space__badge-bg { fill: var(--popover-bg); stroke: var(--popover-text); stroke-width: 0.75; }
+.space__badge-text { fill: var(--popover-text); font-weight: 700; letter-spacing: 0.02em; }
+.override-states { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; margin: 0; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 6px; }
+.override-states legend { padding: 0 0.25rem; }
+.form .override-states__option { display: flex; align-items: center; gap: 0.35rem; min-height: 44px; cursor: pointer; }
+.form .override-states__option input { min-height: 0; width: 1.15rem; height: 1.15rem; margin: 0; padding: 0; }

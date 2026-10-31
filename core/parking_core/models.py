@@ -240,8 +240,9 @@ class SpaceObservation(CamelModel):
 
 
 class SpaceStatus(CamelModel):
-    """Current view for the dashboard. `confidence` is the ACPDS occupied score of the
-    observation behind this state; the API exposes it as `spaces[].score`."""
+    """One viewpoint's latest reading of a space. The API fuses a space's readings from all
+    viewpoints into the state drivers see (`fusion.fuse`). `confidence` is the ACPDS occupied
+    score of the observation behind this reading; the API exposes it as `spaces[].score`."""
 
     lot_id: str
     space_id: str
@@ -249,6 +250,9 @@ class SpaceStatus(CamelModel):
     confidence: float | None = None
     observed_at: datetime
     source_image_id: str
+    view_id: str | None = Field(default=None, exclude_if=lambda v: v is None)
+    """The viewpoint this reading comes from; None on readings stored before readings were
+    kept per viewpoint."""
     layout_version: int | None = Field(default=None, exclude_if=lambda v: v is None)
     """The layout version the photo was scored with. Breaks a tie in `observed_at`: the same
     photo re-scored after a publish replaces its earlier result (see `supersedes`)."""
@@ -275,6 +279,30 @@ class Closure(CamelModel):
     created_at: datetime
     ended_at: datetime | None = None
     """Set when an admin ends a closure early."""
+
+    def is_active(self, now: datetime) -> bool:
+        if self.ended_at is not None and now >= self.ended_at:
+            return False
+        if now < self.starts_at:
+            return False
+        return self.ends_at is None or now < self.ends_at
+
+
+class StateOverride(CamelModel):
+    """An admin's word on some spaces' state (FREE or OCCUPIED), shown to drivers over what
+    the cameras report until it ends. A closure still wins over it (the space is unusable)."""
+
+    lot_id: str
+    override_id: str
+    space_ids: list[str]
+    state: SpaceState
+    note: str = ""
+    starts_at: datetime
+    ends_at: datetime | None = None
+    created_by: str
+    created_at: datetime
+    ended_at: datetime | None = None
+    """Set when an admin ends the override early."""
 
     def is_active(self, now: datetime) -> bool:
         if self.ended_at is not None and now >= self.ended_at:

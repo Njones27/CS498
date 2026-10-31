@@ -31,6 +31,11 @@ export function AdminHomePage() {
           </Link>
         </li>
         <li>
+          <Link to="/admin/overrides" className="admin-link">
+            Set space state
+          </Link>
+        </li>
+        <li>
           <MapLink />
         </li>
         <li>

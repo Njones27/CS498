@@ -35,6 +35,7 @@ from ..models import (
     Snapshot,
     SpaceObservation,
     SpaceStatus,
+    StateOverride,
     Viewpoint,
     check_proposal_run_fields,
     utcnow,
@@ -182,8 +183,9 @@ class MemoryRepository:
         self._hashes: dict[str, tuple[str, datetime]] = {}  # sha256 -> (imageId, claimedAt)
         self._observations: dict[tuple[str, str], SpaceObservation] = {}
         self._detections: dict[str, list[CarBox]] = {}
-        self._statuses: dict[tuple[str, str], SpaceStatus] = {}
+        self._statuses: dict[tuple[str, str, str | None], SpaceStatus] = {}
         self._closures: dict[tuple[str, str], Closure] = {}
+        self._overrides: dict[tuple[str, str], StateOverride] = {}
         self._drafts: dict[str, DraftMeta] = {}
         self._proposals: dict[tuple[str, str], ProposalRun] = {}
 
@@ -375,7 +377,7 @@ class MemoryRepository:
             return [d.model_copy(deep=True) for d in self._detections.get(image_id, [])]
 
     def update_status_if_newer(self, status: SpaceStatus) -> bool:
-        key = (status.lot_id, status.space_id)
+        key = (status.lot_id, status.space_id, status.view_id)
         with self._lock:
             if not status.supersedes(self._statuses.get(key)):
                 return False
@@ -385,13 +387,24 @@ class MemoryRepository:
     def get_statuses(self, lot_id: str) -> list[SpaceStatus]:
         with self._lock:
             return [
-                s.model_copy(deep=True) for (lid, _), s in self._statuses.items() if lid == lot_id
+                s.model_copy(deep=True) for key, s in self._statuses.items() if key[0] == lot_id
             ]
 
     # Closures
     def put_closure(self, closure: Closure) -> None:
         with self._lock:
             self._closures[(closure.lot_id, closure.closure_id)] = closure.model_copy(deep=True)
+
+    def put_override(self, override: StateOverride) -> None:
+        with self._lock:
+            key = (override.lot_id, override.override_id)
+            self._overrides[key] = override.model_copy(deep=True)
+
+    def list_overrides(self, lot_id: str) -> list[StateOverride]:
+        with self._lock:
+            return [
+                o.model_copy(deep=True) for (lid, _), o in self._overrides.items() if lid == lot_id
+            ]
 
     def list_closures(self, lot_id: str) -> list[Closure]:
         with self._lock:

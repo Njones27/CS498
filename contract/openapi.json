@@ -1243,6 +1243,188 @@
         "title": "OutlineStatus",
         "type": "string"
       },
+      "OverrideCreate": {
+        "properties": {
+          "endsAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null until an admin ends it; must be after startsAt",
+            "title": "Endsat"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Note",
+            "type": "string"
+          },
+          "spaceIds": {
+            "description": "Spaces to set; duplicates dropped",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Spaceids",
+            "type": "array"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "title": "Startsat",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "FREE",
+              "OCCUPIED"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "spaceIds",
+          "state",
+          "startsAt"
+        ],
+        "title": "OverrideCreate",
+        "type": "object"
+      },
+      "OverrideInfo": {
+        "properties": {
+          "endsAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endsat"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SpaceState"
+          }
+        },
+        "required": [
+          "state",
+          "endsAt",
+          "note"
+        ],
+        "title": "OverrideInfo",
+        "type": "object"
+      },
+      "OverrideOut": {
+        "properties": {
+          "active": {
+            "description": "In effect right now",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "createdBy": {
+            "title": "Createdby",
+            "type": "string"
+          },
+          "endedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when an admin ended it early",
+            "title": "Endedat"
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endsat"
+          },
+          "lotId": {
+            "title": "Lotid",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "overrideId": {
+            "title": "Overrideid",
+            "type": "string"
+          },
+          "spaceIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Spaceids",
+            "type": "array"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "title": "Startsat",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "FREE",
+              "OCCUPIED"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "SCHEDULED",
+              "ACTIVE",
+              "ENDED"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "overrideId",
+          "lotId",
+          "spaceIds",
+          "state",
+          "note",
+          "startsAt",
+          "endsAt",
+          "createdBy",
+          "createdAt",
+          "endedAt",
+          "active",
+          "status"
+        ],
+        "title": "OverrideOut",
+        "type": "object"
+      },
       "ProposalRunOut": {
         "description": "The latest layout proposer run on a viewpoint's reference photo.",
         "properties": {
@@ -1948,6 +2130,17 @@
             "description": "Capture time of the photo behind this state",
             "title": "Observedat"
           },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OverrideInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The admin override in effect (not while closed)"
+          },
           "score": {
             "anyOf": [
               {
@@ -1960,6 +2153,23 @@
             "description": "ACPDS occupied score, for tooltips and admin views",
             "title": "Score"
           },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "camera",
+                  "admin",
+                  "closure"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What decided the state: an active closure, an admin override, or the readings of every viewpoint fused (null when nothing has been seen)",
+            "title": "Source"
+          },
           "spaceId": {
             "title": "Spaceid",
             "type": "string"
@@ -1970,6 +2180,14 @@
           },
           "state": {
             "$ref": "#/components/schemas/SpaceState"
+          },
+          "views": {
+            "description": "Viewpoints whose latest readings agree with the state",
+            "items": {
+              "type": "string"
+            },
+            "title": "Views",
+            "type": "array"
           }
         },
         "required": [
@@ -3404,6 +3622,311 @@
           }
         },
         "summary": "Replace the draft with a published version's contents; publish to make it live",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/lots/{lot_id}/overrides": {
+      "get": {
+        "operationId": "list_overrides_admin_lots__lot_id__overrides_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OverrideOut"
+                  },
+                  "title": "Response List Overrides Admin Lots  Lot Id  Overrides Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "Every state override for a lot, including ended ones, latest start first",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "create_override_admin_lots__lot_id__overrides_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OverrideCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverrideOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "not_published: lot has no layout"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_window, unknown_space, or validation_error"
+          }
+        },
+        "summary": "Set spaces Free or Occupied over the cameras, now or on a schedule",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/lots/{lot_id}/overrides/{override_id}": {
+      "delete": {
+        "operationId": "end_override_admin_lots__lot_id__overrides__override_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "override_id",
+            "required": true,
+            "schema": {
+              "title": "Override Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverrideOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "already_ended"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "End an override now (the cameras decide again); the record is kept",
         "tags": [
           "admin"
         ]

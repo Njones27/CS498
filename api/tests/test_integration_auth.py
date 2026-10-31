@@ -38,6 +38,7 @@ PATH_PARAMS = {
     "version": "1",
     "image_id": "nope",
     "closure_id": "cl_x",
+    "override_id": "ov_x",
     "key": "x",
 }
 _METHODS = {"get", "put", "post", "patch", "delete"}
