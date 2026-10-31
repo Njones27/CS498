@@ -59,6 +59,11 @@ class OutlineReviewOut(CamelModel):
         exclude_if=lambda v: v is None,
         description="For a proposed outline, how strongly the photo supports it (0 to 1)",
     )
+    new_space: bool | None = Field(
+        default=None,
+        exclude_if=lambda v: v is None,
+        description="The layout proposer created this space; rejecting the outline removes it",
+    )
 
 
 class ReferenceImageOut(CamelModel):

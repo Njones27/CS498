@@ -1201,6 +1201,18 @@
             "description": "For a proposed outline, how strongly the photo supports it (0 to 1)",
             "title": "Evidence"
           },
+          "newSpace": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The layout proposer created this space; rejecting the outline removes it",
+            "title": "Newspace"
+          },
           "source": {
             "$ref": "#/components/schemas/OutlineSource"
           },

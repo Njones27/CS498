@@ -923,6 +923,11 @@ export interface components {
              * @description For a proposed outline, how strongly the photo supports it (0 to 1)
              */
             evidence?: number | null;
+            /**
+             * Newspace
+             * @description The layout proposer created this space; rejecting the outline removes it
+             */
+            newSpace?: boolean | null;
             source: components["schemas"]["OutlineSource"];
             status: components["schemas"]["OutlineStatus"];
         };

@@ -267,3 +267,31 @@ def test_drone_photo_with_yolo():  # pragma: no cover - needs ultralytics and th
     precision, recall = _drone_scores(stalls)
     assert precision >= 0.9 and recall >= 0.95
     assert sum(s.evidence >= 0.7 for s in stalls) >= 0.8 * len(stalls)
+
+
+def test_car_size_comes_from_named_cars_when_there_are_some():
+    """People, signs or poles outnumbering the cars must not set the car size."""
+    from parking_worker.proposer.cars import car_boxes
+
+    cars = [Detection("car", 0.9, (100.0 + 60 * i, 100.0, 140.0 + 60 * i, 180.0)) for i in range(3)]
+    people = [
+        Detection("person", 0.9, (100.0 + 30 * i, 400.0, 110.0 + 30 * i, 412.0)) for i in range(6)
+    ]
+    kept = car_boxes(cars + people, 2000, 2000)
+    assert len(kept) == 3
+    assert all(b[3] - b[1] == 80 for b in kept)
+    # With too few named cars the median of everything decides, as before.
+    blobs = [
+        Detection("cell phone", 0.8, (100.0 + 60 * i, 100.0, 140.0 + 60 * i, 180.0))
+        for i in range(5)
+    ]
+    assert len(car_boxes(blobs, 2000, 2000)) == 5
+
+
+def test_coordinates_are_rounded():
+    img = asphalt()
+    double_row(img, 400)
+    stalls = proposer().propose(jpeg(img))
+    assert stalls
+    for s in stalls:
+        assert all(round(v, 4) == v for p in s.polygon for v in p)

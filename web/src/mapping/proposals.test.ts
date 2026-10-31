@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { acceptProposals, insidePolygon, mergeProposals, pendingProposals, rejectProposals, type ProposedStall } from './proposals'
+import {
+  acceptProposals,
+  insidePolygon,
+  mergeProposals,
+  NEEDS_ANCHORS,
+  pendingProposals,
+  rejectProposals,
+  type ProposedStall,
+} from './proposals'
+import { photoToSchematic } from './sync'
 import type { DraftLayout, DraftSpace, Outline } from './types'
 
 const box = (x: number, y: number, w: number, h: number): Outline => [
@@ -56,7 +65,12 @@ describe('mergeProposals', () => {
     const v1 = draft.viewpoints[0]
     for (const [i, s] of draft.spaces.entries()) {
       expect(v1.outlines[s.spaceId]).toEqual(stalls[i].polygon)
-      expect(v1.outlineReview?.[s.spaceId]).toEqual({ source: 'proposed', status: 'pending', evidence: stalls[i].evidence })
+      expect(v1.outlineReview?.[s.spaceId]).toEqual({
+        source: 'proposed',
+        status: 'pending',
+        evidence: stalls[i].evidence,
+        newSpace: true,
+      })
       expect(s.spaceId).toMatch(/^sp_[a-z0-9]{8}$/)
       const r = s.rect
       expect(r.x >= 0 && r.y >= 0 && r.x + r.w <= draft.schematic.width && r.y + r.h <= draft.schematic.height).toBe(true)
@@ -110,6 +124,54 @@ describe('mergeProposals', () => {
     expect(added0.label).toBe('A-03') // the row it lines up with
   })
 
+  it('refuses to add stalls it cannot match to spaces this photo does not show yet', () => {
+    const base = emptyDraft()
+    base.spaces = [space('s1', 'A-01', 20, 20), space('s2', 'A-02', 80, 20)]
+    base.viewpoints[1].outlines = { s1: box(0.1, 0.1, 0.05, 0.1), s2: box(0.15, 0.1, 0.05, 0.1) }
+    const result = mergeProposals(base, 'V1', [stall(0, 0), stall(0, 1)])
+    expect(result.blocked).toBe(NEEDS_ANCHORS)
+    expect(result.draft).toBe(base)
+    expect(result.added + result.attached).toBe(0)
+  })
+
+  it('with a fit, matches stalls to spaces seen from another view instead of duplicating them', () => {
+    const base = emptyDraft()
+    // Four drawn anchors in V1 (photo fraction (x, y) -> map (x * 1000, y * 1000)), plus A-03 on the map
+    // with an outline only in V2.
+    base.spaces = [
+      space('s1', 'A-01', 100, 100),
+      space('s2', 'A-02', 150, 100),
+      space('s3', 'B-01', 100, 250),
+      space('s4', 'B-02', 150, 250),
+      space('s5', 'A-03', 200, 100),
+    ]
+    base.viewpoints[0].outlines = {
+      s1: box(0.1, 0.1, 0.05, 0.1),
+      s2: box(0.15, 0.1, 0.05, 0.1),
+      s3: box(0.1, 0.25, 0.05, 0.1),
+      s4: box(0.15, 0.25, 0.05, 0.1),
+    }
+    base.viewpoints[1].outlines = { s5: box(0.5, 0.5, 0.1, 0.1) }
+    const { draft, added, attached } = mergeProposals(base, 'V1', [stall(0, 2), stall(0, 3)])
+    expect(attached).toBe(1)
+    expect(added).toBe(1)
+    expect(draft.spaces).toHaveLength(6)
+    const v1 = draft.viewpoints[0]
+    expect(v1.outlines.s5).toEqual(stall(0, 2).polygon)
+    expect(v1.outlineReview?.s5).toEqual({ source: 'proposed', status: 'pending', evidence: 0.8 })
+    // Rejecting the matched stall keeps the space it was matched to.
+    const { draft: rejected, removedSpaces } = rejectProposals(draft, 'V1', ['s5'])
+    expect(removedSpaces).toBe(0)
+    expect(rejected.spaces.map((s) => s.spaceId)).toContain('s5')
+  })
+
+  it('accepted found stalls anchor the photo fit; pending ones do not', () => {
+    const { draft } = mergeProposals(emptyDraft(), 'V1', [stall(0, 0), stall(0, 1), stall(1, 0), stall(1, 1)])
+    expect(photoToSchematic(draft, draft.viewpoints[0])).toBeNull()
+    const accepted = acceptProposals(draft, 'V1', draft.spaces.map((s) => s.spaceId))
+    expect(photoToSchematic(accepted, accepted.viewpoints[0])).not.toBeNull()
+  })
+
   it('does nothing for an unknown view or no stalls', () => {
     const d = emptyDraft()
     expect(mergeProposals(d, 'V9', [stall(0, 0)]).draft).toBe(d)
@@ -136,7 +198,12 @@ describe('review helpers', () => {
     const d = reviewed()
     const id = d.spaces[1].spaceId
     const next = acceptProposals(d, 'V1', [id])
-    expect(next.viewpoints[0].outlineReview?.[id]).toEqual({ source: 'proposed', status: 'accepted', evidence: 0.1 })
+    expect(next.viewpoints[0].outlineReview?.[id]).toEqual({
+      source: 'proposed',
+      status: 'accepted',
+      evidence: 0.1,
+      newSpace: true,
+    })
     expect(pendingProposals(next.viewpoints[0])).toHaveLength(2)
   })
 
@@ -153,7 +220,7 @@ describe('review helpers', () => {
     expect(next.viewpoints[1].outlines[keep]).toBeDefined()
   })
 
-  it('rejecting a proposal from the map fit keeps its space', () => {
+  it('rejecting a proposal the proposer did not create a space for keeps the space', () => {
     const d = emptyDraft()
     d.spaces = [space('s1', 'A-01', 20, 20)]
     d.viewpoints[0].outlines = { s1: box(0.1, 0.1, 0.05, 0.1) }

@@ -147,7 +147,8 @@ def test_proposed_outline_evidence_survives_a_draft_save(client, admin_headers):
     draft = client.get("/admin/lots/test-lot/layout/draft", headers=admin_headers).json()
     v1 = next(v for v in draft["viewpoints"] if v["viewId"] == "V1")
     sid = next(iter(v1["outlines"]))
-    v1["outlineReview"][sid] = {"source": "proposed", "status": "pending", "evidence": 0.35}
+    found = {"source": "proposed", "status": "pending", "evidence": 0.35, "newSpace": True}
+    v1["outlineReview"][sid] = found
     body = {k: v for k, v in draft.items() if k not in {"updatedAt", "updatedBy"}}
     for v in body["viewpoints"]:
         v.pop("referenceImage", None)
@@ -155,9 +156,9 @@ def test_proposed_outline_evidence_survives_a_draft_save(client, admin_headers):
     assert r.status_code == 200, r.text
     again = client.get("/admin/lots/test-lot/layout/draft", headers=admin_headers).json()
     review = next(v for v in again["viewpoints"] if v["viewId"] == "V1")["outlineReview"]
-    assert review[sid] == {"source": "proposed", "status": "pending", "evidence": 0.35}
-    # Reviews without evidence (drawn outlines) carry no evidence key at all.
-    assert all("evidence" not in r for s, r in review.items() if s != sid)
+    assert review[sid] == found
+    # Reviews without them (drawn outlines) carry no evidence or newSpace key at all.
+    assert all("evidence" not in r and "newSpace" not in r for s, r in review.items() if s != sid)
     # And the pending proposal blocks publishing until reviewed.
     report = client.post("/admin/lots/test-lot/layout/draft/validate", headers=admin_headers).json()
     assert any(e["code"] == "pending_proposals" for e in report["errors"])

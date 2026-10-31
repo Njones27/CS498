@@ -2,7 +2,8 @@
 
 YOLO trained on street photos often names a car seen from straight above something else
 ("cell phone" on the drone test photo), so the class is ignored: a detection counts as a car
-when its size matches the typical detection's.
+when its size matches the typical car's. That size comes from the detections YOLO did call a
+car, truck or bus when there are a few, else from all detections.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..scorers.acpds_yolo import Detection
+from ..scorers.acpds_yolo import CAR_CLASSES, Detection
 from .frame import Frame
 
 DEDUPE_IOU = 0.6
@@ -20,6 +21,8 @@ DEDUPE_IOU = 0.6
 SIZE_RANGE = (0.6, 1.6)
 """A car's long and short box sides must be within this factor of the median detection's."""
 BORDER_PX = 2.0
+MIN_NAMED_CARS = 3
+"""Detections named car/truck/bus needed to take the car size from them alone."""
 
 
 @dataclass(frozen=True)
@@ -48,15 +51,18 @@ def car_boxes(detections: Sequence[Detection], width: int, height: int) -> np.nd
     """
     dets = sorted(detections, key=lambda d: -d.conf)
     kept: list[np.ndarray] = []
+    named: list[bool] = []
     for det in dets:
         box = np.asarray(det.box_xyxy, dtype=np.float64)
         if box[2] - box[0] < 2 or box[3] - box[1] < 2:
             continue
         if all(_iou(box, k) <= DEDUPE_IOU for k in kept):
             kept.append(box)
+            named.append(det.cls_name in CAR_CLASSES)
     if not kept:
         return np.zeros((0, 4))
     boxes = np.array(kept)
+    is_car = np.array(named)
     w = boxes[:, 2] - boxes[:, 0]
     h = boxes[:, 3] - boxes[:, 1]
     long, short = np.maximum(w, h), np.minimum(w, h)
@@ -67,6 +73,8 @@ def car_boxes(detections: Sequence[Detection], width: int, height: int) -> np.nd
         | (boxes[:, 3] >= height - BORDER_PX)
     )
     ref = ~border if (~border).any() else np.ones(len(boxes), bool)
+    if (ref & is_car).sum() >= MIN_NAMED_CARS:
+        ref = ref & is_car  # people, signs or poles must not set the car size
     med_long, med_short = float(np.median(long[ref])), float(np.median(short[ref]))
     lo, hi = SIZE_RANGE
     short_ok = (short >= lo * med_short) & (short <= hi * med_short)

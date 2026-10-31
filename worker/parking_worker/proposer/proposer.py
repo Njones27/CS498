@@ -30,6 +30,9 @@ from .frame import Frame, make_frame
 from .lines import divider_angle, paint_mask, segments, stroke_width
 
 ALGO_VERSION = "proposer-1"
+COORD_DIGITS = 4
+"""Outline corners are stored to 4 decimals (0.2 px on a 2000 px photo), like drawn outlines,
+which keeps a run of many hundreds of stalls well inside a DynamoDB item."""
 WORK_SIDE = 2000
 """Photos with a longer side are downscaled to it first: a drone frame is 4000-8000 px wide,
 and stall lines stay several pixels wide at 2000 px."""
@@ -174,15 +177,18 @@ def propose_stalls(bgr: np.ndarray, detections: Sequence[Detection]) -> list[Pro
             frac = np.clip(poly / [ww, wh], 0.0, 1.0)
             out.append(
                 ProposedStall(
-                    polygon=[(float(x), float(y)) for x, y in frac],
+                    polygon=[
+                        (round(float(x), COORD_DIGITS), round(float(y), COORD_DIGITS))
+                        for x, y in frac
+                    ],
                     evidence=round(evidence(s), 3),
                     row=r,
                     col=c,
                     map_rect=Rect(
-                        x=(s.x0 - min_x) / ww,
-                        y=(s.y0 - min_y) / ww,
-                        w=(s.x1 - s.x0) / ww,
-                        h=(s.y1 - s.y0) / ww,
+                        x=round((s.x0 - min_x) / ww, 5),
+                        y=round((s.y0 - min_y) / ww, 5),
+                        w=round((s.x1 - s.x0) / ww, 5),
+                        h=round((s.y1 - s.y0) / ww, 5),
                     ),
                 )
             )

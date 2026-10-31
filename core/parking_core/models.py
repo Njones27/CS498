@@ -113,6 +113,10 @@ class OutlineReview(CamelModel):
     """For a proposed outline, how strongly the photo supports it (0 to 1): painted lines on
     both sides and a parked car each add to it. The review list shows the weakest first.
     Left out when unset, so drawn outlines store and serialize as before."""
+    new_space: bool | None = Field(default=None, exclude_if=lambda v: v is None)
+    """True when the layout proposer created the space for this outline (rather than outlining a
+    space the lot already had), so rejecting the outline removes the space too. Left out when
+    unset."""
 
 
 class Viewpoint(CamelModel):

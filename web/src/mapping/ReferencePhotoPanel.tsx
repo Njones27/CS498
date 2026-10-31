@@ -707,13 +707,22 @@ export function ReferencePhotoPanel({
   // proposed outlines, saved at once like any outline edit.
   const handleStalls = (viewId: string, stalls: ProposedStall[]) => {
     const merged = mergeProposals(draft, viewId, stalls)
-    if (merged.added > 0) commitOutlines(merged.draft, { dx: merged.dx, dy: merged.dy })
-    const skipped = merged.skipped ? ` (${merged.skipped} already outlined)` : ''
+    if (merged.blocked) {
+      setDrawError(merged.blocked)
+      return
+    }
+    const proposed = merged.added + merged.attached
+    if (proposed > 0) commitOutlines(merged.draft, { dx: merged.dx, dy: merged.dy })
+    const notes = [
+      merged.attached ? `${merged.attached} matched to spaces you have` : '',
+      merged.skipped ? `${merged.skipped} already outlined` : '',
+    ].filter(Boolean)
+    const extra = notes.length ? ` (${notes.join(', ')})` : ''
     setStatusNotice(
-      merged.added > 0
-        ? `Proposed ${merged.added} ${merged.added === 1 ? 'stall' : 'stalls'} in ${viewId}${skipped}. Review them, weakest first.`
+      proposed > 0
+        ? `Proposed ${proposed} ${proposed === 1 ? 'stall' : 'stalls'} in ${viewId}${extra}. Review them, weakest first.`
         : stalls.length > 0
-          ? `No new stalls found in ${viewId}${skipped}`
+          ? `No new stalls found in ${viewId}${extra}`
           : `No stalls found in ${viewId}. Outline them by hand.`,
     )
   }
@@ -721,6 +730,10 @@ export function ReferencePhotoPanel({
   const finding = finder.state.phase === 'running'
 
   const outlinedCount = Object.keys(currentViewpoint?.outlines ?? {}).length
+  // By label, numbers in order (A-2 before A-10): found stalls get random ids, so stored order is no order.
+  const sortedSpaces = [...draft.spaces].sort((a, b) =>
+    a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }),
+  )
   const proposedCount = Object.values(currentViewpoint?.outlineReview ?? {}).filter(
     (r) => r.status === 'pending',
   ).length
@@ -1552,7 +1565,7 @@ export function ReferencePhotoPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {draft.spaces.map((space) => {
+                  {sortedSpaces.map((space) => {
                     const count = draft.viewpoints.filter((v) => v.outlines[space.spaceId]).length
                     const isSelected = selectedSpaceId === space.spaceId
                     const isHovered = hoveredSpaceId === space.spaceId

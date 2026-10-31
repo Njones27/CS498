@@ -2,8 +2,8 @@ import type { components } from '../api/types.gen'
 import { MARGIN, MIN_SIDE, yBelowAll } from './schematic/geometry'
 import { addSpacesAt, deleteSpace, type Grown } from './schematic/edits'
 import { formatLabel, nextRowStart, parseLabel } from './schematic/labels'
-import { outlineToRect, photoToSchematic } from './sync'
-import type { DraftLayout, DraftRect, DraftViewpoint, OutlineReview, Outline, Point } from './types'
+import { centroid, outlineToRect, photoToSchematic } from './sync'
+import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, OutlineReview, Outline, Point } from './types'
 
 // Stalls found by the layout proposer (HDD §4.6), merged into the draft for review. Pure: every edit
 // returns a new DraftLayout. A proposer stall becomes a new space with a pending proposed outline that
@@ -16,10 +16,9 @@ export type ProposalRun = components['schemas']['ProposalRunOut']
 const MIN_STALL_W = 30
 const MAX_STALL_W = 110
 
-const centroid = (pts: Point[]): Point => [
-  pts.reduce((s, p) => s + p[0], 0) / pts.length,
-  pts.reduce((s, p) => s + p[1], 0) / pts.length,
-]
+/** Why found stalls could not be added: the lot has spaces this photo cannot be matched to yet. */
+export const NEEDS_ANCHORS =
+  'Outline 4 of this lot\'s spaces on this photo first, so the stalls found can be matched to the spaces you already have.'
 
 /** Ray casting: is `p` inside the polygon? */
 export function insidePolygon([x, y]: Point, poly: Point[]): boolean {
@@ -82,44 +81,87 @@ function layoutLabels(draft: DraftLayout, stalls: ProposedStall[]): (string | un
   })
 }
 
-/**
- * Add the proposer's stalls to `viewId` as new spaces with pending proposed outlines. Stalls on an outline
- * already in the view are skipped. With enough outlined spaces to fit the photo to the map, new rects go
- * where the fit puts them and take the label of the row they line up with; on a new lot they follow the
- * proposer's top-down layout with rows labeled A, B, C (after any rows in use) and stalls 01 onward.
- */
-export function mergeProposals(
-  draft: DraftLayout,
-  viewId: string,
-  stalls: ProposedStall[],
-): Grown & { added: number; skipped: number } {
-  const view = draft.viewpoints.find((v) => v.viewId === viewId)
-  if (!view) return { draft, dx: 0, dy: 0, added: 0, skipped: stalls.length }
-  const fresh = stalls.filter((s) => !alreadyOutlined(view, s.polygon as Outline))
-  const skipped = stalls.length - fresh.length
-  if (fresh.length === 0) return { draft, dx: 0, dy: 0, added: 0, skipped }
+export interface MergeResult extends Grown {
+  /** New spaces created for stalls. */
+  added: number
+  /** Stalls attached to a space the lot already had (outlined in another view, or on the map only). */
+  attached: number
+  /** Stalls left out: already outlined in this view, or not placeable on the map. */
+  skipped: number
+  /** Set when nothing was merged because the stalls cannot be matched to the lot's spaces. */
+  blocked?: string
+}
 
+const contains = (r: DraftRect, [x, y]: Point) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h
+
+/**
+ * Add the proposer's stalls to `viewId` as pending proposed outlines. Stalls on an outline already in the
+ * view are skipped.
+ *
+ * With enough outlined spaces to fit the photo to the map, each stall is placed by the fit: one landing on
+ * a space that has no outline in this view yet (seen from another viewpoint, or drawn on the map) becomes
+ * that space's outline, and the rest become new spaces labeled for the row they line up with. Without a
+ * fit, stalls can only be matched to nothing: on a lot whose spaces are all outlined here (a new lot,
+ * typically) they become new spaces in the proposer's top-down layout, rows labeled A, B, C (after any rows
+ * in use) and stalls 01 onward; on a lot with spaces this photo does not show yet, nothing is merged
+ * (`blocked`), so a second viewpoint never duplicates the stalls of the first.
+ */
+export function mergeProposals(draft: DraftLayout, viewId: string, stalls: ProposedStall[]): MergeResult {
+  const none = { draft, dx: 0, dy: 0, added: 0, attached: 0 }
+  const view = draft.viewpoints.find((v) => v.viewId === viewId)
+  if (!view) return { ...none, skipped: stalls.length }
+  const fresh = stalls.filter((s) => !alreadyOutlined(view, s.polygon as Outline))
+  let skipped = stalls.length - fresh.length
+  if (fresh.length === 0) return { ...none, skipped }
+
+  const unmatched = draft.spaces.filter((sp) => !sp.retired && !view.outlines[sp.spaceId])
   const fit = photoToSchematic(draft, view)
-  const fitted = fit ? fresh.map((s) => outlineToRect(fit, s.polygon as Outline)) : []
-  const byFit = fit !== null && fitted.every((r) => r !== null)
-  const rects = byFit ? (fitted as DraftRect[]) : layoutRects(draft, fresh)
-  const labels = byFit ? fresh.map(() => undefined) : layoutLabels(draft, fresh)
+  if (!fit && unmatched.length > 0) return { ...none, skipped, blocked: NEEDS_ANCHORS }
+
+  // Stalls for spaces the lot already has, and the rest with their rect and label.
+  const attach = new Map<string, ProposedStall>()
+  const create: { stall: ProposedStall; rect: DraftRect; label?: string }[] = []
+  if (fit) {
+    const free = new Set(unmatched.map((sp) => sp.spaceId))
+    for (const stall of fresh) {
+      const rect = outlineToRect(fit, stall.polygon as Outline)
+      if (!rect) {
+        skipped++
+        continue
+      }
+      const mid: Point = [rect.x + rect.w / 2, rect.y + rect.h / 2]
+      const space: DraftSpace | undefined = unmatched.find((sp) => free.has(sp.spaceId) && contains(sp.rect, mid))
+      if (space) {
+        free.delete(space.spaceId)
+        attach.set(space.spaceId, stall)
+      } else {
+        create.push({ stall, rect })
+      }
+    }
+  } else {
+    const rects = layoutRects(draft, fresh)
+    const labels = layoutLabels(draft, fresh)
+    fresh.forEach((stall, i) => create.push({ stall, rect: rects[i], label: labels[i] }))
+  }
 
   const grown = addSpacesAt(
     draft,
-    rects.map((rect, i) => ({ rect, label: labels[i] })),
+    create.map(({ rect, label }) => ({ rect, label })),
   )
+  const found = new Map(attach)
+  grown.spaces.forEach((space, i) => found.set(space.spaceId, create[i].stall))
   const outlines = { ...view.outlines }
   const outlineReview: Record<string, OutlineReview> = { ...view.outlineReview }
-  grown.spaces.forEach((space, i) => {
-    outlines[space.spaceId] = fresh[i].polygon as Outline
-    outlineReview[space.spaceId] = { source: 'proposed', status: 'pending', evidence: fresh[i].evidence }
-  })
+  for (const [spaceId, stall] of found) {
+    outlines[spaceId] = stall.polygon as Outline
+    outlineReview[spaceId] = { source: 'proposed', status: 'pending', evidence: stall.evidence }
+    if (!attach.has(spaceId)) outlineReview[spaceId].newSpace = true
+  }
   const next: DraftLayout = {
     ...grown.draft,
     viewpoints: grown.draft.viewpoints.map((v) => (v.viewId === viewId ? { ...v, outlines, outlineReview } : v)),
   }
-  return { draft: next, dx: grown.dx, dy: grown.dy, added: fresh.length, skipped }
+  return { draft: next, dx: grown.dx, dy: grown.dy, added: create.length, attached: attach.size, skipped }
 }
 
 /** The view's outlines still waiting for review, weakest evidence first (those without a score last). */
@@ -155,9 +197,9 @@ export function acceptProposals(draft: DraftLayout, viewId: string, spaceIds: st
 }
 
 /**
- * Reject proposed outlines in `viewId`. A stall the proposer found (it carries evidence) that has no
- * outline in any other view is not a real space, so the space goes too; it was never published, since a
- * pending outline blocks publishing. Other spaces keep everything but this outline.
+ * Reject proposed outlines in `viewId`. A space the proposer created for its stall (`newSpace`) that has
+ * no outline in any other view is not a real space, so it goes too; it was never published, since its
+ * pending outline blocked publishing. Every other space keeps everything but this outline.
  */
 export function rejectProposals(
   draft: DraftLayout,
@@ -170,9 +212,8 @@ export function rejectProposals(
   let removedSpaces = 0
   for (const id of spaceIds) {
     const review = view.outlineReview?.[id]
-    const fromProposer = review?.source === 'proposed' && review.evidence != null
     const elsewhere = next.viewpoints.some((v) => v.viewId !== viewId && v.outlines[id])
-    if (fromProposer && !elsewhere) {
+    if (review?.status === 'pending' && review.newSpace && !elsewhere) {
       next = deleteSpace(next, id)
       removedSpaces++
       continue

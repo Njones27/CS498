@@ -146,21 +146,24 @@ export function fitTransform(src: Point[], dst: Point[]): Mat3 | null {
   return null
 }
 
-const centroid = (pts: Point[]): Point => [
+export const centroid = (pts: Point[]): Point => [
   pts.reduce((s, p) => s + p[0], 0) / pts.length,
   pts.reduce((s, p) => s + p[1], 0) / pts.length,
 ]
 const rectCenter = (r: DraftRect): Point => [r.x + r.w / 2, r.y + r.h / 2]
 
 /**
- * Outlines that stand as ground truth for the fit: drawn by an admin (or seeded) on active spaces.
- * Proposals are left out even once accepted: they came from a fit (or a detector), so they add nothing,
- * and one pulled onto the photo edge would bend the map.
+ * Outlines that stand as ground truth for the fit: drawn by an admin (or seeded) on active spaces, or
+ * found on the photo by the layout proposer and accepted (they carry an evidence score; their map rect
+ * was laid out from the photo). Proposals made from the fit itself are left out even once accepted:
+ * they add nothing, and one pulled onto the photo edge would bend the map.
  */
 function anchorOutlines(draft: DraftLayout, view: DraftViewpoint): [DraftSpace, Outline][] {
   return draft.spaces.flatMap((s): [DraftSpace, Outline][] => {
     const outline = view.outlines[s.spaceId]
-    if (s.retired || !outline || view.outlineReview?.[s.spaceId]?.source === 'proposed') return []
+    const review = view.outlineReview?.[s.spaceId]
+    const fromFit = review?.source === 'proposed' && (review.status === 'pending' || review.evidence == null)
+    if (s.retired || !outline || fromFit) return []
     return [[s, outline]]
   })
 }
