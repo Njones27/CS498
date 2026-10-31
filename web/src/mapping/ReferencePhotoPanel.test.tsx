@@ -477,6 +477,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
     row: 0,
     col: 0,
     mapRect: { x: 0, y: 0, w: 0.08, h: 0.15 },
+    partial: false,
   }
   /** The fixture with every active space outlined in V1, so found stalls have nothing to match. */
   function outlinedDraft(): DraftLayout {

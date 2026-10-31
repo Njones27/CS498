@@ -37,8 +37,12 @@ WORK_SIDE = 2000
 """Photos with a longer side are downscaled to it first: a drone frame is 4000-8000 px wide,
 and stall lines stay several pixels wide at 2000 px."""
 MIN_IN_FRAME = 0.9
-"""A stall is proposed only if this share of it is on the photo, like the hand-drawn layouts
-(a stall cut off by the frame cannot be scored reliably)."""
+"""A stall with at least this share on the photo is proposed whole."""
+MIN_PARTIAL = 0.3
+"""A stall with between this share and `MIN_IN_FRAME` on the photo is proposed as partial:
+its outline is the part in view (up to the photo's border) and its evidence is scaled by that
+share. The worker never calls a cut-off stall Free, so another viewpoint that sees it whole
+decides it (see `parking_core.fusion`)."""
 EVIDENCE_FLOOR = 0.1
 EVIDENCE_DIVIDER = 0.35
 EVIDENCE_CAR = 0.3
@@ -156,34 +160,47 @@ def propose_stalls(bgr: np.ndarray, detections: Sequence[Detection]) -> list[Pro
     boxes = car_boxes(detections, width, height) * scale
     frame, rows = find_rows(work, boxes)
 
-    kept: list[tuple[float, list[tuple[R.FrameStall, np.ndarray]]]] = []
+    kept: list[tuple[float, list[tuple[R.FrameStall, np.ndarray, float]]]] = []
     for row in rows:
         good = []
         for s in sorted(row, key=lambda s: s.x0):
             corners = np.array([[s.x0, s.y0], [s.x1, s.y0], [s.x1, s.y1], [s.x0, s.y1]])
             poly = frame.to_photo(corners)
-            if _in_frame_share(poly, ww, wh) >= MIN_IN_FRAME:
-                good.append((s, poly))
+            share = _in_frame_share(poly, ww, wh)
+            if share >= MIN_PARTIAL:
+                good.append((s, poly, share))
         if good:
-            kept.append((float(np.mean([(s.y0 + s.y1) / 2 for s, _ in good])), good))
+            kept.append((float(np.mean([(s.y0 + s.y1) / 2 for s, _, _ in good])), good))
     kept.sort(key=lambda r: r[0])
     if not kept:
         return []
-    min_x = min(s.x0 for _, row in kept for s, _ in row)
-    min_y = min(s.y0 for _, row in kept for s, _ in row)
+    min_x = min(s.x0 for _, row in kept for s, _, _ in row)
+    min_y = min(s.y0 for _, row in kept for s, _, _ in row)
     out = []
     for r, (_, row) in enumerate(kept):
-        for c, (s, poly) in enumerate(row):
+        for c, (s, poly, share) in enumerate(row):
+            partial = share < MIN_IN_FRAME
+            # A cut-off stall's outline is the part in view: its corners pulled onto the border.
             frac = np.clip(poly / [ww, wh], 0.0, 1.0)
+            score = evidence(s) * (share if partial else 1.0)
             out.append(
                 ProposedStall(
                     polygon=[
                         (round(float(x), COORD_DIGITS), round(float(y), COORD_DIGITS))
                         for x, y in frac
                     ],
-                    evidence=round(evidence(s), 3),
+                    evidence=round(score, 3),
                     row=r,
                     col=c,
+                    partial=partial,
+                    whole_polygon=(
+                        [
+                            (round(float(x), COORD_DIGITS), round(float(y), COORD_DIGITS))
+                            for x, y in poly / [ww, wh]
+                        ]
+                        if partial
+                        else None
+                    ),
                     map_rect=Rect(
                         x=round((s.x0 - min_x) / ww, 5),
                         y=round((s.y0 - min_y) / ww, 5),

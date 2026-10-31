@@ -56,7 +56,7 @@ export function ProposalReview({ draft, view, selectedSpaceId, onSelectSpace, on
         </div>
       </div>
       <ul className="ref-proposals__list">
-        {shown.map(({ spaceId, evidence }) => (
+        {shown.map(({ spaceId, evidence, partial }) => (
           <li
             key={spaceId}
             className={`ref-proposals__item${selectedSpaceId === spaceId ? ' is-selected' : ''}`}
@@ -69,6 +69,7 @@ export function ProposalReview({ draft, view, selectedSpaceId, onSelectSpace, on
             </button>
             <span className="ref-proposals__evidence" title={evidence === null ? undefined : `Evidence ${Math.round(evidence * 100)}%`}>
               {evidenceWord(evidence)}
+              {partial && <span className="muted"> · Partly outside the photo</span>}
               {evidence !== null && <span className="muted"> {Math.round(evidence * 100)}%</span>}
             </span>
             <button

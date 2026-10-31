@@ -14,6 +14,20 @@ Point = tuple[FiniteFloat, FiniteFloat]
 stored as JSON null, after which the layout or observation holding it no longer loads."""
 Polygon = list[Point]
 
+PHOTO_EDGE = 0.001
+"""An outline corner this close to the photo's border (as a fraction) is on the border."""
+
+
+def touches_photo_edge(polygon: Polygon) -> bool:
+    """True for an outline drawn up to the photo's border: a stall the photo cuts off, whose
+    outline covers only the part in view. Such a stall is scored as not wholly in the photo
+    (never Free; Occupied only from a car box), since a car may stand in the part out of view."""
+    return any(
+        x <= PHOTO_EDGE or x >= 1 - PHOTO_EDGE or y <= PHOTO_EDGE or y >= 1 - PHOTO_EDGE
+        for x, y in polygon
+    )
+
+
 UPLOAD_EXPIRY = timedelta(minutes=15)
 """An UPLOAD_PENDING snapshot older than this is reported as EXPIRED (HDD §4.2)."""
 
@@ -371,6 +385,13 @@ class ProposedStall(CamelModel):
     map_rect: Rect
     """The stall flattened to a top-down map, in photo-width units (0..1 across): position
     along its row and the row's place among the others. The web scales it to the schematic."""
+    partial: bool = False
+    """The photo cuts the stall off: `polygon` is the part in view, up to the photo's border
+    (see `touches_photo_edge`); `map_rect` is the whole stall."""
+    whole_polygon: Polygon | None = None
+    """For a partial stall, the whole stall in photo fractions, running past the border. Used
+    to place it on the map (the part in view alone would put it in the next row); never stored
+    as an outline."""
 
 
 class ProposalStatus(StrEnum):

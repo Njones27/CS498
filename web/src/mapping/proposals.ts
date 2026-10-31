@@ -93,6 +93,9 @@ export interface MergeResult extends Grown {
   blocked?: string
 }
 
+/** Where a stall is, for placing it on the map: the whole stall, even past the photo's border. */
+const placement = (stall: ProposedStall): Outline => (stall.wholePolygon ?? stall.polygon) as Outline
+
 const contains = (r: DraftRect, [x, y]: Point) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h
 
 /**
@@ -138,7 +141,7 @@ export function mergeProposals(
     const free = new Set(unmatched.map((sp) => sp.spaceId))
     const rest: ProposedStall[] = []
     for (const stall of fresh) {
-      const rect = outlineToRect(fit, stall.polygon as Outline)
+      const rect = outlineToRect(fit, placement(stall))
       const mid: Point | null = rect && [rect.x + rect.w / 2, rect.y + rect.h / 2]
       const space: DraftSpace | undefined = mid
         ? unmatched.find((sp) => free.has(sp.spaceId) && contains(sp.rect, mid))
@@ -152,7 +155,8 @@ export function mergeProposals(
     }
     rest.sort((a, b) => centroid(b.polygon as Outline)[0] - centroid(a.polygon as Outline)[0])
     for (const stall of rest) {
-      const placed = addSpaceFromOutline(next, viewId, stall.polygon as Outline, grid && shiftGrid(grid, dx, dy))
+      // Placed by the whole stall; its outline becomes the part in view just below.
+      const placed = addSpaceFromOutline(next, viewId, placement(stall), grid && shiftGrid(grid, dx, dy))
       next = placed.draft
       dx += placed.dx
       dy += placed.dy
@@ -191,10 +195,28 @@ export function mergeProposals(
 }
 
 /** The view's outlines still waiting for review, weakest evidence first (those without a score last). */
-export function pendingProposals(view: DraftViewpoint): { spaceId: string; evidence: number | null }[] {
+/** Matches `PHOTO_EDGE` in parking_core.models: a corner this close to the border is on it. */
+const PHOTO_EDGE = 0.001
+
+/**
+ * An outline drawn up to the photo's border: a stall the photo cuts off, outlined only where it is
+ * in view. The worker never calls such a stall Free (`touches_photo_edge` on the server); another
+ * viewpoint that sees it whole decides it.
+ */
+export function touchesPhotoEdge(outline: Point[]): boolean {
+  return outline.some(([x, y]) => x <= PHOTO_EDGE || x >= 1 - PHOTO_EDGE || y <= PHOTO_EDGE || y >= 1 - PHOTO_EDGE)
+}
+
+export function pendingProposals(
+  view: DraftViewpoint,
+): { spaceId: string; evidence: number | null; partial: boolean }[] {
   return Object.entries(view.outlineReview ?? {})
     .filter(([sid, r]) => r.status === 'pending' && view.outlines[sid])
-    .map(([spaceId, r]) => ({ spaceId, evidence: r.evidence ?? null }))
+    .map(([spaceId, r]) => ({
+      spaceId,
+      evidence: r.evidence ?? null,
+      partial: touchesPhotoEdge(view.outlines[spaceId] as Point[]),
+    }))
     .sort((a, b) => (a.evidence ?? Infinity) - (b.evidence ?? Infinity) || a.spaceId.localeCompare(b.spaceId))
 }
 

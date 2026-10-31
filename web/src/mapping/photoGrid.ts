@@ -82,6 +82,7 @@ interface Layout {
   rowY: Map<number, number> // median photo y of each row
   pitch: number // signed photo x per column: negative when numbers run right to left
   rowStep: number // signed photo y per row: negative when row A is at the bottom
+  height: number // median outline height, levelled
 }
 
 /**
@@ -153,7 +154,7 @@ function layout(raw: Marker[]): Layout | null {
   // perspective: rows converging), a column would drift a third of a column per row: don't read it.
   const tilts = [...byRow.values()].filter((ms) => ms.length > 2).map(slope)
   if (tilts.filter((t) => Math.abs(t * rowStep) > Math.abs(pitch) / 3).length * 3 > tilts.length) return null
-  return { level, unlevel, byRow, rowY, pitch, rowStep }
+  return { level, unlevel, byRow, rowY, pitch, rowStep, height: median(all.map((m) => m.h))! }
 }
 
 /** How a row tilts (y per x): the median slope between its outlines, so one stray doesn't count. */
@@ -210,7 +211,16 @@ function photoColumn(lay: Layout, row: number, x: number, y: number): number {
 function photoRow(lay: Layout, y: number): { row: number; at: number } {
   const [row, rowY] = [...lay.rowY].reduce((a, b) => (Math.abs(b[1] - y) < Math.abs(a[1] - y) ? b : a))
   const off = (y - rowY) / lay.rowStep
-  return { row: row + Math.sign(off) * Math.round(Math.abs(off)), at: row + off }
+  const step = Math.sign(off) * Math.round(Math.abs(off))
+  // Past the outermost row by more than half a space is a new row beyond it, even where the rows are
+  // not evenly spaced (back-to-back rows between wide aisles make the median row step too big).
+  const rows = [...lay.rowY.keys()]
+  const side = Math.sign(y - rowY) // which way from the nearest row, on the photo
+  const beyond =
+    Math.abs(y - rowY) > lay.height / 2 &&
+    ((row === Math.min(...rows) && side === -Math.sign(lay.rowStep)) ||
+      (row === Math.max(...rows) && side === Math.sign(lay.rowStep)))
+  return { row: beyond && step === 0 ? row + Math.sign(off) : row + step, at: row + off }
 }
 
 /**

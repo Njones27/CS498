@@ -53,6 +53,8 @@ class Result:
     corner_err: list[float]
     seconds: float
     detect_seconds: float
+    partial: int = 0
+    """Stalls the photo cuts off, proposed as partial and left out of the scores."""
 
 
 def read_truth(path: Path, width: int, height: int, view: str | None) -> list[np.ndarray]:
@@ -154,12 +156,16 @@ def run_one(
     t0 = time.perf_counter()
     stalls = proposer.propose(data)
     seconds = time.perf_counter() - t0
+    # The hand-drawn layouts outline whole stalls only; partial ones (cut off by the photo's
+    # border) are counted apart.
+    partial = sum(s.partial for s in stalls)
+    stalls = [s for s in stalls if not s.partial]
     props = [np.array(s.polygon) * [width, height] for s in stalls]
     pairs = match(props, truth)
     errs = [100.0 * corner_error(props[i], truth[j]) / width for i, j, _ in pairs]
     if out is not None:
         draw(bgr, props, stalls, truth, {i for i, _, _ in pairs}, out)
-    return Result(photo.name, len(props), len(truth), len(pairs), errs, seconds, detect_s)
+    return Result(photo.name, len(props), len(truth), len(pairs), errs, seconds, detect_s, partial)
 
 
 def report(r: Result) -> None:
@@ -170,7 +176,7 @@ def report(r: Result) -> None:
     print(
         f"{r.photo}: precision {prec:.1%} recall {rec:.1%} ({r.matched} matched, "
         f"{r.proposed} proposed, {r.truth} truth) corner error {err} of width, "
-        f"time {r.seconds:.2f}s{det}"
+        f"time {r.seconds:.2f}s{det}; {r.partial} partial (cut off by the border, not scored)"
     )
 
 

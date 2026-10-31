@@ -5,12 +5,13 @@ import {
   mergeProposals,
   NEEDS_ANCHORS,
   pendingProposals,
+  touchesPhotoEdge,
   rejectProposals,
   type ProposedStall,
 } from './proposals'
 import { fitGrid } from './schematic/grid'
 import { photoToSchematic } from './sync'
-import type { DraftLayout, DraftSpace, Outline } from './types'
+import type { DraftLayout, DraftSpace, Outline, Point } from './types'
 
 const box = (x: number, y: number, w: number, h: number): Outline => [
   [x, y],
@@ -23,7 +24,7 @@ const box = (x: number, y: number, w: number, h: number): Outline => [
 function stall(row: number, col: number, evidence = 0.8): ProposedStall {
   const x = 0.1 + col * 0.05
   const y = 0.1 + row * 0.15
-  return { polygon: box(x, y, 0.05, 0.1), evidence, row, col, mapRect: { x: col * 0.05, y: row * 0.15, w: 0.05, h: 0.1 } }
+  return { polygon: box(x, y, 0.05, 0.1), evidence, row, col, mapRect: { x: col * 0.05, y: row * 0.15, w: 0.05, h: 0.1 }, partial: false }
 }
 
 function emptyDraft(): DraftLayout {
@@ -200,6 +201,7 @@ describe('mergeProposals on a mapped lot (like the seeded drone lot)', () => {
     row,
     col: Math.max(0, col),
     mapRect: { x: 0, y: 0, w: 0.05, h: 0.1 },
+    partial: false,
   })
 
   it('puts stalls past a row end in that row, named for the cell', () => {
@@ -282,5 +284,63 @@ describe('review helpers', () => {
     const sq = box(0, 0, 1, 1)
     expect(insidePolygon([0.5, 0.5], sq)).toBe(true)
     expect(insidePolygon([1.5, 0.5], sq)).toBe(false)
+  })
+})
+
+describe('partly visible stalls', () => {
+  it('an outline up to the photo border is a cut-off stall', () => {
+    expect(touchesPhotoEdge(box(0.1, 0, 0.05, 0.03))).toBe(true) // top row, cut by the border
+    expect(touchesPhotoEdge(box(0.1, 0.95, 0.05, 0.05))).toBe(true) // bottom row
+    expect(touchesPhotoEdge(box(0.1, 0.1, 0.05, 0.1))).toBe(false)
+  })
+
+  it('the review list says which proposals are partly outside the photo', () => {
+    const cut: ProposedStall = { ...stall(0, 0), polygon: box(0.1, 0, 0.05, 0.03), evidence: 0.3, partial: true }
+    const { draft } = mergeProposals(emptyDraft(), 'V1', [cut, stall(1, 0)])
+    const pending = pendingProposals(draft.viewpoints[0])
+    expect(pending.map((p) => p.partial)).toEqual([true, false]) // weakest first
+  })
+})
+
+describe('cut-off rows on a mapped lot', () => {
+  /** Rows A..D, four stalls each, unevenly spaced like a real lot: A, then B and C back to back, then D
+   * past a wide aisle. Photo y of each row's top; map rows 150 apart. */
+  const ROW_Y = [0.1, 0.35, 0.45, 0.7]
+  function unevenLot(): DraftLayout {
+    const d = emptyDraft()
+    ROW_Y.forEach((y, r) => {
+      const row = 'ABCD'[r]
+      for (let c = 0; c < 4; c++) {
+        const id = `${row}${c + 1}`
+        d.spaces.push(space(id, `${row}-0${c + 1}`, 200 + c * 50, 100 + r * 150))
+        d.viewpoints[0].outlines[id] = box(0.2 + c * 0.05, y, 0.05, 0.1)
+      }
+    })
+    d.schematic = { width: 1000, height: 800 }
+    return d
+  }
+  /** A stall of row `row` (photo top y) the photo cuts at the bottom border, at column `col`. */
+  const cut = (col: number, top: number): ProposedStall => ({
+    polygon: box(0.2 + col * 0.05, top, 0.05, 1 - top),
+    wholePolygon: box(0.2 + col * 0.05, top, 0.05, 0.1),
+    evidence: 0.3,
+    row: 9,
+    col,
+    mapRect: { x: 0, y: 0, w: 0.05, h: 0.1 },
+    partial: true,
+  })
+
+  it('a row past the last one becomes a new row, though the rows are unevenly spaced', () => {
+    const d = unevenLot()
+    const { draft, added } = mergeProposals(d, 'V1', [cut(0, 0.8), cut(1, 0.8)], fitGrid(d.spaces))
+    expect(added).toBe(2)
+    const newRow = draft.spaces.filter((s) => s.label.startsWith('E-'))
+    expect(newRow.map((s) => s.label).sort()).toEqual(['E-01', 'E-02'])
+    const rowD = draft.spaces.find((s) => s.label === 'D-01')!
+    expect(newRow[0].rect.y).toBeGreaterThan(rowD.rect.y) // below D on the map
+    // Placed by the whole stall, stored as the part in view.
+    const v1 = draft.viewpoints[0]
+    expect(v1.outlines[newRow[0].spaceId].every(([, y]) => y <= 1)).toBe(true)
+    expect(touchesPhotoEdge(v1.outlines[newRow[0].spaceId] as Point[])).toBe(true)
   })
 })

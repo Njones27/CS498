@@ -246,10 +246,17 @@ def test_drone_photo_lines_only():
     """Measured: precision 93.8%, recall 97.6% (129 proposed, 124 hand-drawn). The extras
     are real stalls the hand-drawn layout leaves out (the left column beside the hatched
     island, row B's ends); two misses are row B's four wide stalls drawn as six."""
-    stalls = proposer().propose(DRONE.read_bytes())
+    found = proposer().propose(DRONE.read_bytes())
+    stalls = [s for s in found if not s.partial]  # the hand-drawn layout has whole stalls only
     precision, recall = _drone_scores(stalls)
     assert precision >= 0.9 and recall >= 0.93
     assert len({s.row for s in stalls}) == 6
+    # The rows the photo cuts off at the top and bottom come as partial stalls: outlined up
+    # to the border, weaker than any whole stall with the same paint.
+    cut = [s for s in found if s.partial]
+    assert len(cut) >= 30 and len({s.row for s in cut}) == 2
+    assert all(any(y in (0.0, 1.0) for _, y in s.polygon) for s in cut)
+    assert max(s.evidence for s in cut) < 0.8
 
 
 @pytest.mark.real_model
@@ -263,7 +270,8 @@ def test_drone_photo_with_yolo():  # pragma: no cover - needs ultralytics and th
         pytest.skip(f"models/{settings.yolo_weights} not downloaded")
     path, _ = verify_weights(Path(settings.models_dir), settings.yolo_weights)
     detector = YoloCarDetector(path, conf=settings.yolo_conf, seg=False, imgsz=settings.yolo_imgsz)
-    stalls = build_proposer(settings, detector).propose(DRONE.read_bytes())
+    found = build_proposer(settings, detector).propose(DRONE.read_bytes())
+    stalls = [s for s in found if not s.partial]
     precision, recall = _drone_scores(stalls)
     assert precision >= 0.9 and recall >= 0.95
     assert sum(s.evidence >= 0.7 for s in stalls) >= 0.8 * len(stalls)

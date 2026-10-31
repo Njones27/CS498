@@ -1548,6 +1548,11 @@
           "mapRect": {
             "$ref": "#/components/schemas/Rect"
           },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
           "polygon": {
             "items": {
               "maxItems": 2,
@@ -1569,6 +1574,30 @@
             "minimum": 0.0,
             "title": "Row",
             "type": "integer"
+          },
+          "wholePolygon": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wholepolygon"
           }
         },
         "required": [

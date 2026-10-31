@@ -1109,6 +1109,11 @@ export interface components {
             /** Evidence */
             evidence: number;
             mapRect: components["schemas"]["Rect"];
+            /**
+             * Partial
+             * @default false
+             */
+            partial: boolean;
             /** Polygon */
             polygon: [
                 number,
@@ -1116,6 +1121,11 @@ export interface components {
             ][];
             /** Row */
             row: number;
+            /** Wholepolygon */
+            wholePolygon?: [
+                number,
+                number
+            ][] | null;
         };
         /** PublishRequest */
         PublishRequest: {
