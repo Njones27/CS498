@@ -124,3 +124,28 @@ export function isValidQuad(polygon: Point[]): boolean {
   if (Math.abs(area2) <= EPS) return false
   return !(segmentsTouch(a, b, c, d) || segmentsTouch(b, c, d, a))
 }
+
+/** Matches `PHOTO_EDGE` in parking_core.models: a corner this close to the border is on it. */
+const PHOTO_EDGE = 0.001
+
+/**
+ * An outline drawn up to the photo's border: a stall the photo cuts off, outlined only where it is
+ * in view. The worker never calls such a stall Free (`touches_photo_edge` on the server); another
+ * viewpoint that sees it whole decides it.
+ */
+export function touchesPhotoEdge(outline: Point[]): boolean {
+  return outline.some(onBorder)
+}
+
+/** On the border itself: a corner past it (a whole stall's outline, while being placed) is not. */
+const onBorder = ([x, y]: Point) =>
+  [x, y].some((v) => Math.abs(v) <= PHOTO_EDGE || Math.abs(1 - v) <= PHOTO_EDGE)
+
+/**
+ * An outline the border cuts through: the part in view of a stall that runs off the photo, which has a
+ * side along the border (two corners on it). Its middle is not the stall's middle, so it can't stand for
+ * where the stall is. A whole stall merely flush with the border has one corner there and still can.
+ */
+export function cutByBorder(outline: Point[]): boolean {
+  return outline.filter(onBorder).length >= 2
+}

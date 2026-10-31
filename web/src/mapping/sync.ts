@@ -3,7 +3,7 @@ import { addSpace, addSpaceAt, addSpacesAt, fitSchematic, updateSpace, type Grow
 import { applyLabels, cellAt, cellLabel, cellRect, cellTaken, labelDigits, relabelMoved, rowIndex, type Cell, type Grid } from './schematic/grid'
 import { parseLabel } from './schematic/labels'
 import { outlineLike, photoCell, placeFromPhoto } from './photoGrid'
-import { isValidQuad, orderClockwise } from './photo/geom'
+import { cutByBorder, isValidQuad, orderClockwise } from './photo/geom'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, Outline, Point } from './types'
 
 // Keeps the photo and the schematic in step. Each viewpoint gets a projective map between its photo
@@ -163,7 +163,8 @@ function anchorOutlines(draft: DraftLayout, view: DraftViewpoint): [DraftSpace, 
     const outline = view.outlines[s.spaceId]
     const review = view.outlineReview?.[s.spaceId]
     const fromFit = review?.source === 'proposed' && (review.status === 'pending' || review.evidence == null)
-    if (s.retired || !outline || fromFit) return []
+    // A cut-off stall's outline is the part in view only: its middle is not the space's middle.
+    if (s.retired || !outline || fromFit || cutByBorder(outline)) return []
     return [[s, outline]]
   })
 }

@@ -9,6 +9,7 @@ import { ClosuresPage } from './pages/ClosuresPage'
 import { LotListPage } from './pages/LotListPage'
 import { LotMapPage } from './pages/LotMapPage'
 import { NewLotPage } from './pages/NewLotPage'
+import { OverridesPage } from './pages/OverridesPage'
 import { SignInPage } from './pages/SignInPage'
 import { SnapshotPhotoPage } from './pages/SnapshotPhotoPage'
 import { SnapshotsPage } from './pages/SnapshotsPage'
@@ -28,6 +29,7 @@ export function AppRoutes() {
           <Route path="/admin/snapshots" element={<RequireAdmin><SnapshotsPage /></RequireAdmin>} />
           <Route path="/admin/snapshots/:imageId/photo" element={<RequireAdmin><SnapshotPhotoPage /></RequireAdmin>} />
           <Route path="/admin/closures" element={<RequireAdmin><ClosuresPage /></RequireAdmin>} />
+          <Route path="/admin/overrides" element={<RequireAdmin><OverridesPage /></RequireAdmin>} />
           <Route path="/admin/lots/new" element={<RequireAdmin><NewLotPage /></RequireAdmin>} />
           <Route path="/admin/lots/:lotId/map" element={<RequireAdmin><LotMappingPage /></RequireAdmin>} />
           <Route path="/admin/lots/:lotId/versions" element={<RequireAdmin><VersionsPage /></RequireAdmin>} />

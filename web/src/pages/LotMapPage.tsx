@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { LotDetail, LotStatusOut, SpaceStatusOut } from '../api/schemas'
-import { LotMapSvg } from '../components/LotMapSvg'
+import { AdminBadgeIcon, LotMapSvg } from '../components/LotMapSvg'
 import { StateIconSvg } from '../components/StateIcon'
+import { setByAdminText } from '../lib/overrides'
 import { dateTime, minutesAgo } from '../lib/relativeTime'
 import { STATE_ORDER, visualFor } from '../lib/status'
 import { useFetch } from '../lib/useFetch'
@@ -45,6 +46,11 @@ export function LotMapPage() {
     const label = labelById.get(spaceId) ?? spaceId
     const s = statusById.get(spaceId)
     if (!s) return `${label}: Unknown, no observation`
+    if (s.source === 'admin') {
+      // The admin's state replaces the camera reading, so its age does not apply.
+      const note = s.override?.note ? `. Note: ${s.override.note}` : ''
+      return `${label}: ${visualFor(s.state).label}. ${setByAdminText(s.override)}${note}`
+    }
     const parts = [`${label}: ${visualFor(s.state).label}`]
     parts.push(s.observedAt ? `observed ${dateTime(s.observedAt)}` : 'no observation')
     if (s.stale) parts.push('out of date')
@@ -162,6 +168,10 @@ function Legend() {
         <li>
           <StateIconSvg icon="empty" className="space--free space--stale" />
           Dimmed: out of date
+        </li>
+        <li>
+          <AdminBadgeIcon />
+          Set by admin
         </li>
       </ul>
     </section>

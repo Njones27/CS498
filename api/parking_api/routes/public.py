@@ -80,7 +80,12 @@ def list_lots(adapters: AdaptersDep, now: NowDep) -> list[LotListItem]:
             continue
         lot, layout = found
         summary = lot_summary(
-            lot, layout, repo.get_statuses(lot.lot_id), repo.list_closures(lot.lot_id), now
+            lot,
+            layout,
+            repo.get_statuses(lot.lot_id),
+            repo.list_closures(lot.lot_id),
+            now,
+            repo.list_overrides(lot.lot_id),
         )
         items.append(
             LotListItem(
@@ -143,5 +148,6 @@ def get_status(lot_id: str, adapters: AdaptersDep, now: NowDep) -> LotStatusOut:
         repo.list_closures(lot_id),
         repo.list_snapshots(lot_id, limit=RECENT_SNAPSHOTS),
         now,
+        repo.list_overrides(lot_id),
     )
     return LotStatusOut.model_validate(out)

@@ -293,7 +293,7 @@ SQ = [(0.1, 0.1), (0.2, 0.1), (0.2, 0.2), (0.1, 0.2)]
 
 def sq(i: int) -> list[tuple[float, float]]:
     """A small square outline, one per space, side by side on the photo."""
-    x = 0.05 * i
+    x = 0.02 + 0.05 * i  # clear of the border: an outline on the edge is a cut-off stall
     return [(x, 0.1), (x + 0.04, 0.1), (x + 0.04, 0.2), (x, 0.2)]
 
 
@@ -899,3 +899,19 @@ def test_restore_loses_race(repo, store, lot_l, monkeypatch):
         before.spaces,
         before.viewpoints,
     )
+
+
+def test_outline_on_photo_edge_warns():
+    d = clean()
+    d.viewpoints[0].outlines["A-01"] = [(0.0, 0.1), (0.1, 0.1), (0.1, 0.2), (0.0, 0.2)]
+    report = validate_draft(d, None)
+    issue = only(report.warnings, "outline_on_photo_edge")
+    assert issue.message == (
+        "1 outline reaches the edge of the V1 photo: treated as cut off, never shown Free from V1"
+    )
+    assert (issue.space_ids, issue.view_id) == (["A-01"], "V1")
+    assert report.ok  # a warning: it publishes
+
+
+def test_no_edge_warning_for_outlines_clear_of_the_border():
+    assert all(w.code != "outline_on_photo_edge" for w in validate_draft(clean(), None).warnings)

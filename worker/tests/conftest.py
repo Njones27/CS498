@@ -28,7 +28,7 @@ ALL_SPACES = sorted(set(V1_SPACES) | set(V2_SPACES))
 
 
 def _square(i: int) -> list[tuple[float, float]]:
-    x = 0.1 * i
+    x = 0.02 + 0.1 * i  # clear of the photo's border: an edge outline is a cut-off stall
     return [(x, 0.1), (x + 0.05, 0.1), (x + 0.05, 0.2), (x, 0.2)]
 
 

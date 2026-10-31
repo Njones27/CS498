@@ -21,7 +21,8 @@ from collections.abc import Sequence
 
 import cv2
 import numpy as np
-from parking_core.models import ProposedStall, Rect
+from parking_core.layouts import is_valid_quad
+from parking_core.models import ProposedStall, Rect, touches_photo_edge
 
 from ..scorers.acpds_yolo import CarDetector, Detection, decode_photo
 from . import rows as R
@@ -36,9 +37,13 @@ which keeps a run of many hundreds of stalls well inside a DynamoDB item."""
 WORK_SIDE = 2000
 """Photos with a longer side are downscaled to it first: a drone frame is 4000-8000 px wide,
 and stall lines stay several pixels wide at 2000 px."""
-MIN_IN_FRAME = 0.9
-"""A stall is proposed only if this share of it is on the photo, like the hand-drawn layouts
-(a stall cut off by the frame cannot be scored reliably)."""
+MIN_PARTIAL = 0.3
+"""A stall the photo cuts off is proposed as partial if at least this share of it is in view:
+its outline is the part in view (up to the photo's border, `touches_photo_edge`) and its
+evidence is scaled by that share. The worker never calls a cut-off stall Free, so another
+viewpoint that sees it whole decides it (see `parking_core.fusion`)."""
+WHOLE = 0.999
+"""In-view share at or above which a stall counts as wholly in the photo."""
 EVIDENCE_FLOOR = 0.1
 EVIDENCE_DIVIDER = 0.35
 EVIDENCE_CAR = 0.3
@@ -73,6 +78,29 @@ def _mark_cars(stalls: Sequence[R.FrameStall], cars: Sequence[Car]) -> None:
     for s in stalls:
         xc, half = (s.x0 + s.x1) / 2, CAR_CENTRED * (s.x1 - s.x0)
         s.car = s.car or any(abs(c.cx - xc) <= half and s.y0 <= c.cy <= s.y1 for c in cars)
+
+
+def _visible_part(poly: np.ndarray, width: int, height: int) -> np.ndarray | None:
+    """The stall's part inside the photo as 4 corners, clockwise, or None when the photo cuts it
+    into another shape (across a photo corner) or a sliver too thin to be a valid outline."""
+    rect = np.array([[0, 0], [width, 0], [width, height], [0, height]], dtype=np.float32)
+    _, pts = cv2.intersectConvexConvex(poly.astype(np.float32), rect)
+    if pts is None:
+        return None
+    pts = pts.reshape(-1, 2).astype(np.float64)
+    corners: list[np.ndarray] = []
+    for p in pts:  # drop repeated corners (a side lying on the border)
+        if all(np.hypot(*(p - q)) > 0.5 for q in corners):
+            corners.append(p)
+    if len(corners) != 4:
+        return None
+    quad = np.array(corners)
+    mid = quad.mean(axis=0)
+    # Clockwise on the photo (y down): increasing angle from the middle.
+    quad = quad[np.argsort(np.arctan2(quad[:, 1] - mid[1], quad[:, 0] - mid[0]))]
+    if not is_valid_quad([(float(x) / width, float(y) / height) for x, y in quad]):
+        return None
+    return quad
 
 
 def _in_frame_share(poly: np.ndarray, width: int, height: int) -> float:
@@ -156,34 +184,53 @@ def propose_stalls(bgr: np.ndarray, detections: Sequence[Detection]) -> list[Pro
     boxes = car_boxes(detections, width, height) * scale
     frame, rows = find_rows(work, boxes)
 
-    kept: list[tuple[float, list[tuple[R.FrameStall, np.ndarray]]]] = []
+    kept: list[tuple[float, list[tuple[R.FrameStall, np.ndarray, float]]]] = []
     for row in rows:
         good = []
         for s in sorted(row, key=lambda s: s.x0):
             corners = np.array([[s.x0, s.y0], [s.x1, s.y0], [s.x1, s.y1], [s.x0, s.y1]])
             poly = frame.to_photo(corners)
-            if _in_frame_share(poly, ww, wh) >= MIN_IN_FRAME:
-                good.append((s, poly))
+            share = _in_frame_share(poly, ww, wh)
+            if share >= WHOLE:
+                good.append((s, poly, None))
+            elif share >= MIN_PARTIAL:
+                visible = _visible_part(poly, ww, wh)
+                if visible is not None:
+                    good.append((s, poly, (visible, share)))
         if good:
-            kept.append((float(np.mean([(s.y0 + s.y1) / 2 for s, _ in good])), good))
+            kept.append((float(np.mean([(s.y0 + s.y1) / 2 for s, _, _ in good])), good))
     kept.sort(key=lambda r: r[0])
     if not kept:
         return []
-    min_x = min(s.x0 for _, row in kept for s, _ in row)
-    min_y = min(s.y0 for _, row in kept for s, _ in row)
+    min_x = min(s.x0 for _, row in kept for s, _, _ in row)
+    min_y = min(s.y0 for _, row in kept for s, _, _ in row)
     out = []
     for r, (_, row) in enumerate(kept):
-        for c, (s, poly) in enumerate(row):
-            frac = np.clip(poly / [ww, wh], 0.0, 1.0)
+        for c, (s, poly, cut) in enumerate(row):
+            # A cut-off stall's outline is the part in view, up to the photo's border.
+            frac = np.clip((cut[0] if cut else poly) / [ww, wh], 0.0, 1.0)
+            polygon = [
+                (round(float(x), COORD_DIGITS), round(float(y), COORD_DIGITS)) for x, y in frac
+            ]
+            # Partial means what the worker will see: an outline reaching the border (a stall
+            # wholly in view but flush with the border included), never just an area share.
+            partial = touches_photo_edge(polygon)
+            score = evidence(s) * (cut[1] if cut else 1.0)
             out.append(
                 ProposedStall(
-                    polygon=[
-                        (round(float(x), COORD_DIGITS), round(float(y), COORD_DIGITS))
-                        for x, y in frac
-                    ],
-                    evidence=round(evidence(s), 3),
+                    polygon=polygon,
+                    evidence=round(score, 3),
                     row=r,
                     col=c,
+                    partial=partial,
+                    whole_polygon=(
+                        [
+                            (round(float(x), COORD_DIGITS), round(float(y), COORD_DIGITS))
+                            for x, y in poly / [ww, wh]
+                        ]
+                        if partial
+                        else None
+                    ),
                     map_rect=Rect(
                         x=round((s.x0 - min_x) / ww, 5),
                         y=round((s.y0 - min_y) / ww, 5),
