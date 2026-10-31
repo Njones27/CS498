@@ -292,7 +292,7 @@ function SetStateDialog({ spacesText, onCancel, onSubmit, onCreated }: DialogPro
       await onSubmit({
         state,
         note: note.trim(),
-        startsAt: now.toISOString(),
+        // No startsAt: the server starts it now by its own clock.
         endsAt: end ? end.toISOString() : null,
       })
       onCreated()
@@ -337,7 +337,7 @@ function SetStateDialog({ spacesText, onCancel, onSubmit, onCreated }: DialogPro
             <input type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} />
           </label>
           <label>
-            Note <span className="muted">(optional)</span>
+            Note <span className="muted">(optional; shown to drivers)</span>
             <input type="text" value={note} maxLength={NOTE_MAX} onChange={(e) => setNote(e.target.value)} />
           </label>
           {error && (

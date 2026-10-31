@@ -49,9 +49,10 @@ def test_no_readings():
         ([r("V1", UNK, 5), r("V2", UNK, 0)], UNK, "V2", ("V1", "V2")),
         # A confident reading past the allowed age no longer counts.
         ([r("V1", OCC, 45), r("V2", UNK, 0)], UNK, "V2", ("V2",)),
-        # The same view's newer reading replaced its older one before fusion (one per view),
-        # but a legacy reading with no view still counts as its own view.
-        ([r(None, OCC, 2), r("V1", FREE, 0)], OCC, None, ("",)),
+        # A legacy reading (no viewpoint) counts, but may be this very view's older reading,
+        # so it never overrules a newer Free.
+        ([r(None, OCC, 2), r("V1", FREE, 0)], FREE, "V1", ("V1",)),
+        ([r(None, OCC, 2), r("V1", UNK, 0)], OCC, None, ()),
     ],
 )
 def test_fuse(readings, state, chosen_view, views):

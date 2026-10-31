@@ -80,7 +80,9 @@ def create_override(
     repo = adapters.repository
     if repo.get_lot(lot_id) is None:
         raise error(404, "not_found", "Lot not found")
-    if body.ends_at is not None and body.ends_at <= body.starts_at:
+    # Now, by the server's clock; a start in the past means now too.
+    starts_at = max(body.starts_at or now, now)
+    if body.ends_at is not None and body.ends_at <= starts_at:
         raise error(422, "invalid_window", "End time must be after start time")
     found = find_published(repo, lot_id)
     if found is None:
@@ -96,7 +98,7 @@ def create_override(
         space_ids=body.space_ids,
         state=SpaceState(body.state),
         note=body.note.strip(),
-        starts_at=body.starts_at,
+        starts_at=starts_at,
         ends_at=body.ends_at,
         created_by=admin.email,
         created_at=now,

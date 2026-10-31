@@ -12,10 +12,16 @@ OverrideState = Literal["FREE", "OCCUPIED"]
 
 
 class OverrideCreate(CamelModel):
-    space_ids: list[str] = Field(min_length=1, description="Spaces to set; duplicates dropped")
+    space_ids: list[str] = Field(
+        min_length=1, max_length=500, description="Spaces to set; duplicates dropped"
+    )
     state: OverrideState
-    note: str = Field(default="", max_length=200)
-    starts_at: AwareDatetime
+    note: str = Field(default="", max_length=200, description="Shown to drivers")
+    starts_at: AwareDatetime | None = Field(
+        default=None,
+        description="Omit to start now (the server's clock, so an admin's clock never delays "
+        "it); a later time schedules it",
+    )
     ends_at: AwareDatetime | None = Field(
         default=None, description="Null until an admin ends it; must be after startsAt"
     )

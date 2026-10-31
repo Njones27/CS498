@@ -11,7 +11,8 @@ fixed rules, so views complement each other instead of the latest photo always w
    Occupied from another viewpoint within `AGREEMENT_WINDOW` of it: views seeing the lot at
    nearly the same moment that disagree resolve to Occupied, since a false Free is the costly
    error (HDD §4.5).
-4. A newer Unknown (a view that sees the space badly) never replaces a confident reading.
+4. A newer Unknown from another viewpoint (one that sees the space badly) never replaces a
+   confident reading. Within one viewpoint, its newer reading replaces its older one as before.
 
 Pure: no I/O, no clock.
 """
@@ -37,7 +38,8 @@ class Fused:
     state: SpaceState
     reading: SpaceStatus
     views: tuple[str, ...]
-    """Viewpoints whose counted readings agree with `state` (sorted; "" for a legacy reading)."""
+    """Viewpoints whose counted readings agree with `state` (sorted; legacy readings, which
+    have no viewpoint, are left out)."""
 
 
 def fuse(readings: Iterable[SpaceStatus], allowed_age: timedelta) -> Fused | None:
@@ -58,6 +60,7 @@ def fuse(readings: Iterable[SpaceStatus], allowed_age: timedelta) -> Fused | Non
             r
             for r in confident
             if r.state is SpaceState.OCCUPIED
+            and r.view_id is not None  # a legacy reading's view is unknown: maybe this one
             and r.view_id != chosen.view_id
             and abs(r.observed_at - chosen.observed_at) <= AGREEMENT_WINDOW
         ]
@@ -87,4 +90,4 @@ def _order(r: SpaceStatus) -> tuple:
 
 
 def _views(readings: list[SpaceStatus], state: SpaceState) -> tuple[str, ...]:
-    return tuple(sorted({r.view_id or "" for r in readings if r.state is state}))
+    return tuple(sorted({r.view_id for r in readings if r.state is state and r.view_id}))

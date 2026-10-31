@@ -200,7 +200,7 @@ describe('overrides list', () => {
 })
 
 describe('setting space state', () => {
-  it('posts the spaces picked on the map, state, note and startsAt now, then lists it', async () => {
+  it('posts the spaces picked on the map, state and note (the server starts it now), then lists it', async () => {
     let posted: Record<string, unknown> = {}
     const created: OverrideOut = {
       ...active, overrideId: 'ov_2', spaceIds: ['A-01', 'A-03'], note: 'VIP visit', endsAt: null, startsAt: today(0),
@@ -216,17 +216,12 @@ describe('setting space state', () => {
     expect(dialog.getByText('Spaces: A-01, A-03 (2 selected)')).toBeInTheDocument()
     await user.click(dialog.getByRole('radio', { name: 'Occupied' }))
     await user.type(dialog.getByLabelText(/^Note/), '  VIP visit ')
-    const before = Date.now()
     await user.click(dialog.getByRole('button', { name: 'Set state' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(calls(fetchMock, 'POST', URL)).toHaveLength(1)
-    expect(posted).toEqual({
-      spaceIds: ['A-01', 'A-03'], state: 'OCCUPIED', note: 'VIP visit', startsAt: expect.any(String), endsAt: null,
-    })
-    const startsAt = new Date(String(posted.startsAt))
-    expect(startsAt.toISOString()).toBe(posted.startsAt)
-    expect(Math.abs(startsAt.getTime() - before)).toBeLessThan(5_000)
+    // No startsAt: the server starts it now by its own clock.
+    expect(posted).toEqual({ spaceIds: ['A-01', 'A-03'], state: 'OCCUPIED', note: 'VIP visit', endsAt: null })
     expect(screen.getByText('0 selected')).toBeInTheDocument()
     expect(within(await screen.findByTestId('override-ov_2')).getByText('VIP visit')).toBeInTheDocument()
     expect(calls(fetchMock, 'GET', '/lots/test-lot/status')).toHaveLength(2)

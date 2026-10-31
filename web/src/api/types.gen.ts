@@ -985,6 +985,7 @@ export interface components {
             endsAt?: string | null;
             /**
              * Note
+             * @description Shown to drivers
              * @default
              */
             note: string;
@@ -995,9 +996,9 @@ export interface components {
             spaceIds: string[];
             /**
              * Startsat
-             * Format: date-time
+             * @description Omit to start now (the server's clock, so an admin's clock never delays it); a later time schedules it
              */
-            startsAt: string;
+            startsAt?: string | null;
             /**
              * State
              * @enum {string}

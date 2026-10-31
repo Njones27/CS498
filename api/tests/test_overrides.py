@@ -116,3 +116,31 @@ def test_views_disagreeing_at_the_same_moment_resolve_to_occupied(
     upload_photo(client, admin_headers, "test-lot", "V2", b"v2", NOW - timedelta(minutes=1))
     run_worker(adapters, settings, scripted_scorer({"B-01": FREE}), clock)
     assert rows(client)["B-01"]["state"] == OCCUPIED
+
+
+def test_the_server_clock_starts_an_override(client, admin_headers, clock):
+    # No startsAt: it starts now by the server's clock, whatever the admin's clock says.
+    r = client.post(URL, json={"spaceIds": ["B-01"], "state": "FREE"}, headers=admin_headers)
+    assert r.status_code == 201 and r.json()["status"] == "ACTIVE"
+    assert r.json()["startsAt"].startswith(NOW.isoformat()[:19])
+    # A start the admin's clock put a few minutes ahead does not delay it.
+    ahead = body(["B-02"])
+    r = client.post(URL, json=ahead, headers=admin_headers)
+    assert r.json()["status"] == "ACTIVE"
+    # An end already past is refused, not stored as an override that never applied.
+    past = {
+        "spaceIds": ["B-01"],
+        "state": "FREE",
+        "endsAt": (NOW - timedelta(minutes=1)).isoformat(),
+    }
+    r = client.post(URL, json=past, headers=admin_headers)
+    assert r.status_code == 422 and r.json()["error"] == "invalid_window"
+
+
+def test_a_scheduled_override_waits_for_its_start(client, admin_headers, clock):
+    later = NOW + timedelta(hours=2)
+    r = client.post(URL, json=body(["B-01"], startsAt=later.isoformat()), headers=admin_headers)
+    assert r.json()["status"] == "SCHEDULED"
+    assert rows(client)["B-01"]["source"] != "admin"
+    clock.now = later
+    assert rows(client)["B-01"]["source"] == "admin"

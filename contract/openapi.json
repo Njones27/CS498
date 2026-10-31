@@ -1260,6 +1260,7 @@
           },
           "note": {
             "default": "",
+            "description": "Shown to drivers",
             "maxLength": 200,
             "title": "Note",
             "type": "string"
@@ -1269,14 +1270,23 @@
             "items": {
               "type": "string"
             },
+            "maxItems": 500,
             "minItems": 1,
             "title": "Spaceids",
             "type": "array"
           },
           "startsAt": {
-            "format": "date-time",
-            "title": "Startsat",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omit to start now (the server's clock, so an admin's clock never delays it); a later time schedules it",
+            "title": "Startsat"
           },
           "state": {
             "enum": [
@@ -1289,8 +1299,7 @@
         },
         "required": [
           "spaceIds",
-          "state",
-          "startsAt"
+          "state"
         ],
         "title": "OverrideCreate",
         "type": "object"
