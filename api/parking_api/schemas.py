@@ -193,6 +193,10 @@ class SnapshotOut(CamelModel):
     error: str | None
     layout_version: int | None
     created_at: datetime
+    rescore_of: str | None = Field(
+        default=None,
+        description="Set on a re-score after a publish: the snapshot whose photo this scores again",
+    )
 
 
 class CarBoxOut(CamelModel):

@@ -31,6 +31,7 @@ def snapshot_out(s: Snapshot, now: datetime) -> dict[str, object]:
         "error": s.error,
         "layout_version": s.layout_version,
         "created_at": s.created_at,
+        "rescore_of": s.rescore_of,
     }
 
 

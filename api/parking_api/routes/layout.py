@@ -42,6 +42,7 @@ from parking_core.models import (
 )
 
 from ..deps import AdaptersDep, AdminDep, NowDep, error
+from ..jobs import rescore_latest
 from ..layout_schemas import (
     DraftErrorResponse,
     DraftLayout,
@@ -279,6 +280,8 @@ def publish(
             VALIDATION_FAILED_MESSAGE,
             report=exc.report.model_dump(mode="json"),
         ) from None
+    # Spaces new in this version get a state from the latest photo, without another upload.
+    rescore_latest(adapters, lot_id, version.version, admin.email, now)
     return _version_out(version)
 
 

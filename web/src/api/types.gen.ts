@@ -1152,6 +1152,11 @@ export interface components {
             photoUrl: string | null;
             /** Processingms */
             processingMs: number | null;
+            /**
+             * Rescoreof
+             * @description Set on a re-score after a publish: the snapshot whose photo this scores again
+             */
+            rescoreOf?: string | null;
             /** Viewid */
             viewId: string;
         };
@@ -1188,6 +1193,11 @@ export interface components {
             modelVersion: string | null;
             /** Processingms */
             processingMs: number | null;
+            /**
+             * Rescoreof
+             * @description Set on a re-score after a publish: the snapshot whose photo this scores again
+             */
+            rescoreOf?: string | null;
             /** Viewid */
             viewId: string;
         };

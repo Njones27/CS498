@@ -1758,6 +1758,18 @@
             ],
             "title": "Processingms"
           },
+          "rescoreOf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on a re-score after a publish: the snapshot whose photo this scores again",
+            "title": "Rescoreof"
+          },
           "viewId": {
             "title": "Viewid",
             "type": "string"
@@ -1866,6 +1878,18 @@
               }
             ],
             "title": "Processingms"
+          },
+          "rescoreOf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on a re-score after a publish: the snapshot whose photo this scores again",
+            "title": "Rescoreof"
           },
           "viewId": {
             "title": "Viewid",

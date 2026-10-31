@@ -377,8 +377,7 @@ class MemoryRepository:
     def update_status_if_newer(self, status: SpaceStatus) -> bool:
         key = (status.lot_id, status.space_id)
         with self._lock:
-            current = self._statuses.get(key)
-            if current is not None and not current.observed_at < status.observed_at:
+            if not status.supersedes(self._statuses.get(key)):
                 return False
             self._statuses[key] = status.model_copy(deep=True)
             return True

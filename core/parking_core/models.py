@@ -208,6 +208,9 @@ class Snapshot(CamelModel):
     model_version: str | None = None
     layout_version: int | None = None
     processing_ms: int | None = None
+    rescore_of: str | None = None
+    """Set on a re-score: the earlier snapshot whose photo this one scores again against a
+    newly published layout version (no new upload; same capture time and object)."""
     created_at: datetime
     queued_at: datetime | None = None
     completed_at: datetime | None = None
@@ -246,6 +249,19 @@ class SpaceStatus(CamelModel):
     confidence: float | None = None
     observed_at: datetime
     source_image_id: str
+    layout_version: int | None = Field(default=None, exclude_if=lambda v: v is None)
+    """The layout version the photo was scored with. Breaks a tie in `observed_at`: the same
+    photo re-scored after a publish replaces its earlier result (see `supersedes`)."""
+
+    def supersedes(self, current: SpaceStatus | None) -> bool:
+        """Newer capture wins (HDD §4.1 step 7); on the same capture time, the newer layout
+        version wins, so a re-score after a publish updates the map. Two photos with the same
+        time and version keep the first one."""
+        if current is None or current.observed_at < self.observed_at:
+            return True
+        if current.observed_at != self.observed_at or self.layout_version is None:
+            return False
+        return current.layout_version is None or current.layout_version < self.layout_version
 
 
 class Closure(CamelModel):

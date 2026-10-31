@@ -145,7 +145,8 @@ class Repository(Protocol):
         ...
 
     def update_status_if_newer(self, status: SpaceStatus) -> bool:
-        """Conditional write: only when the stored observedAt is older (HDD §4.1 step 7)."""
+        """Conditional write: only when `status.supersedes` the stored one (HDD §4.1 step 7):
+        an older observedAt, or the same one from an older layout version."""
         ...
 
     def get_statuses(self, lot_id: str) -> list[SpaceStatus]: ...

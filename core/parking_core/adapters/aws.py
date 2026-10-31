@@ -157,6 +157,24 @@ def status_item(status: SpaceStatus) -> dict[str, Any]:
     return model_to_item(status, k.lot_pk(status.lot_id), k.status_sk(status.space_id))
 
 
+def status_condition(status: SpaceStatus) -> dict[str, Any]:
+    """PutItem condition kwargs for `update_status_if_newer`, the same rule as
+    `SpaceStatus.supersedes` (pure, so it is unit-testable)."""
+    new = format_dt(status.observed_at)
+    if status.layout_version is None:
+        return {
+            "ConditionExpression": "attribute_not_exists(observedAt) OR observedAt < :new",
+            "ExpressionAttributeValues": {":new": new},
+        }
+    return {
+        "ConditionExpression": (
+            "attribute_not_exists(observedAt) OR observedAt < :new OR (observedAt = :new AND "
+            "(attribute_not_exists(layoutVersion) OR layoutVersion < :ver))"
+        ),
+        "ExpressionAttributeValues": {":new": new, ":ver": status.layout_version},
+    }
+
+
 def closure_item(closure: Closure) -> dict[str, Any]:
     return model_to_item(closure, k.lot_pk(closure.lot_id), k.closure_sk(closure.closure_id))
 
@@ -592,11 +610,7 @@ class DynamoRepository:
 
     def update_status_if_newer(self, status: SpaceStatus) -> bool:
         try:
-            self._table.put_item(
-                Item=status_item(status),
-                ConditionExpression="attribute_not_exists(observedAt) OR observedAt < :new",
-                ExpressionAttributeValues={":new": format_dt(status.observed_at)},
-            )
+            self._table.put_item(Item=status_item(status), **status_condition(status))
             return True
         except ClientError as exc:
             if is_conditional_failure(exc):

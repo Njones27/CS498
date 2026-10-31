@@ -262,6 +262,12 @@ describe('Snapshots page (US-06)', () => {
     expect(within(panel).queryByRole('link', { name: 'View photo with outlines' })).not.toBeInTheDocument()
   })
 
+  it('labels the same photo re-scored after a publish', async () => {
+    setup([row('img-rescore', { layoutVersion: 4, rescoreOf: 'img-1405' }), complete])
+    expect(cells(await rowOf('img-rescore'))[1]).toBe('V1 · Re-scored for layout v4')
+    expect(cells(await rowOf('img-1405'))[1]).toBe('V1')
+  })
+
   it('says when a lot has no photos yet', async () => {
     setup([])
     expect(await screen.findByText(/No photos uploaded for this lot yet/)).toBeInTheDocument()
