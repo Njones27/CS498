@@ -706,7 +706,7 @@ export function ReferencePhotoPanel({
   // HDD §4.6: the worker finds stalls on the reference photo; they arrive as new spaces with pending
   // proposed outlines, saved at once like any outline edit.
   const handleStalls = (viewId: string, stalls: ProposedStall[]) => {
-    const merged = mergeProposals(draft, viewId, stalls)
+    const merged = mergeProposals(draft, viewId, stalls, grid ?? null)
     if (merged.blocked) {
       setDrawError(merged.blocked)
       return

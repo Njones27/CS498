@@ -2,7 +2,8 @@ import type { components } from '../api/types.gen'
 import { MARGIN, MIN_SIDE, yBelowAll } from './schematic/geometry'
 import { addSpacesAt, deleteSpace, type Grown } from './schematic/edits'
 import { formatLabel, nextRowStart, parseLabel } from './schematic/labels'
-import { centroid, outlineToRect, photoToSchematic } from './sync'
+import { type Grid, shiftGrid } from './schematic/grid'
+import { addSpaceFromOutline, centroid, outlineToRect, photoToSchematic } from './sync'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, OutlineReview, Outline, Point } from './types'
 
 // Stalls found by the layout proposer (HDD §4.6), merged into the draft for review. Pure: every edit
@@ -98,70 +99,95 @@ const contains = (r: DraftRect, [x, y]: Point) => x >= r.x && x <= r.x + r.w && 
  * Add the proposer's stalls to `viewId` as pending proposed outlines. Stalls on an outline already in the
  * view are skipped.
  *
- * With enough outlined spaces to fit the photo to the map, each stall is placed by the fit: one landing on
- * a space that has no outline in this view yet (seen from another viewpoint, or drawn on the map) becomes
- * that space's outline, and the rest become new spaces labeled for the row they line up with. Without a
- * fit, stalls can only be matched to nothing: on a lot whose spaces are all outlined here (a new lot,
- * typically) they become new spaces in the proposer's top-down layout, rows labeled A, B, C (after any rows
- * in use) and stalls 01 onward; on a lot with spaces this photo does not show yet, nothing is merged
+ * With enough outlined spaces to fit the photo to the map, a stall landing on a space that has no outline in
+ * this view yet (seen from another viewpoint, or drawn on the map) becomes that space's outline. Every other
+ * stall is added exactly like a space drawn on the photo (`addSpaceFromOutline`): with the schematic grid it
+ * takes the cell the photo puts it in and is named for it, a stall before a row's first space is inserted at
+ * the row start, and the row renumbered. Stalls are added right to left, so those nearest the spaces already
+ * placed go first.
+ *
+ * Without a fit, stalls can only be matched to nothing: on a lot whose spaces are all outlined here (a new
+ * lot, typically) they become new spaces in the proposer's top-down layout, rows labeled A, B, C (after any
+ * rows in use) and stalls 01 onward; on a lot with spaces this photo does not show yet, nothing is merged
  * (`blocked`), so a second viewpoint never duplicates the stalls of the first.
  */
-export function mergeProposals(draft: DraftLayout, viewId: string, stalls: ProposedStall[]): MergeResult {
+export function mergeProposals(
+  draft: DraftLayout,
+  viewId: string,
+  stalls: ProposedStall[],
+  grid: Grid | null = null,
+): MergeResult {
   const none = { draft, dx: 0, dy: 0, added: 0, attached: 0 }
   const view = draft.viewpoints.find((v) => v.viewId === viewId)
   if (!view) return { ...none, skipped: stalls.length }
   const fresh = stalls.filter((s) => !alreadyOutlined(view, s.polygon as Outline))
-  let skipped = stalls.length - fresh.length
+  const skipped = stalls.length - fresh.length
   if (fresh.length === 0) return { ...none, skipped }
 
   const unmatched = draft.spaces.filter((sp) => !sp.retired && !view.outlines[sp.spaceId])
   const fit = photoToSchematic(draft, view)
   if (!fit && unmatched.length > 0) return { ...none, skipped, blocked: NEEDS_ANCHORS }
 
-  // Stalls for spaces the lot already has, and the rest with their rect and label.
-  const attach = new Map<string, ProposedStall>()
-  const create: { stall: ProposedStall; rect: DraftRect; label?: string }[] = []
+  // Which space each stall's outline goes to; `created` marks spaces made for a stall.
+  const found = new Map<string, ProposedStall>()
+  const created = new Set<string>()
+  let next = draft
+  let dx = 0
+  let dy = 0
   if (fit) {
     const free = new Set(unmatched.map((sp) => sp.spaceId))
+    const rest: ProposedStall[] = []
     for (const stall of fresh) {
       const rect = outlineToRect(fit, stall.polygon as Outline)
-      if (!rect) {
-        skipped++
-        continue
-      }
-      const mid: Point = [rect.x + rect.w / 2, rect.y + rect.h / 2]
-      const space: DraftSpace | undefined = unmatched.find((sp) => free.has(sp.spaceId) && contains(sp.rect, mid))
+      const mid: Point | null = rect && [rect.x + rect.w / 2, rect.y + rect.h / 2]
+      const space: DraftSpace | undefined = mid
+        ? unmatched.find((sp) => free.has(sp.spaceId) && contains(sp.rect, mid))
+        : undefined
       if (space) {
         free.delete(space.spaceId)
-        attach.set(space.spaceId, stall)
+        found.set(space.spaceId, stall)
       } else {
-        create.push({ stall, rect })
+        rest.push(stall)
       }
+    }
+    rest.sort((a, b) => centroid(b.polygon as Outline)[0] - centroid(a.polygon as Outline)[0])
+    for (const stall of rest) {
+      const placed = addSpaceFromOutline(next, viewId, stall.polygon as Outline, grid && shiftGrid(grid, dx, dy))
+      next = placed.draft
+      dx += placed.dx
+      dy += placed.dy
+      found.set(placed.space.spaceId, stall)
+      created.add(placed.space.spaceId)
     }
   } else {
     const rects = layoutRects(draft, fresh)
     const labels = layoutLabels(draft, fresh)
-    fresh.forEach((stall, i) => create.push({ stall, rect: rects[i], label: labels[i] }))
+    const grown = addSpacesAt(
+      draft,
+      fresh.map((_, i) => ({ rect: rects[i], label: labels[i] })),
+    )
+    next = grown.draft
+    dx = grown.dx
+    dy = grown.dy
+    grown.spaces.forEach((space, i) => {
+      found.set(space.spaceId, fresh[i])
+      created.add(space.spaceId)
+    })
   }
 
-  const grown = addSpacesAt(
-    draft,
-    create.map(({ rect, label }) => ({ rect, label })),
-  )
-  const found = new Map(attach)
-  grown.spaces.forEach((space, i) => found.set(space.spaceId, create[i].stall))
-  const outlines = { ...view.outlines }
-  const outlineReview: Record<string, OutlineReview> = { ...view.outlineReview }
+  const target = next.viewpoints.find((v) => v.viewId === viewId)!
+  const outlines = { ...target.outlines }
+  const outlineReview: Record<string, OutlineReview> = { ...target.outlineReview }
   for (const [spaceId, stall] of found) {
     outlines[spaceId] = stall.polygon as Outline
     outlineReview[spaceId] = { source: 'proposed', status: 'pending', evidence: stall.evidence }
-    if (!attach.has(spaceId)) outlineReview[spaceId].newSpace = true
+    if (created.has(spaceId)) outlineReview[spaceId].newSpace = true
   }
-  const next: DraftLayout = {
-    ...grown.draft,
-    viewpoints: grown.draft.viewpoints.map((v) => (v.viewId === viewId ? { ...v, outlines, outlineReview } : v)),
+  next = {
+    ...next,
+    viewpoints: next.viewpoints.map((v) => (v.viewId === viewId ? { ...v, outlines, outlineReview } : v)),
   }
-  return { draft: next, dx: grown.dx, dy: grown.dy, added: create.length, attached: attach.size, skipped }
+  return { draft: next, dx, dy, added: created.size, attached: found.size - created.size, skipped }
 }
 
 /** The view's outlines still waiting for review, weakest evidence first (those without a score last). */

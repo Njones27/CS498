@@ -8,6 +8,7 @@ import {
   rejectProposals,
   type ProposedStall,
 } from './proposals'
+import { fitGrid } from './schematic/grid'
 import { photoToSchematic } from './sync'
 import type { DraftLayout, DraftSpace, Outline } from './types'
 
@@ -176,6 +177,52 @@ describe('mergeProposals', () => {
     const d = emptyDraft()
     expect(mergeProposals(d, 'V9', [stall(0, 0)]).draft).toBe(d)
     expect(mergeProposals(d, 'V1', []).draft).toBe(d)
+  })
+})
+
+describe('mergeProposals on a mapped lot (like the seeded drone lot)', () => {
+  /** Rows A and B, four stalls each, outlined on V1: photo fraction (x, y) sits at map (x * 1000, y * 1000). */
+  function mappedLot(): DraftLayout {
+    const d = emptyDraft()
+    d.schematic = { width: 1000, height: 600 }
+    for (const [r, row] of ['A', 'B'].entries()) {
+      for (let c = 0; c < 4; c++) {
+        const id = `${row}${c + 1}`
+        d.spaces.push(space(id, `${row}-0${c + 1}`, 200 + c * 50, 100 + r * 150))
+        d.viewpoints[0].outlines[id] = box(0.2 + c * 0.05, 0.1 + r * 0.15, 0.05, 0.1)
+      }
+    }
+    return d
+  }
+  const at = (row: number, col: number): ProposedStall => ({
+    polygon: box(0.2 + col * 0.05, 0.1 + row * 0.15, 0.05, 0.1),
+    evidence: 0.8,
+    row,
+    col: Math.max(0, col),
+    mapRect: { x: 0, y: 0, w: 0.05, h: 0.1 },
+  })
+
+  it('puts stalls past a row end in that row, named for the cell', () => {
+    const d = mappedLot()
+    const { draft, added } = mergeProposals(d, 'V1', [at(0, 4), at(1, 4)], fitGrid(d.spaces))
+    expect(added).toBe(2)
+    const byLabel = new Map(draft.spaces.map((s) => [s.label, s]))
+    expect(byLabel.get('A-05')?.rect).toEqual({ ...byLabel.get('A-04')!.rect, x: byLabel.get('A-04')!.rect.x + 50 })
+    expect(byLabel.get('B-05')?.rect.y).toBe(byLabel.get('B-04')!.rect.y)
+  })
+
+  it('inserts stalls before a row start at the start, renumbering the row', () => {
+    const d = mappedLot()
+    const { draft, added } = mergeProposals(d, 'V1', [at(0, -2), at(0, -1)], fitGrid(d.spaces))
+    expect(added).toBe(2)
+    const rowA = draft.spaces.filter((s) => s.label.startsWith('A-')).sort((a, b) => a.rect.x - b.rect.x)
+    expect(rowA.map((s) => s.label)).toEqual(['A-01', 'A-02', 'A-03', 'A-04', 'A-05', 'A-06'])
+    expect(new Set(rowA.map((s) => s.rect.y))).toEqual(new Set([rowA[0].rect.y])) // one line
+    expect(rowA.slice(2).map((s) => s.spaceId)).toEqual(['A1', 'A2', 'A3', 'A4'])
+    const v1 = draft.viewpoints[0]
+    for (const s of rowA.slice(0, 2)) {
+      expect(v1.outlineReview?.[s.spaceId]).toEqual({ source: 'proposed', status: 'pending', evidence: 0.8, newSpace: true })
+    }
   })
 })
 
