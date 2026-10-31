@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { davidFixture, space } from './fixtures/david'
 import { fitSchematic } from './schematic/edits'
 import { labelForRect } from './schematic/labels'
-import { cellRect, fitGrid } from './schematic/grid'
+import { cellRect, fitGrid, insertAtRowStart } from './schematic/grid'
 import { isValidQuad } from './photo/geom'
 import {
   addSpaceFromOutline,
@@ -347,6 +347,20 @@ describe('photo <-> schematic sync', () => {
     const mid = [0, 1].map((k) => out.reduce((t, p) => t + p[k], 0) / 4)
     expect(mid[0]).toBeCloseTo(expectMid[0], 2)
     expect(mid[1]).toBeCloseTo(expectMid[1], 2)
+  })
+
+  it('a space inserted at a row\'s start takes its outline to the spot before the row\'s first outline', () => {
+    const draft = gridDraft()
+    const grid = fitGrid(draft.spaces)
+    const v = draft.viewpoints[0]
+    // A-03 inserted at the start of row B (as a schematic drag before B-01 does), then its outline follows.
+    const inserted = insertAtRowStart(draft, grid, 'A-03', 1)!
+    const out = followRects(draft, inserted, ['A-03']).viewpoints[0].outlines['A-03']
+    const [b1, b2] = [v.outlines['B-01'], v.outlines['B-02']]
+    const mid = (o: Outline, k: number) => o.reduce((t, q) => t + q[k], 0) / 4
+    expect(mid(out, 0)).toBeCloseTo(mid(b1, 0) - (mid(b2, 0) - mid(b1, 0)), 2)
+    expect(mid(out, 1)).toBeCloseTo(mid(b1, 1) - (mid(b2, 1) - mid(b1, 1)), 2)
+    expect(inserted.spaces.find((s) => s.spaceId === 'A-03')!.label).toBe('B-01')
   })
 
   it('a first outline does not move the space', () => {

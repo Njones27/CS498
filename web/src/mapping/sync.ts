@@ -343,12 +343,19 @@ export function followRects(before: DraftLayout, after: DraftLayout, spaceIds: s
       if (!was || !now || now.retired || sameRect(was.rect, now.rect)) continue
       const moved = (() => {
         // Renamed for another cell: its outline goes where that cell is beside the row's others.
+        // The others moving in this batch still have their old outlines: not markers to go by.
         const p = was.label !== now.label ? parseLabel(now.label) : null
-        const spot = p && outlineLike(after, v, rowIndex(p.row), p.num - 1, id)
+        const spot = p && outlineLike(after, v, rowIndex(p.row), p.num - 1, ids)
         if (spot) {
           const [ox, oy] = centroid(v.outlines[id])
           const [sx, sy] = centroid(spot)
-          return onPhoto(v.outlines[id].map(([x, y]): Point => [x + sx - ox, y + sy - oy]))
+          const shifted = v.outlines[id].map(([x, y]): Point => [x + sx - ox, y + sy - oy])
+          // Nudged past the photo's edge: slide it back in whole rather than squash its corners.
+          const xs = shifted.map((q) => q[0])
+          const ys = shifted.map((q) => q[1])
+          const dx = Math.min(...xs) < 0 ? -Math.min(...xs) : Math.max(...xs) > 1 ? 1 - Math.max(...xs) : 0
+          const dy = Math.min(...ys) < 0 ? -Math.min(...ys) : Math.max(...ys) > 1 ? 1 - Math.max(...ys) : 0
+          return onPhoto(shifted.map(([x, y]): Point => [x + dx, y + dy]))
         }
         if (!toSchematic || !toPhoto) return null
         const carry = edgeCarry(was.rect, now.rect)

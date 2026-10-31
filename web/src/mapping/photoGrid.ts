@@ -57,12 +57,13 @@ const inProportion = (view: DraftViewpoint, o: Outline): Outline => {
   return o.map(([x, y]) => [x * aspect, y])
 }
 
-/** Outlined active spaces in `view` with row-number labels, except `exceptId`, in the photo's proportions. */
-function markers(draft: DraftLayout, view: DraftViewpoint, exceptId?: string): Marker[] {
+/** Outlined active spaces in `view` with row-number labels, except `except` (one id or several), in the photo's proportions. */
+function markers(draft: DraftLayout, view: DraftViewpoint, except?: string | Iterable<string>): Marker[] {
+  const skip = new Set(typeof except === 'string' ? [except] : (except ?? []))
   return draft.spaces.flatMap((s) => {
     const raw = view.outlines[s.spaceId]
     const p = parseLabel(s.label)
-    if (s.retired || !raw || !p || s.spaceId === exceptId) return []
+    if (s.retired || !raw || !p || skip.has(s.spaceId)) return []
     const outline = inProportion(view, raw)
     return [{ spaceId: s.spaceId, row: rowIndex(p.row), col: p.num - 1, outline, ...box(outline) }]
   })
@@ -256,9 +257,9 @@ export function outlineLike(
   view: DraftViewpoint,
   row: number,
   named: number,
-  exceptId?: string,
+  except?: string | Iterable<string>,
 ): Outline | null {
-  const lay = layout(markers(draft, view, exceptId))
+  const lay = layout(markers(draft, view, except))
   if (!lay) return null
   // Copy an accepted outline over a proposal still waiting for review, when the row has one.
   const pending = (m: Marker) => view.outlineReview?.[m.spaceId]?.status === 'pending'
