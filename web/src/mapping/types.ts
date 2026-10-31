@@ -1,4 +1,5 @@
 import type { components } from '../api/types.gen'
+import type { Grid } from './schematic/grid'
 
 /** Mapping types shared by the mapping page and its panels (brief §4.4): aliases of the generated schemas. */
 type S = components['schemas']
@@ -23,6 +24,12 @@ export interface UploadedReference {
 }
 
 export type Point = [number, number]
+
+/** How far an edit moved every space when growing the map left or up. */
+export interface MapShift {
+  dx: number
+  dy: number
+}
 export type Outline = Point[]
 
 /** One validation problem (brief §4.3): `code`, `message`, `spaceIds`, `viewId`. */
@@ -43,10 +50,15 @@ export interface ReferencePhotoPanelProps extends MappingSelection {
   draft: DraftLayout
   viewId: string | null
   onViewChange: (viewId: string) => void
-  onChange: (next: DraftLayout) => void
+  /** `shift`: how far the edit moved every space to grow the map left or up (fitSchematic), if at all. */
+  onChange: (next: DraftLayout, shift?: MapShift) => void
   /** Refetch the reference photos (with fresh signed URLs) into the page's latest draft: after an
    * upload, which passes the stored photo so it shows at once, and to retry a photo that did not load. */
   onReferenceUploaded: (uploaded?: UploadedReference) => void
   issues: Issue[]
   onSave?: () => Promise<DraftLayout | null>
+  /** The schematic grid: a space moved from the photo into another cell is renamed for it. */
+  grid?: Grid | null
+  /** Snapping on: spaces added or moved from the photo also land squarely in the grid's cells. */
+  snap?: boolean
 }

@@ -1,9 +1,11 @@
 import type { DraftRect, DraftSpace } from '../types'
 
-/** Schematic size in schematic units (`draft.schematic`). */
+/** An area in schematic units: the map area (`draft.schematic`, origin 0,0) or, while dragging, the visible area. */
 export interface Bounds {
   width: number
   height: number
+  x?: number // left edge, 0 when left out
+  y?: number // top edge, 0 when left out
 }
 
 export interface Size {
@@ -30,11 +32,13 @@ export function sameRect(a: DraftRect, b: DraftRect): boolean {
   return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
 }
 
-/** Snap to whole units, keep at least MIN_SIDE per side, and keep the rectangle inside the schematic. */
+/** Snap to whole units, keep at least MIN_SIDE per side, and keep the rectangle inside the bounds. */
 export function clampRect(r: DraftRect, b: Bounds): DraftRect {
+  const bx = b.x ?? 0
+  const by = b.y ?? 0
   const w = clamp(Math.round(r.w), Math.min(MIN_SIDE, b.width), b.width)
   const h = clamp(Math.round(r.h), Math.min(MIN_SIDE, b.height), b.height)
-  return { x: clamp(Math.round(r.x), 0, b.width - w), y: clamp(Math.round(r.y), 0, b.height - h), w, h }
+  return { x: clamp(Math.round(r.x), bx, bx + b.width - w), y: clamp(Math.round(r.y), by, by + b.height - h), w, h }
 }
 
 /** Move by (dx, dy) units; the size is kept and the rectangle stops at the schematic edge. */
@@ -45,16 +49,60 @@ export function moveRect(r: DraftRect, dx: number, dy: number, b: Bounds): Draft
 /** Drag one corner by (dx, dy) units; the opposite corner stays put. */
 export function resizeRect(r: DraftRect, corner: Corner, dx: number, dy: number, b: Bounds): DraftRect {
   const start = clampRect(r, b)
+  const bx = b.x ?? 0
+  const by = b.y ?? 0
   let left = start.x
   let top = start.y
   let right = start.x + start.w
   let bottom = start.y + start.h
   const min = (side: number) => Math.min(MIN_SIDE, side)
-  if (corner === 'nw' || corner === 'sw') left = clamp(Math.round(left + dx), 0, right - min(b.width))
-  else right = clamp(Math.round(right + dx), left + min(b.width), b.width)
-  if (corner === 'nw' || corner === 'ne') top = clamp(Math.round(top + dy), 0, bottom - min(b.height))
-  else bottom = clamp(Math.round(bottom + dy), top + min(b.height), b.height)
+  if (corner === 'nw' || corner === 'sw') left = clamp(Math.round(left + dx), bx, right - min(b.width))
+  else right = clamp(Math.round(right + dx), left + min(b.width), bx + b.width)
+  if (corner === 'nw' || corner === 'ne') top = clamp(Math.round(top + dy), by, bottom - min(b.height))
+  else bottom = clamp(Math.round(bottom + dy), top + min(b.height), by + b.height)
   return { x: left, y: top, w: right - left, h: bottom - top }
+}
+
+/**
+ * Push `r` out of the active spaces it overlaps, each time along the shorter way out (keeping GAP), so an
+ * approximate rect (one mapped from a photo) doesn't sit on its neighbours. A few passes settle a row.
+ */
+export function clearOf(r: DraftRect, spaces: DraftSpace[]): DraftRect {
+  let out = r
+  for (let pass = 0; pass < 3; pass++) {
+    let moved = false
+    for (const s of spaces) {
+      const o = s.rect
+      if (s.retired || !(out.x < o.x + o.w && o.x < out.x + out.w && out.y < o.y + o.h && o.y < out.y + out.h)) continue
+      const right = o.x + o.w + GAP - out.x
+      const left = out.x + out.w + GAP - o.x
+      const down = o.y + o.h + GAP - out.y
+      const up = out.y + out.h + GAP - o.y
+      const step = Math.min(right, left, down, up)
+      out =
+        step === right ? { ...out, x: out.x + right }
+        : step === left ? { ...out, x: out.x - left }
+        : step === down ? { ...out, y: out.y + down }
+        : { ...out, y: out.y - up }
+      moved = true
+    }
+    if (!moved) break
+  }
+  return out
+}
+
+/** The smallest area holding both. */
+export function unionBounds(a: Bounds, b: Bounds): Bounds {
+  const x = Math.min(a.x ?? 0, b.x ?? 0)
+  const y = Math.min(a.y ?? 0, b.y ?? 0)
+  const right = Math.max((a.x ?? 0) + a.width, (b.x ?? 0) + b.width)
+  const bottom = Math.max((a.y ?? 0) + a.height, (b.y ?? 0) + b.height)
+  return { x, y, width: right - x, height: bottom - y }
+}
+
+/** The map area plus room for one more `size` space right of it and below it; fitSchematic grows the map to match. */
+export function roomFor(b: Bounds, size: Size): Bounds {
+  return { width: b.width + size.w + GAP + MARGIN, height: b.height + size.h + GAP + MARGIN }
 }
 
 function median(values: number[]): number {

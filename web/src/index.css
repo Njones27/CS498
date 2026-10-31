@@ -213,6 +213,10 @@ a { color: var(--accent); }
 .photo-view { position: relative; display: block; margin: 0.75rem 0; line-height: 0; background: #000; border-radius: 8px; overflow: hidden; }
 .photo-view__img { display: block; width: 100%; max-width: 100%; height: auto; }
 .photo-view__overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+.photo-view__stage { position: relative; transform-origin: 0 0; }
+.photo-zoom { position: absolute; top: 0.5rem; right: 0.5rem; display: inline-flex; align-items: center; gap: 0.25rem; line-height: normal;
+  background: color-mix(in srgb, var(--surface) 85%, transparent); border-radius: 6px; padding: 0.2rem; }
+.photo-zoom__level { min-width: 3.2em; text-align: center; font-size: 0.8rem; color: var(--text); }
 .photo-space__line, .photo-space__inner { fill: transparent; stroke-linejoin: round; }
 .photo-space__line { stroke-width: 2; }
 .photo-space__inner { display: none; }
@@ -404,15 +408,17 @@ a { color: var(--accent); }
 .ref-space-polygon polygon {
   transition: stroke 0.15s ease, stroke-width 0.15s ease, fill 0.15s ease;
 }
-.ref-handle {
-  cursor: grab;
-  transition: r 0.12s ease;
-}
-.ref-handle:hover,
-.ref-handle:active {
-  cursor: grabbing;
-  r: 9;
-}
+.ref-suggestion { fill: rgba(56, 189, 248, 0.18); stroke: var(--photo-car); stroke-width: 2.5; stroke-dasharray: 6 4; pointer-events: none; }
+.ref-drawbox { fill: rgba(31, 95, 191, 0.25); stroke: #ffffff; stroke-width: 2; stroke-dasharray: 5 3; pointer-events: none; }
+.ref-handle { cursor: grab; }
+.ref-handle:active { cursor: grabbing; }
+.ref-handle circle:not(.ref-handle__hit),
+.ref-handle rect { fill: #ffffff; stroke: var(--accent); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.ref-handle:hover circle:not(.ref-handle__hit),
+.ref-handle:hover rect { fill: var(--accent); stroke: #ffffff; }
+.ref-handle__hit { fill: transparent; stroke: none; }
+.ref-handle--side { cursor: move; }
+.ref-space-polygon { cursor: pointer; }
 .ref-dot {
   display: inline-block;
   width: 8px;
@@ -642,7 +648,22 @@ a { color: var(--accent); }
   display: block; width: 100%; height: auto; max-height: 60vh;
   border: 1px solid var(--border); border-radius: 6px; touch-action: none; user-select: none;
 }
-.schematic__bg { fill: var(--bg); }
+.schematic__bg { fill: var(--bg); stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; stroke-dasharray: 6 4; }
+.schematic__outside { fill: var(--surface); }
+.schematic--pan .schematic__bg, .schematic--pan .schematic__outside { cursor: grab; }
+.schematic--pan .schematic__bg:active, .schematic--pan .schematic__outside:active { cursor: grabbing; }
+.schematic--draw .schematic__bg, .schematic--draw .schematic__outside { cursor: crosshair; }
+.schematic-drawbox { fill: var(--selected-bg); fill-opacity: 0.6; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+.schematic-tools { display: inline-flex; align-items: center; gap: 0.25rem; }
+.schematic-tools .button[aria-pressed='true'] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.schematic-zoom { min-width: 3.2em; text-align: center; }
+.schematic-gridbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 0.75rem; margin-bottom: 0.5rem; font-size: 0.85rem; }
+.schematic-check { display: inline-flex; align-items: center; gap: 0.3rem; }
+.schematic-size { display: inline-flex; flex-direction: column; gap: 0.15rem; color: var(--muted); }
+.schematic-size input { width: 5.5em; }
+.schematic-grid { pointer-events: none; }
+.schematic-grid line { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; opacity: 0.7; }
+.schematic-grid text { fill: var(--muted); font-weight: 600; }
 .schematic-space { cursor: move; }
 .schematic-space:focus { outline: none; }
 .schematic-space__rect { fill: var(--surface); stroke: var(--muted); stroke-width: 2; }

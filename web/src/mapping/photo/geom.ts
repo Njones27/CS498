@@ -88,3 +88,39 @@ export function getSvgPoint(
   if (rect.width === 0 || rect.height === 0) return [0, 0]
   return svgPxToPoint(clientX - rect.left, clientY - rect.top, rect.width, rect.height)
 }
+
+// The server's quad rule (core/parking_core/layouts.py is_valid_quad), so the client never saves an
+// outline that publishing would reject as bad_polygon.
+const EPS = 1e-9
+const cross = (o: Point, a: Point, b: Point) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+const onSegment = (p: Point, q: Point, r: Point) =>
+  Math.min(p[0], q[0]) - EPS <= r[0] &&
+  r[0] <= Math.max(p[0], q[0]) + EPS &&
+  Math.min(p[1], q[1]) - EPS <= r[1] &&
+  r[1] <= Math.max(p[1], q[1]) + EPS
+
+/** True if the closed segments p1p2 and q1q2 share any point. */
+function segmentsTouch(p1: Point, p2: Point, q1: Point, q2: Point): boolean {
+  const d1 = cross(q1, q2, p1)
+  const d2 = cross(q1, q2, p2)
+  const d3 = cross(p1, p2, q1)
+  const d4 = cross(p1, p2, q2)
+  const straddles = (a: number, b: number) => (a > EPS && b < -EPS) || (a < -EPS && b > EPS)
+  if (straddles(d1, d2) && straddles(d3, d4)) return true
+  return (
+    (Math.abs(d1) <= EPS && onSegment(q1, q2, p1)) ||
+    (Math.abs(d2) <= EPS && onSegment(q1, q2, p2)) ||
+    (Math.abs(d3) <= EPS && onSegment(p1, p2, q1)) ||
+    (Math.abs(d4) <= EPS && onSegment(p1, p2, q2))
+  )
+}
+
+/** Four corners, non-zero area, and no edge crossing or touching the opposite edge (a repeated corner touches). */
+export function isValidQuad(polygon: Point[]): boolean {
+  if (polygon.length !== 4) return false
+  const [a, b, c, d] = polygon
+  const origin: Point = [0, 0]
+  const area2 = cross(origin, a, b) + cross(origin, b, c) + cross(origin, c, d) + cross(origin, d, a)
+  if (Math.abs(area2) <= EPS) return false
+  return !(segmentsTouch(a, b, c, d) || segmentsTouch(b, c, d, a))
+}

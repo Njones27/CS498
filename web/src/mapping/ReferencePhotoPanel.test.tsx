@@ -5,7 +5,8 @@ import { putFile } from '../lib/putFile'
 import { mockFetch } from '../test/helpers'
 import { rylanDraftFixture } from './fixtures/rylan'
 import { ReferencePhotoPanel } from './ReferencePhotoPanel'
-import type { DraftLayout, ReferencePhotoPanelProps } from './types'
+import { cellRect, fitGrid } from './schematic/grid'
+import type { DraftLayout, DraftSpace, ReferencePhotoPanelProps } from './types'
 
 vi.mock('../lib/putFile', () => ({ putFile: vi.fn() }))
 
@@ -71,6 +72,8 @@ describe('ReferencePhotoPanel (US-08)', () => {
         hoveredSpaceId={props.hoveredSpaceId ?? null}
         onHoverSpace={onHoverSpace}
         onSave={onSave}
+        grid={props.grid}
+        snap={props.snap}
       />,
     )
     return {
@@ -637,5 +640,215 @@ describe('ReferencePhotoPanel (US-08)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  // --- Drawing new spaces on the photo, synced to the schematic ------------
+  describe('new spaces from the photo', () => {
+    // Accepted outlines for A-01..A-04 laid out like their schematic rects (x/1000, y/600), so the
+    // photo maps onto the schematic; A-05 has none and is active here.
+    function syncedDraft(): DraftLayout {
+      const draft = structuredClone(rylanDraftFixture)
+      draft.spaces[4].retired = false
+      const v1 = draft.viewpoints[0]
+      v1.outlines = {}
+      v1.outlineReview = {}
+      for (const s of draft.spaces.slice(0, 4)) {
+        const { x, y, w, h } = s.rect
+        v1.outlines[s.spaceId] = [
+          [x / 1000, y / 600],
+          [(x + w) / 1000, y / 600],
+          [(x + w) / 1000, (y + h) / 600],
+          [x / 1000, (y + h) / 600],
+        ]
+        v1.outlineReview[s.spaceId] = { source: 'drawn', status: 'accepted' }
+      }
+      return draft
+    }
+
+    it('dragging a box on empty photo adds a space where the photo says it is, outlined and selected', () => {
+      const { onChange, onSave, onSelectSpace } = renderPanel({ draft: syncedDraft() })
+      const svg = screen.getByTestId('photo-svg')
+      // 500 px wide test layout: x 325..360 px is 0.65..0.72 of the photo, so 650..720 on the schematic.
+      fireEvent.pointerDown(svg, { clientX: 325, clientY: 42, button: 0 })
+      fireEvent.pointerMove(window, { clientX: 340, clientY: 80 })
+      expect(screen.getByTestId('photo-drawbox')).toBeInTheDocument()
+      fireEvent.pointerUp(svg, { clientX: 360, clientY: 192 })
+      fireEvent.click(svg, { clientX: 360, clientY: 192 }) // the click after release places no corner
+
+      expect(onChange).toHaveBeenCalledTimes(1)
+      expect(onSave).toHaveBeenCalledTimes(1)
+      const next: DraftLayout = onChange.mock.calls[0][0]
+      const added = next.spaces.at(-1)!
+      expect(added.label).toBe('A-06')
+      expect(added.rect.x).toBeCloseTo(650, -1)
+      expect(added.rect.y).toBeCloseTo(50, -1)
+      expect(next.viewpoints[0].outlines[added.spaceId]).toEqual([
+        [0.65, 0.084],
+        [0.72, 0.084],
+        [0.72, 0.384],
+        [0.65, 0.384],
+      ])
+      expect(onSelectSpace).toHaveBeenLastCalledWith(added.spaceId)
+      expect(screen.getByText('Added A-06 to the schematic')).toBeInTheDocument()
+      expect(screen.queryByTestId('partial-clicks')).not.toBeInTheDocument()
+    })
+
+    it('Match schematic to photo moves the selected space into its photo cell', async () => {
+      // A-05 is drawn on the photo in column 5 (right after A-04) but sits far away on the schematic.
+      const draft = syncedDraft()
+      draft.spaces[4] = { ...draft.spaces[4], rect: { x: 50, y: 400, w: 100, h: 180 } }
+      draft.viewpoints[0].outlines['sp_a05'] = [
+        [0.53, 50 / 600],
+        [0.63, 50 / 600],
+        [0.63, 230 / 600],
+        [0.53, 230 / 600],
+      ]
+      const grid = fitGrid(draft.spaces.slice(0, 4))
+      const { onChange, user } = renderPanel({ draft, selectedSpaceId: 'sp_a05', grid })
+      await user.click(screen.getByTestId('match-photo-btn'))
+      const moved = onChange.mock.calls[0][0].spaces.find((s: DraftSpace) => s.spaceId === 'sp_a05')
+      expect(moved).toMatchObject({ label: 'A-05', rect: cellRect(grid, { row: 0, col: 4 }) })
+    })
+
+    it('with nothing selected, 4 clicks on empty photo add a new space', () => {
+      const { onChange } = renderPanel({ draft: syncedDraft() })
+      const svg = screen.getByTestId('photo-svg')
+      fireEvent.click(svg, { clientX: 325, clientY: 42 })
+      expect(screen.getByText('Click the 4 corners of the new space (1 of 4)')).toBeInTheDocument()
+      fireEvent.click(svg, { clientX: 360, clientY: 42 })
+      fireEvent.click(svg, { clientX: 360, clientY: 192 })
+      expect(onChange).not.toHaveBeenCalled()
+      fireEvent.click(svg, { clientX: 325, clientY: 192 })
+      expect(onChange).toHaveBeenCalledTimes(1)
+      expect(onChange.mock.calls[0][0].spaces).toHaveLength(6)
+    })
+
+    it('four corners that fold onto each other are refused, not saved', () => {
+      const { onChange } = renderPanel({ draft: syncedDraft() })
+      const svg = screen.getByTestId('photo-svg')
+      // The fourth click lands on the second corner again: a repeated corner.
+      for (const [x, y] of [[100, 100], [200, 100], [200, 200], [200, 100]]) fireEvent.click(svg, { clientX: x, clientY: y })
+      expect(onChange).not.toHaveBeenCalled()
+      expect(screen.getByRole('alert')).toHaveTextContent('Those corners do not make a four-sided shape')
+      // The first three corners are kept; a good fourth adds the space and clears the message.
+      fireEvent.click(svg, { clientX: 100, clientY: 200 })
+      expect(onChange).toHaveBeenCalledTimes(1)
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('pressing a corner handle without moving it changes nothing', () => {
+      const draft = syncedDraft()
+      draft.viewpoints[0].outlineReview['sp_a01'] = { source: 'proposed', status: 'accepted' }
+      const { onChange, onSave } = renderPanel({ draft, selectedSpaceId: 'sp_a01' })
+      fireEvent.pointerDown(screen.getByTestId('corner-handle-0'), { clientX: 25, clientY: 42 })
+      fireEvent.pointerUp(window)
+      expect(onChange).not.toHaveBeenCalled()
+      expect(onSave).not.toHaveBeenCalled()
+    })
+
+    it('a corner dragged across the opposite edge is refused; a hand-corrected outline becomes drawn', () => {
+      const draft = syncedDraft()
+      draft.viewpoints[0].outlineReview['sp_a01'] = { source: 'proposed', status: 'accepted' }
+      const { onChange } = renderPanel({ draft, selectedSpaceId: 'sp_a01' })
+      // A-01 spans x 0.05..0.15 (25..75 px), y 50/600..230/600; corner 0 is top-left.
+      fireEvent.pointerDown(screen.getByTestId('corner-handle-0'), { clientX: 25, clientY: 42 })
+      fireEvent.pointerMove(window, { clientX: 125, clientY: 125 }) // past the right edge: a bowtie
+      fireEvent.pointerUp(window)
+      expect(onChange).not.toHaveBeenCalled()
+      expect(screen.getByRole('alert')).toHaveTextContent('cross the outline over itself')
+
+      fireEvent.pointerDown(screen.getByTestId('corner-handle-0'), { clientX: 25, clientY: 42 })
+      fireEvent.pointerMove(window, { clientX: 30, clientY: 45 })
+      fireEvent.pointerUp(window)
+      expect(onChange.mock.calls[0][0].viewpoints[0].outlineReview['sp_a01']).toEqual({ source: 'drawn', status: 'accepted' })
+    })
+
+    it('after a box drag with no trailing click (touch), the next click still places a corner', () => {
+      const now = vi.spyOn(performance, 'now').mockReturnValue(1000)
+      renderPanel({ draft: syncedDraft() })
+      const svg = screen.getByTestId('photo-svg')
+      fireEvent.pointerDown(svg, { clientX: 400, clientY: 400, button: 0 })
+      fireEvent.pointerMove(window, { clientX: 401, clientY: 401 }) // under the drag threshold: a tap
+      fireEvent.pointerDown(svg, { clientX: 325, clientY: 42, button: 0 })
+      fireEvent.pointerMove(window, { clientX: 360, clientY: 192 })
+      fireEvent.pointerUp(svg, { clientX: 360, clientY: 192 })
+      now.mockReturnValue(5000) // no click came; much later the admin taps a corner
+      fireEvent.click(svg, { clientX: 100, clientY: 450 })
+      expect(screen.getByText(/\(1 of 4\)/)).toBeInTheDocument()
+    })
+
+    it('dragging a side handle resizes the outline, and the schematic rect follows', () => {
+      const { onChange } = renderPanel({ draft: syncedDraft(), selectedSpaceId: 'sp_a01' })
+      // A-01's outline spans x 0.05..0.15 (25..75 px of 500); side 1 is its right side.
+      fireEvent.pointerDown(screen.getByTestId('side-handle-1'), { clientX: 75, clientY: 117, button: 0 })
+      fireEvent.pointerMove(window, { clientX: 100, clientY: 130 }) // only the sideways part counts
+      fireEvent.pointerUp(window)
+      const next: DraftLayout = onChange.mock.calls[0][0]
+      const outline = next.viewpoints[0].outlines['sp_a01']
+      expect(outline.map((p) => p[0])).toEqual([0.05, 0.2, 0.2, 0.05])
+      expect(outline[1][1]).toBeCloseTo(50 / 600, 3)
+      const rect = next.spaces.find((s) => s.spaceId === 'sp_a01')!.rect
+      expect(rect.x).toBeCloseTo(50, 0)
+      expect(rect.w).toBeCloseTo(150, 0)
+    })
+
+    it('dragging the selected outline moves it, and the schematic rect moves too', () => {
+      const { onChange } = renderPanel({ draft: syncedDraft(), selectedSpaceId: 'sp_a01' })
+      const polygon = screen.getByTestId('space-polygon-sp_a01').querySelector('polygon')!
+      fireEvent.pointerDown(polygon, { clientX: 50, clientY: 100, button: 0 })
+      fireEvent.pointerMove(window, { clientX: 60, clientY: 100 })
+      fireEvent.pointerUp(window)
+      const next: DraftLayout = onChange.mock.calls[0][0]
+      expect(next.viewpoints[0].outlines['sp_a01'].map((p) => p[0])).toEqual([0.07, 0.17, 0.17, 0.07])
+      expect(next.spaces.find((s) => s.spaceId === 'sp_a01')!.rect.x).toBeCloseTo(70, 0)
+    })
+
+    it('zooms the photo in and back to fit', async () => {
+      const { user } = renderPanel({ draft: syncedDraft() })
+      const zoom = screen.getByRole('group', { name: 'Photo zoom' })
+      await user.click(within(zoom).getByRole('button', { name: 'Zoom photo in' }))
+      expect(within(zoom).getByText('150%')).toBeInTheDocument()
+      expect(document.querySelector('.photo-view__stage')).toHaveStyle({ transform: 'translate(0px, 0px) scale(1.5)' })
+      await user.click(within(zoom).getByRole('button', { name: 'Fit' }))
+      expect(within(zoom).getByText('100%')).toBeInTheDocument()
+    })
+
+    it('handles keep a usable size on screen however large the photo is', () => {
+      const draft = syncedDraft()
+      draft.viewpoints[0].referenceImage = { ...draft.viewpoints[0].referenceImage!, width: 2000, height: 1125 }
+      renderPanel({ draft, selectedSpaceId: 'sp_a01' })
+      // 2000 photo pixels drawn 500 px wide: a 6 px handle is 24 photo pixels.
+      const dot = screen.getByTestId('corner-handle-0').querySelector('circle:not(.ref-handle__hit)')!
+      expect(dot.getAttribute('r')).toBe('24')
+    })
+
+    it('a click on empty photo clears a selected, outlined space instead of drawing', () => {
+      const { onChange, onSelectSpace } = renderPanel({ draft: syncedDraft(), selectedSpaceId: 'sp_a01' })
+      fireEvent.click(screen.getByTestId('photo-svg'), { clientX: 400, clientY: 400 })
+      expect(onSelectSpace).toHaveBeenLastCalledWith(null)
+      expect(onChange).not.toHaveBeenCalled()
+    })
+
+    it('a selected space with no outline shows where the schematic puts it, and can take that outline', async () => {
+      const { onChange, user } = renderPanel({ draft: syncedDraft(), selectedSpaceId: 'sp_a05' })
+      expect(screen.getByTestId('suggested-outline')).toBeInTheDocument()
+      await user.click(screen.getByTestId('use-suggestion-btn'))
+      const v1 = onChange.mock.calls[0][0].viewpoints[0]
+      const outline = v1.outlines['sp_a05']
+      expect(outline[0][0]).toBeCloseTo(0.53, 3) // A-05's rect starts at x 530
+      expect(outline[2][1]).toBeCloseTo(230 / 600, 3)
+      expect(v1.outlineReview['sp_a05']).toEqual({ source: 'proposed', status: 'accepted' })
+    })
+
+    it('a suggestion from just a couple of outlined neighbours, none with nothing outlined', () => {
+      const { unmount } = renderPanel({ selectedSpaceId: 'sp_a03' }) // V1 has outlines for A-01, A-02 and A-05
+      expect(screen.getByTestId('suggested-outline')).toBeInTheDocument()
+      unmount()
+      const bare = structuredClone(rylanDraftFixture)
+      bare.viewpoints[0].outlines = {}
+      bare.viewpoints[0].outlineReview = {}
+      renderPanel({ draft: bare, selectedSpaceId: 'sp_a03' })
+      expect(screen.queryByTestId('suggested-outline')).not.toBeInTheDocument()
+    })
   })
 })

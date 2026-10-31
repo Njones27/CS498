@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { davidFixture, space } from './fixtures/david'
 import { SchematicEditor } from './SchematicEditor'
+import { useSchematicGrid } from './useSchematicGrid'
 import type { DraftLayout, DraftSpace, Issue } from './types'
 
 interface Options {
@@ -11,10 +12,11 @@ interface Options {
   selectedSpaceId?: string | null
   issues?: Issue[]
   publishedSpaceIds?: ReadonlySet<string>
+  withGrid?: boolean // the page's grid (useSchematicGrid), snapping on unless a test turns it off
 }
 
 /** Render the editor alone, holding draft, selection and hover in state like the mapping page does. */
-function setup({ draft = davidFixture(), selectedSpaceId = null, issues = [], publishedSpaceIds }: Options = {}) {
+function setup({ draft = davidFixture(), selectedSpaceId = null, issues = [], publishedSpaceIds, withGrid = false }: Options = {}) {
   const onChange = vi.fn<(next: DraftLayout) => void>()
   const onSelectSpace = vi.fn<(id: string | null) => void>()
   const onHoverSpace = vi.fn<(id: string | null) => void>()
@@ -22,11 +24,15 @@ function setup({ draft = davidFixture(), selectedSpaceId = null, issues = [], pu
     const [d, setD] = useState(draft)
     const [selected, setSelected] = useState(selectedSpaceId)
     const [hovered, setHovered] = useState<string | null>(null)
+    const grid = useSchematicGrid('test-lot', d)
     return (
       <SchematicEditor
         draft={d}
-        onChange={(next) => {
+        grid={withGrid ? grid : undefined}
+        onChange={(next, shift) => {
           onChange(next)
+          // As the mapping page does: an edit that shifted every space moves the grid with them.
+          if (shift) grid?.shiftBy(next, shift.dx, shift.dy)
           setD(next)
         }}
         issues={issues}
@@ -66,7 +72,8 @@ describe('SchematicEditor', () => {
   it('renders one labeled rectangle per space in the schematic viewBox, with type badges and retired marker', () => {
     setup()
     const svg = screen.getByRole('group', { name: 'Schematic editor' })
-    expect(svg).toHaveAttribute('viewBox', '0 0 1000 600')
+    // The whole map plus a 6% margin to drag into.
+    expect(svg).toHaveAttribute('viewBox', '-60 -60 1120 720')
     expect(screen.getByRole('button', { name: 'A-01, standard' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'A-02, ADA' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'A-04, EV' })).toBeInTheDocument()
@@ -190,10 +197,44 @@ describe('SchematicEditor', () => {
     expect(rectOf(last(), 'A-03')).toEqual({ x: 250, y: 20, w: 130, h: 170 })
   })
 
-  it('US-07 #3: drags snap to whole units and stay inside the schematic', () => {
+  it('US-07 #3: drags snap to whole units, stop at the edge of the view, and grow the map to hold the space', () => {
     const { last } = setup()
     drag(spaceEl('A-03'), 2000.4, -500.6)
-    expect(rectOf(last(), 'A-03')).toEqual({ x: 900, y: 0, w: 100, h: 120 })
+    // Clamped to the view (-60..1060, -60..660), then everything shifts down 80 so A-03 sits 20 from the top.
+    expect(rectOf(last(), 'A-03')).toEqual({ x: 960, y: 20, w: 100, h: 120 })
+    expect(rectOf(last(), 'A-01')).toEqual({ x: 40, y: 120, w: 100, h: 120 })
+    expect(last().schematic).toEqual({ width: 1080, height: 680 })
+  })
+
+  it('zoom buttons narrow and widen the view; Fit goes back to the whole map', async () => {
+    const { user } = setup()
+    const svg = screen.getByRole('group', { name: 'Schematic editor' })
+    await user.click(screen.getByRole('button', { name: 'Zoom in' }))
+    expect(svg).toHaveAttribute('viewBox', '52 12 896 576')
+    expect(screen.getByText('125%')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Fit' }))
+    expect(svg).toHaveAttribute('viewBox', '-60 -60 1120 720')
+  })
+
+  it('a drag on empty map pans the view', () => {
+    setup()
+    const svg = screen.getByRole('group', { name: 'Schematic editor' })
+    drag(screen.getByTestId('schematic-area'), 100, 50)
+    expect(svg).toHaveAttribute('viewBox', '-160 -110 1120 720')
+  })
+
+  it('with Draw space on, a drag on empty map adds a space there, labeled for its row', async () => {
+    const { last, onSelectSpace, user } = setup()
+    await user.click(screen.getByRole('button', { name: 'Draw space' }))
+    // In jsdom one pixel is one unit from the view's top-left corner (-60, -60).
+    fireEvent.pointerDown(screen.getByTestId('schematic-area'), { clientX: 700, clientY: 100, button: 0 })
+    fireEvent.pointerMove(window, { clientX: 750, clientY: 160 })
+    expect(screen.getByTestId('schematic-drawbox')).toBeInTheDocument()
+    fireEvent.pointerUp(window, { clientX: 800, clientY: 220 })
+    const added = last().spaces.at(-1)!
+    expect(added).toMatchObject({ label: 'A-06', type: 'STANDARD', rect: { x: 640, y: 40, w: 100, h: 120 } })
+    expect(onSelectSpace).toHaveBeenLastCalledWith(added.spaceId)
+    expect(screen.queryByTestId('schematic-drawbox')).toBeNull()
   })
 
   it('a click without movement selects and emits nothing', () => {
@@ -229,6 +270,7 @@ describe('SchematicEditor', () => {
     fireEvent.pointerUp(window, { clientX: 0, clientY: 0 })
     expect(onSelectSpace).toHaveBeenLastCalledWith('A-01')
     fireEvent.pointerDown(document.querySelector('.schematic__bg')!, { clientX: 0, clientY: 0, button: 0 })
+    fireEvent.pointerUp(window, { clientX: 0, clientY: 0 })
     expect(onSelectSpace).toHaveBeenLastCalledWith(null)
   })
 
@@ -384,7 +426,7 @@ describe('SchematicEditor', () => {
     expect(screen.getAllByRole('button', { name: /^A-0\d/ })).toHaveLength(5)
     const reloaded = davidFixture({ revision: 8, schematic: { width: 800, height: 400 }, spaces: [space('Z-09', 10, 10)] })
     rerender(<SchematicEditor {...props} draft={reloaded} />)
-    expect(screen.getByRole('group', { name: 'Schematic editor' })).toHaveAttribute('viewBox', '0 0 800 400')
+    expect(screen.getByRole('group', { name: 'Schematic editor' })).toHaveAttribute('viewBox', '-48 -48 896 496')
     expect(screen.queryByRole('button', { name: /^A-0\d/ })).toBeNull()
     expect(screen.getByRole('button', { name: 'Z-09, standard' })).toBeInTheDocument()
     expect(props.onChange).not.toHaveBeenCalled()
@@ -415,5 +457,154 @@ describe('SchematicEditor', () => {
     act(() => unmount())
     fireEvent.pointerUp(window, { clientX: 50, clientY: 0 })
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  // Test Lot fits a grid of 110 x 130 cells (box 100 x 120) with row A's boxes at y 40 and column 1's at
+  // x 40: column c's box starts at 40 + 110c, row B's at y 170. In jsdom a pixel is a unit from the view's
+  // corner (-60, -60).
+  describe('grid and snapping', () => {
+    beforeEach(() => localStorage.clear())
+
+    it('a moved space drops into the cell under it and takes its label', () => {
+      const { last } = setup({ withGrid: true })
+      drag(spaceEl('A-03'), 225, 130) // middle lands in row B, column 5
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'B-05', rect: { x: 480, y: 170, w: 100, h: 120 } })
+      expect(screen.getByText('Now B-05')).toBeInTheDocument()
+    })
+
+    it('refuses a move onto a cell that already has a space', () => {
+      const { onChange } = setup({ withGrid: true })
+      drag(spaceEl('A-01'), 110, 0) // onto A-02
+      expect(onChange).not.toHaveBeenCalled()
+      expect(screen.getByText('That cell already has A-02; nothing moved')).toBeInTheDocument()
+    })
+
+    it('takes the cell\'s label even when a space elsewhere has it; that one is renamed for its own cell', () => {
+      // A misplaced B-05 sits in row B, column 9; the B-05 cell itself is empty.
+      const draft = davidFixture({ spaces: [...davidFixture().spaces, space('far', 920, 170, { label: 'B-05' })] })
+      const { last } = setup({ draft, withGrid: true })
+      drag(spaceEl('A-03'), 220, 130)
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'B-05', rect: { x: 480, y: 170 } })
+      expect(byId(last(), 'far').label).toBe('B-09')
+      expect(screen.getByText('Now B-05; the space that was B-05 is now B-09')).toBeInTheDocument()
+    })
+
+    it('arrow keys move one cell at a time', async () => {
+      const { last, user } = setup({ withGrid: true, selectedSpaceId: 'A-03' })
+      spaceEl('A-03').focus()
+      await user.keyboard('{ArrowDown}')
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'B-03', rect: { x: 260, y: 170 } })
+    })
+
+    it('Draw space across cells adds one space per free cell, named for each', async () => {
+      const { last, user } = setup({ withGrid: true })
+      await user.click(screen.getByRole('button', { name: 'Draw space' }))
+      fireEvent.pointerDown(screen.getByTestId('schematic-area'), { clientX: 110, clientY: 290, button: 0 })
+      fireEvent.pointerMove(window, { clientX: 330, clientY: 290 })
+      expect(screen.getAllByTestId('schematic-drawcell')).toHaveLength(3)
+      fireEvent.pointerUp(window, { clientX: 330, clientY: 290 })
+      expect(last().spaces.slice(-3).map((s) => [s.label, s.rect.x, s.rect.y])).toEqual([
+        ['B-01', 40, 170],
+        ['B-02', 150, 170],
+        ['B-03', 260, 170],
+      ])
+      expect(screen.getByText('Added 3 spaces, B-01 to B-03')).toBeInTheDocument()
+    })
+
+    it('with Snap to grid off, moves are free, and landing in another cell still renames', async () => {
+      const { last, user } = setup({ withGrid: true })
+      await user.click(screen.getByRole('checkbox', { name: 'Snap to grid' }))
+      drag(spaceEl('A-03'), 225, 130)
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'B-05', rect: { x: 485, y: 170 } })
+      drag(spaceEl('A-03'), 5, 0) // still in B-05's cell: no rename, no snap
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'B-05', rect: { x: 490, y: 170 } })
+    })
+
+    it('a resize never renames, even when the middle crosses into another cell', async () => {
+      const { last, user } = setup({ withGrid: true, selectedSpaceId: 'A-03' })
+      await user.click(screen.getByRole('checkbox', { name: 'Snap to grid' }))
+      drag(screen.getByTestId('schematic-handle-se'), 250, 0) // middle moves 125 to the right
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'A-03', rect: { x: 260, w: 350 } })
+    })
+
+    it('a snapped drag that ends in the same cell keeps the label', () => {
+      const spaces = davidFixture().spaces.map((s) => (s.spaceId === 'A-03' ? { ...s, label: 'Q-01' } : s))
+      const { last } = setup({ draft: davidFixture({ spaces }), withGrid: true })
+      drag(spaceEl('A-03'), 20, 10)
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'Q-01', rect: { x: 260, y: 40 } })
+    })
+
+    it('a space moved before a row\'s first number becomes 01 and the row moves up one', () => {
+      const { last } = setup({ withGrid: true })
+      drag(spaceEl('A-03'), -330, 0) // left of A-01, into the cell before column 1
+      const labels = (ids: string[]) => ids.map((id) => byId(last(), id).label)
+      // Only the spaces numbered below it move up; A-03's old hole closes.
+      expect(labels(['A-03', 'A-01', 'A-02', 'A-04'])).toEqual(['A-01', 'A-02', 'A-03', 'A-04'])
+      expect(byId(last(), 'A-03').rect).toMatchObject({ x: 40, y: 40 })
+      expect(byId(last(), 'A-01').rect).toMatchObject({ x: 150, y: 40 })
+      expect(screen.getByText('Now A-01; the rest of row A moved up one to make room')).toBeInTheDocument()
+    })
+
+    it('a blocked insert (a name in the way) moves nothing and says so', () => {
+      const draft = davidFixture({ spaces: [...davidFixture().spaces, space('g', 150, 40, { label: 'Gate' })] }) // Gate in A-02's cell
+      const { onChange } = setup({ draft, withGrid: true })
+      drag(spaceEl('A-03'), -330, 0)
+      expect(onChange).not.toHaveBeenCalled()
+      expect(screen.getByText(/Row A can't move up to make room/)).toBeInTheDocument()
+    })
+
+    it('+ Space adds the next free cell in the selected row, or starts a new row below', async () => {
+      const { last, user } = setup({ withGrid: true, selectedSpaceId: 'A-02' })
+      await user.click(screen.getByRole('button', { name: '+ Space' }))
+      // A-03 and A-04 fill the cells right of A-02 (A-05 is retired, its cell free): the first free is column 5.
+      expect(last().spaces.at(-1)).toMatchObject({ label: 'A-05', rect: { x: 480, y: 40 } })
+      await user.keyboard('{Escape}')
+      await user.click(screen.getByRole('button', { name: '+ Space' }))
+      expect(last().spaces.at(-1)).toMatchObject({ label: 'B-01', rect: { x: 40, y: 170 } })
+    })
+
+    it('Fit grid with a space selected lines the grid up with that space', async () => {
+      const spaces = davidFixture().spaces.map((s) => (s.spaceId === 'A-03' ? { ...s, rect: { x: 265, y: 45, w: 90, h: 110 } } : s))
+      const { last, user } = setup({ draft: davidFixture({ spaces }), withGrid: true, selectedSpaceId: 'A-03' })
+      await user.click(screen.getByRole('button', { name: 'Fit grid to A-03' }))
+      expect(screen.getByRole('spinbutton', { name: 'Space width' })).toHaveValue(90)
+      expect(screen.getByRole('spinbutton', { name: 'Space height' })).toHaveValue(110)
+      // A-03 now sits exactly in its cell, so snapping it changes nothing; A-01 aligns in place.
+      await user.click(screen.getByRole('button', { name: 'Align all to grid' }))
+      expect(byId(last(), 'A-03').rect).toEqual({ x: 265, y: 45, w: 90, h: 110 })
+      expect(byId(last(), 'A-01')).toMatchObject({ label: 'A-01', rect: { w: 90, h: 110 } })
+    })
+
+    it('shows the grid with row letters, and can hide it', async () => {
+      const { user } = setup({ withGrid: true })
+      const lines = screen.getByTestId('schematic-grid')
+      expect(within(lines as unknown as HTMLElement).getByText('A')).toBeInTheDocument()
+      await user.click(screen.getByRole('checkbox', { name: 'Show grid' }))
+      expect(screen.queryByTestId('schematic-grid')).toBeNull()
+    })
+
+    it('after Align all grows the map left, the grid moves with the spaces', async () => {
+      const { last, user } = setup({ withGrid: true, selectedSpaceId: 'A-01' })
+      const gap = screen.getByRole('spinbutton', { name: 'Gap across' })
+      await user.clear(gap)
+      await user.type(gap, '60{Enter}') // pitch 160: column 1's box now starts at x -35
+      await user.click(screen.getByRole('button', { name: 'Align all to grid' }))
+      expect(byId(last(), 'A-01').rect.x).toBe(20) // everything shifted right by 55
+      spaceEl('A-01').focus()
+      await user.keyboard('{ArrowDown}')
+      expect(byId(last(), 'A-01')).toMatchObject({ label: 'B-01', rect: { x: 20 } })
+    })
+
+    it('a new space size and Align all resize every labeled space into its cell', async () => {
+      const { last, user } = setup({ withGrid: true })
+      const width = screen.getByRole('spinbutton', { name: 'Space width' })
+      await user.clear(width)
+      await user.type(width, '80{Enter}')
+      await user.click(screen.getByRole('button', { name: 'Align all to grid' }))
+      // Gap across stays 10, so the pitch is 90; the grid re-centres on the spaces (median of x - 90c
+      // over A-01..A-04 is 70), so A-03 (column 3) starts at 70 + 180.
+      expect(byId(last(), 'A-03').rect).toEqual({ x: 250, y: 40, w: 80, h: 120 })
+      expect(byId(last(), 'A-01').rect).toEqual({ x: 70, y: 40, w: 80, h: 120 })
+    })
   })
 })
