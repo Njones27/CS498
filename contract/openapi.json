@@ -1187,6 +1187,32 @@
       },
       "OutlineReviewOut": {
         "properties": {
+          "evidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a proposed outline, how strongly the photo supports it (0 to 1)",
+            "title": "Evidence"
+          },
+          "newSpace": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The layout proposer created this space; rejecting the outline removes it",
+            "title": "Newspace"
+          },
           "source": {
             "$ref": "#/components/schemas/OutlineSource"
           },
@@ -1217,6 +1243,153 @@
         "title": "OutlineStatus",
         "type": "string"
       },
+      "ProposalRunOut": {
+        "description": "The latest layout proposer run on a viewpoint's reference photo.",
+        "properties": {
+          "completedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "lotId": {
+            "title": "Lotid",
+            "type": "string"
+          },
+          "modelVersion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modelversion"
+          },
+          "photoChanged": {
+            "description": "The viewpoint's reference photo changed since this run was requested",
+            "title": "Photochanged",
+            "type": "boolean"
+          },
+          "requestedAt": {
+            "format": "date-time",
+            "title": "Requestedat",
+            "type": "string"
+          },
+          "requestedBy": {
+            "title": "Requestedby",
+            "type": "string"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
+          "stalls": {
+            "description": "Proposed stall outlines, once COMPLETE",
+            "items": {
+              "$ref": "#/components/schemas/ProposedStall"
+            },
+            "title": "Stalls",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProposalStatus"
+          },
+          "viewId": {
+            "title": "Viewid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
+          "lotId",
+          "viewId",
+          "status",
+          "requestedBy",
+          "requestedAt",
+          "photoChanged"
+        ],
+        "title": "ProposalRunOut",
+        "type": "object"
+      },
+      "ProposalStatus": {
+        "enum": [
+          "QUEUED",
+          "PROCESSING",
+          "COMPLETE",
+          "FAILED"
+        ],
+        "title": "ProposalStatus",
+        "type": "string"
+      },
+      "ProposedStall": {
+        "description": "One stall outline the layout proposer found on a reference photo (HDD \u00a74.6).",
+        "properties": {
+          "col": {
+            "minimum": 0.0,
+            "title": "Col",
+            "type": "integer"
+          },
+          "evidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Evidence",
+            "type": "number"
+          },
+          "mapRect": {
+            "$ref": "#/components/schemas/Rect"
+          },
+          "polygon": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Polygon",
+            "type": "array"
+          },
+          "row": {
+            "minimum": 0.0,
+            "title": "Row",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "polygon",
+          "evidence",
+          "row",
+          "col",
+          "mapRect"
+        ],
+        "title": "ProposedStall",
+        "type": "object"
+      },
       "PublishRequest": {
         "properties": {
           "revision": {
@@ -1229,6 +1402,35 @@
           "revision"
         ],
         "title": "PublishRequest",
+        "type": "object"
+      },
+      "Rect": {
+        "description": "Schematic rectangle in schematic units (see `Schematic`). Finite only, like `Point`.",
+        "properties": {
+          "h": {
+            "title": "H",
+            "type": "number"
+          },
+          "w": {
+            "title": "W",
+            "type": "number"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "w",
+          "h"
+        ],
+        "title": "Rect",
         "type": "object"
       },
       "RectOut": {
@@ -1556,6 +1758,18 @@
             ],
             "title": "Processingms"
           },
+          "rescoreOf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on a re-score after a publish: the snapshot whose photo this scores again",
+            "title": "Rescoreof"
+          },
           "viewId": {
             "title": "Viewid",
             "type": "string"
@@ -1664,6 +1878,18 @@
               }
             ],
             "title": "Processingms"
+          },
+          "rescoreOf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on a re-score after a publish: the snapshot whose photo this scores again",
+            "title": "Rescoreof"
           },
           "viewId": {
             "title": "Viewid",
@@ -3178,6 +3404,208 @@
           }
         },
         "summary": "Replace the draft with a published version's contents; publish to make it live",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/lots/{lot_id}/views/{view_id}/proposals": {
+      "get": {
+        "operationId": "get_proposals_admin_lots__lot_id__views__view_id__proposals_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "title": "View Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "The latest layout proposer run on this viewpoint, with its stalls once complete",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "request_proposals_admin_lots__lot_id__views__view_id__proposals_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "title": "View Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "no_reference_photo | proposal_running"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "Find stalls on the viewpoint's reference photo (queues a layout proposer run)",
         "tags": [
           "admin"
         ]

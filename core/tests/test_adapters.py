@@ -531,3 +531,34 @@ def test_build_aws_adapters_rejects_cognito():
     s = Settings(app_env="local", auth_mode="cognito", _env_file=None)  # type: ignore[call-arg]
     with pytest.raises(NotImplementedError, match="Phase 2"):
         aws.build_aws_adapters(s)
+
+
+def _versioned(observed_at, version, state=SpaceState.FREE):
+    return status(observed_at, state).model_copy(update={"layout_version": version})
+
+
+def test_same_photo_rescored_with_a_newer_layout_replaces_the_status(repo):
+    assert repo.update_status_if_newer(status(NOW))  # stored before statuses carried a version
+    assert repo.update_status_if_newer(_versioned(NOW, 1, SpaceState.OCCUPIED))  # tie, versioned
+    assert not repo.update_status_if_newer(_versioned(NOW, 1))  # tie, same version: first wins
+    assert repo.update_status_if_newer(_versioned(NOW, 2))  # tie, newer layout: re-score wins
+    assert not repo.update_status_if_newer(_versioned(NOW, 1, SpaceState.OCCUPIED))
+    assert not repo.update_status_if_newer(_versioned(NOW - timedelta(seconds=1), 9))  # older
+    assert repo.get_statuses("L")[0].state is SpaceState.FREE
+    assert repo.get_statuses("L")[0].layout_version == 2
+
+
+def test_status_condition_expression():
+    assert aws.status_condition(status(NOW)) == {
+        "ConditionExpression": "attribute_not_exists(observedAt) OR observedAt < :new",
+        "ExpressionAttributeValues": {":new": aws.format_dt(NOW)},
+    }
+    cond = aws.status_condition(_versioned(NOW, 3))
+    assert cond["ExpressionAttributeValues"] == {":new": aws.format_dt(NOW), ":ver": 3}
+    assert (
+        "observedAt = :new AND (attribute_not_exists(layoutVersion) OR layoutVersion < :ver)"
+        in (cond["ConditionExpression"])
+    )
+    # A status without a version stores no layoutVersion attribute, so the tie check sees none.
+    assert "layoutVersion" not in aws.status_item(status(NOW))
+    assert aws.status_item(_versioned(NOW, 3))["layoutVersion"] == 3

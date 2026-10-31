@@ -39,6 +39,11 @@ def draft_sk() -> str:
     return "DRAFT"
 
 
+def proposal_sk(view_id: str) -> str:
+    """The one LOT#{lotId} item per viewpoint holding its latest layout proposer run."""
+    return f"PROPOSAL#{view_id}"
+
+
 def gsi1_snapshot(lot_id: str, capture_time: datetime, image_id: str) -> tuple[str, str]:
     """GSI1 keys for an IMG#/META item so snapshots list newest capture first per lot.
 

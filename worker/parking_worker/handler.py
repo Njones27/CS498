@@ -229,6 +229,7 @@ def _run(
                 confidence=score.acpds_score,
                 observed_at=snapshot.capture_time,
                 source_image_id=image_id,
+                layout_version=layout.version,
             )
         )
 

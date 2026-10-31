@@ -10,6 +10,9 @@ import {
   polygonToSvgPoints,
 } from './photo/geom'
 import { placeFromPhoto } from './photoGrid'
+import { ProposalReview } from './ProposalReview'
+import { acceptProposals, mergeProposals, rejectProposals, type ProposedStall } from './proposals'
+import { useStallFinder } from './useStallFinder'
 import { addSpaceFromOutline, followOutline, suggestOutline } from './sync'
 import type {
   DraftLayout,
@@ -672,57 +675,65 @@ export function ReferencePhotoPanel({
     setStatusNotice(`Removed outline for ${sp?.label ?? spaceId}`)
   }
 
-  const handleAcceptProposal = (spaceId: string) => {
-    if (!currentViewpoint) return
-    const nextReview = {
-      ...currentViewpoint.outlineReview,
-      [spaceId]: { source: 'proposed' as const, status: 'accepted' as const },
-    }
-    const nextVps = draft.viewpoints.map((v) =>
-      v.viewId === currentViewpoint.viewId ? { ...v, outlineReview: nextReview } : v,
+  const handleAcceptProposals = (spaceIds: string[]) => {
+    if (!currentViewpoint || spaceIds.length === 0) return
+    commitOutlines(acceptProposals(draft, currentViewpoint.viewId, spaceIds))
+    const one = spaceIds.length === 1 && draft.spaces.find((s) => s.spaceId === spaceIds[0])
+    setStatusNotice(
+      one
+        ? `Accepted proposed outline for ${one.label}`
+        : `Accepted ${spaceIds.length} proposed outlines in ${currentViewpoint.viewId}`,
     )
-    commitOutlines({ ...draft, viewpoints: nextVps })
-    const sp = draft.spaces.find((s) => s.spaceId === spaceId)
-    setStatusNotice(`Accepted proposed outline for ${sp?.label ?? spaceId}`)
   }
+  const handleAcceptProposal = (spaceId: string) => handleAcceptProposals([spaceId])
 
-  const handleRejectProposal = (spaceId: string) => {
-    handleDeleteOutline(spaceId)
-  }
-
-  const handleProposeOutline = (spaceId: string) => {
-    if (!currentViewpoint) return
-    const nextReview = {
-      ...currentViewpoint.outlineReview,
-      [spaceId]: { source: 'proposed' as const, status: 'pending' as const },
-    }
-    const nextVps = draft.viewpoints.map((v) =>
-      v.viewId === currentViewpoint.viewId ? { ...v, outlineReview: nextReview } : v,
+  const handleRejectProposals = (spaceIds: string[]) => {
+    if (!currentViewpoint || spaceIds.length === 0) return
+    const { draft: next, removedSpaces } = rejectProposals(draft, currentViewpoint.viewId, spaceIds)
+    commitOutlines(next)
+    if (selectedSpaceId && !next.spaces.some((s) => s.spaceId === selectedSpaceId)) onSelectSpace(null)
+    const one = spaceIds.length === 1 && draft.spaces.find((s) => s.spaceId === spaceIds[0])
+    setStatusNotice(
+      one
+        ? removedSpaces
+          ? `Rejected ${one.label}: removed the space`
+          : `Removed outline for ${one.label}`
+        : `Rejected ${spaceIds.length} proposed outlines in ${currentViewpoint.viewId}`,
     )
-    commitOutlines({ ...draft, viewpoints: nextVps })
-    const sp = draft.spaces.find((s) => s.spaceId === spaceId)
-    setStatusNotice(`Marked outline for ${sp?.label ?? spaceId} as proposed for review`)
   }
+  const handleRejectProposal = (spaceId: string) => handleRejectProposals([spaceId])
 
-  const handleAcceptAllProposals = () => {
-    if (!currentViewpoint) return
-    const nextReview = { ...currentViewpoint.outlineReview }
-    let count = 0
-    for (const [sId, r] of Object.entries(nextReview)) {
-      if (r.status === 'pending') {
-        nextReview[sId] = { source: 'proposed', status: 'accepted' }
-        count++
-      }
+  // HDD §4.6: the worker finds stalls on the reference photo; they arrive as new spaces with pending
+  // proposed outlines, saved at once like any outline edit.
+  const handleStalls = (viewId: string, stalls: ProposedStall[]) => {
+    const merged = mergeProposals(draft, viewId, stalls, grid ?? null)
+    if (merged.blocked) {
+      setDrawError(merged.blocked)
+      return
     }
-    if (count === 0) return
-    const nextVps = draft.viewpoints.map((v) =>
-      v.viewId === currentViewpoint.viewId ? { ...v, outlineReview: nextReview } : v,
+    const proposed = merged.added + merged.attached
+    if (proposed > 0) commitOutlines(merged.draft, { dx: merged.dx, dy: merged.dy })
+    const notes = [
+      merged.attached ? `${merged.attached} matched to spaces you have` : '',
+      merged.skipped ? `${merged.skipped} already outlined` : '',
+    ].filter(Boolean)
+    const extra = notes.length ? ` (${notes.join(', ')})` : ''
+    setStatusNotice(
+      proposed > 0
+        ? `Proposed ${proposed} ${proposed === 1 ? 'stall' : 'stalls'} in ${viewId}${extra}. Review them, weakest first.`
+        : stalls.length > 0
+          ? `No new stalls found in ${viewId}${extra}`
+          : `No stalls found in ${viewId}. Outline them by hand.`,
     )
-    commitOutlines({ ...draft, viewpoints: nextVps })
-    setStatusNotice(`Accepted ${count} proposed outline${count === 1 ? '' : 's'} in ${currentViewpoint.viewId}`)
   }
+  const finder = useStallFinder(lotId, currentViewpoint?.viewId ?? null, handleStalls)
+  const finding = finder.state.phase === 'running'
 
   const outlinedCount = Object.keys(currentViewpoint?.outlines ?? {}).length
+  // By label, numbers in order (A-2 before A-10): found stalls get random ids, so stored order is no order.
+  const sortedSpaces = [...draft.spaces].sort((a, b) =>
+    a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }),
+  )
   const proposedCount = Object.values(currentViewpoint?.outlineReview ?? {}).filter(
     (r) => r.status === 'pending',
   ).length
@@ -736,10 +747,6 @@ export function ReferencePhotoPanel({
 
   // When user is actively placing points or in drawing mode, existing polygons MUST NOT intercept clicks!
   const isActivelyDrawing = isDrawing || clicks.length > 0
-
-  // Nothing produces proposed outlines yet (HDD §4.6, wave 3), so "Propose" is a test hook for the
-  // review flow. A production build leaves it out: a pending outline blocks publishing.
-  const canProposeOutlines = import.meta.env.DEV
 
   const notices = (
     <>
@@ -762,6 +769,24 @@ export function ReferencePhotoPanel({
         <p className="notice notice--ok" role="status">
           {statusNotice}
         </p>
+      )}
+      {finding && (
+        <p className="notice" role="status" data-testid="finding-stalls">
+          Finding stalls in {finder.state.phase === 'running' && finder.state.viewId}… This takes a few seconds.
+        </p>
+      )}
+      {finder.state.phase === 'failed' && (
+        <p className="notice notice--error" role="alert">
+          Could not find stalls: {finder.state.message}
+        </p>
+      )}
+      {currentViewpoint?.referenceImage && outlinedCount === 0 && finder.state.phase === 'idle' && !isUploading && (
+        <div className="notice ref-prompt" role="status" data-testid="find-stalls-prompt">
+          <span>Find stalls on this photo? Every stall gets a proposed outline to review.</span>
+          <button type="button" className="button button--primary button--sm" onClick={() => void finder.find()}>
+            Find stalls
+          </button>
+        </div>
       )}
       {isUploading && (
         <div className="notice" role="status">
@@ -835,6 +860,18 @@ export function ReferencePhotoPanel({
                   disabled={isUploading}
                 >
                   Upload reference photo
+                </button>
+              )}
+              {currentViewpoint.referenceImage && (
+                <button
+                  type="button"
+                  className="button button--ghost button--sm"
+                  onClick={() => void finder.find()}
+                  disabled={finding || isUploading}
+                  title="Propose an outline for every stall from the painted lines and parked cars"
+                  data-testid="find-stalls-btn"
+                >
+                  {finding ? 'Finding stalls…' : 'Find stalls'}
                 </button>
               )}
             </>
@@ -1383,16 +1420,6 @@ export function ReferencePhotoPanel({
                       >
                         Redraw
                       </button>
-                      {canProposeOutlines && (
-                        <button
-                          type="button"
-                          className="button button--ghost button--sm"
-                          onClick={() => handleProposeOutline(selectedSpace.spaceId)}
-                          title="Mark outline as proposed for testing review workflow"
-                        >
-                          Propose
-                        </button>
-                      )}
                       <button
                         type="button"
                         className="button button--ghost button--sm"
@@ -1471,14 +1498,6 @@ export function ReferencePhotoPanel({
                 <li>
                   <span className="ref-dot ref-dot--proposed" aria-hidden="true" />
                   <strong>{proposedCount}</strong> proposed
-                  <button
-                    type="button"
-                    className="button button--ghost button--sm"
-                    onClick={handleAcceptAllProposals}
-                    data-testid="accept-all-proposals-btn"
-                  >
-                    Accept all
-                  </button>
                 </li>
               )}
               {missingCount > 0 && (
@@ -1518,40 +1537,15 @@ export function ReferencePhotoPanel({
             </p>
           </section>
 
-          {/* Pending proposals banner */}
-          {Object.entries(currentViewpoint.outlineReview ?? {})
-            .filter(([_, rev]) => rev.status === 'pending')
-            .map(([sId]) => {
-              const sp = draft.spaces.find((s) => s.spaceId === sId)
-              return (
-                <div
-                  key={sId}
-                  className="notice notice--warn ref-proposal-banner"
-                  data-testid={`proposal-banner-${sId}`}
-                  role="status"
-                >
-                  <span>
-                    Proposed outline for <strong>{sp?.label ?? sId}</strong>
-                  </span>
-                  <div className="ref-proposal-banner__actions">
-                    <button
-                      type="button"
-                      className="button button--primary button--sm"
-                      onClick={() => handleAcceptProposal(sId)}
-                    >
-                      Accept
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--ghost button--sm"
-                      onClick={() => handleRejectProposal(sId)}
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
+          <ProposalReview
+            draft={draft}
+            view={currentViewpoint}
+            selectedSpaceId={selectedSpaceId}
+            onSelectSpace={onSelectSpace}
+            onHoverSpace={onHoverSpace}
+            onAccept={handleAcceptProposals}
+            onReject={handleRejectProposals}
+          />
 
           {/* Spaces Table matching project tables */}
           <section className="ref-spaces" aria-label="Spaces">
@@ -1571,7 +1565,7 @@ export function ReferencePhotoPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {draft.spaces.map((space) => {
+                  {sortedSpaces.map((space) => {
                     const count = draft.viewpoints.filter((v) => v.outlines[space.spaceId]).length
                     const isSelected = selectedSpaceId === space.spaceId
                     const isHovered = hoveredSpaceId === space.spaceId

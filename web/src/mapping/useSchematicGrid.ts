@@ -78,7 +78,7 @@ export function uniformShift(a: DraftLayout, b: DraftLayout): { dx: number; dy: 
 
 /**
  * The mapping page's schematic grid. It is fitted to the spaces' labels when a lot (and published version)
- * loads, not after every edit, so it stays put while spaces move; it follows the map when growing shifts
+ * loads, and once more when an empty lot gets its first spaces, not after every edit, so it stays put while spaces move; it follows the map when growing shifts
  * every space. Null until the draft loads.
  */
 export function useSchematicGrid(lotId: string, draft: DraftLayout | null): GridControls | null {
@@ -90,6 +90,9 @@ export function useSchematicGrid(lotId: string, draft: DraftLayout | null): Grid
   const [state, setState] = useState<{ key: string; grid: Grid; seen: DraftLayout } | null>(null)
   if (draft && baseKey && state?.key !== baseKey) {
     setState({ key: baseKey, grid: fitGrid(draft.spaces, current.sizes), seen: draft })
+  } else if (draft && state && state.seen.spaces.length === 0 && draft.spaces.length > 0) {
+    // A grid fitted to an empty lot has nothing to go by; fit it to the first spaces (say, found stalls).
+    setState({ ...state, grid: fitGrid(draft.spaces, current.sizes), seen: draft })
   } else if (draft && state && draft !== state.seen) {
     const shift = uniformShift(state.seen, draft)
     setState({ ...state, seen: draft, grid: shift ? shiftGrid(state.grid, shift.dx, shift.dy) : state.grid })

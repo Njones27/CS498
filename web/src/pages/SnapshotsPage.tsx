@@ -171,7 +171,12 @@ export function SnapshotsPage() {
                         {dateTime(s.captureTime)}
                       </button>
                     </td>
-                    <td>{s.viewId}</td>
+                    <td>
+                      {s.viewId}
+                      {s.rescoreOf && s.layoutVersion != null && (
+                        <span className="muted snapshot-row__rescore"> · Re-scored for layout v{s.layoutVersion}</span>
+                      )}
+                    </td>
                     <td>
                       <span className={`job-status job-status--${s.jobStatus.toLowerCase()}`}>
                         {statusLabel(s.jobStatus)}
@@ -275,6 +280,7 @@ function SnapshotDetailPanel({
         <>
           <p className="snapshot-detail__layout">
             {d.layoutVersion != null ? `Processed with layout v${d.layoutVersion}` : 'Not processed yet'}
+            {d.rescoreOf && ' (the same photo re-scored after publishing)'}
           </p>
           <dl className="snapshot-detail__facts">
             <dt>Captured</dt>

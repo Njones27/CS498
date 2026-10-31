@@ -24,6 +24,9 @@ from .models import (
     ObjectInfo,
     ParkingSpace,
     Principal,
+    ProposalRun,
+    ProposalStatus,
+    ProposedStall,
     PublishedLayout,
     Snapshot,
     SpaceObservation,
@@ -142,7 +145,8 @@ class Repository(Protocol):
         ...
 
     def update_status_if_newer(self, status: SpaceStatus) -> bool:
-        """Conditional write: only when the stored observedAt is older (HDD §4.1 step 7)."""
+        """Conditional write: only when `status.supersedes` the stored one (HDD §4.1 step 7):
+        an older observedAt, or the same one from an older layout version."""
         ...
 
     def get_statuses(self, lot_id: str) -> list[SpaceStatus]: ...
@@ -160,6 +164,27 @@ class Repository(Protocol):
 
     def delete_space(self, lot_id: str, space_id: str) -> None:
         """Remove a SPACE# item. Only for never-published spaces; the caller enforces that."""
+        ...
+
+    # Layout proposer runs (HDD §4.6): the latest run per viewpoint.
+    def put_proposal_run(self, run: ProposalRun) -> None:
+        """Store `run` as its viewpoint's latest run, replacing any earlier one."""
+        ...
+
+    def get_proposal_run(self, lot_id: str, view_id: str) -> ProposalRun | None: ...
+
+    def transition_proposal_run(
+        self,
+        lot_id: str,
+        view_id: str,
+        run_id: str,
+        from_statuses: Iterable[ProposalStatus],
+        to_status: ProposalStatus,
+        **fields: object,
+    ) -> bool:
+        """Conditional update: only if the stored run is `run_id` and its status is one of
+        `from_statuses`. `fields` are other `ProposalRun` fields to set. False otherwise
+        (no run, a newer run replaced it, or another worker moved it on)."""
         ...
 
 
@@ -185,6 +210,9 @@ class SpaceScorer(Protocol):
 
 
 class LayoutProposer(Protocol):
-    """Proposes stall outlines from one photo (HDD §4.6). Implemented in wave 3."""
+    """Proposes stall outlines from one photo (HDD §4.6): painted stall lines and parked
+    cars, fitted into rows of evenly spaced stalls."""
 
-    def propose(self, image: bytes) -> list[AlignedOutline]: ...
+    model_version: str
+
+    def propose(self, image: bytes) -> list[ProposedStall]: ...

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 from pydantic.alias_generators import to_camel
@@ -108,6 +109,14 @@ class OutlineReview(CamelModel):
 
     source: OutlineSource
     status: OutlineStatus
+    evidence: float | None = Field(default=None, ge=0, le=1, exclude_if=lambda v: v is None)
+    """For a proposed outline, how strongly the photo supports it (0 to 1): painted lines on
+    both sides and a parked car each add to it. The review list shows the weakest first.
+    Left out when unset, so drawn outlines store and serialize as before."""
+    new_space: bool | None = Field(default=None, exclude_if=lambda v: v is None)
+    """True when the layout proposer created the space for this outline (rather than outlining a
+    space the lot already had), so rejecting the outline removes the space too. Left out when
+    unset."""
 
 
 class Viewpoint(CamelModel):
@@ -199,6 +208,9 @@ class Snapshot(CamelModel):
     model_version: str | None = None
     layout_version: int | None = None
     processing_ms: int | None = None
+    rescore_of: str | None = None
+    """Set on a re-score: the earlier snapshot whose photo this one scores again against a
+    newly published layout version (no new upload; same capture time and object)."""
     created_at: datetime
     queued_at: datetime | None = None
     completed_at: datetime | None = None
@@ -237,6 +249,19 @@ class SpaceStatus(CamelModel):
     confidence: float | None = None
     observed_at: datetime
     source_image_id: str
+    layout_version: int | None = Field(default=None, exclude_if=lambda v: v is None)
+    """The layout version the photo was scored with. Breaks a tie in `observed_at`: the same
+    photo re-scored after a publish replaces its earlier result (see `supersedes`)."""
+
+    def supersedes(self, current: SpaceStatus | None) -> bool:
+        """Newer capture wins (HDD §4.1 step 7); on the same capture time, the newer layout
+        version wins, so a re-score after a publish updates the map. Two photos with the same
+        time and version keep the first one."""
+        if current is None or current.observed_at < self.observed_at:
+            return True
+        if current.observed_at != self.observed_at or self.layout_version is None:
+            return False
+        return current.layout_version is None or current.layout_version < self.layout_version
 
 
 class Closure(CamelModel):
@@ -303,6 +328,64 @@ class Message(CamelModel):
 
 class JobMessage(CamelModel):
     image_id: str
+
+
+class ProposedStall(CamelModel):
+    """One stall outline the layout proposer found on a reference photo (HDD §4.6)."""
+
+    polygon: Polygon
+    """4 corners as photo fractions, clockwise."""
+    evidence: float = Field(ge=0, le=1)
+    row: int = Field(ge=0)
+    """Row index, rows ordered top to bottom on the photo (in the divider frame)."""
+    col: int = Field(ge=0)
+    """Stall index within its row, left to right."""
+    map_rect: Rect
+    """The stall flattened to a top-down map, in photo-width units (0..1 across): position
+    along its row and the row's place among the others. The web scales it to the schematic."""
+
+
+class ProposalStatus(StrEnum):
+    QUEUED = "QUEUED"
+    PROCESSING = "PROCESSING"
+    COMPLETE = "COMPLETE"
+    FAILED = "FAILED"
+
+
+class ProposalRun(CamelModel):
+    """The latest layout proposer run on one viewpoint's reference photo. One per viewpoint:
+    a new run replaces the old one."""
+
+    lot_id: str
+    view_id: str
+    run_id: str
+    status: ProposalStatus = ProposalStatus.QUEUED
+    reference_image_key: str
+    """The reference photo the run was asked for. A run whose viewpoint photo changed since
+    fails rather than propose outlines for a different photo."""
+    requested_by: str
+    requested_at: datetime
+    completed_at: datetime | None = None
+    attempts: int = 0
+    error: str | None = None
+    model_version: str | None = None
+    proposals: list[ProposedStall] = Field(default_factory=list)
+
+
+def check_proposal_run_fields(fields: dict[str, object]) -> None:
+    """Fields a proposal run transition may set: any but the run's identity and status."""
+    bad = set(fields) - (set(ProposalRun.model_fields) - {"lot_id", "view_id", "run_id", "status"})
+    if bad:
+        raise ValueError(f"not updatable proposal run fields: {sorted(bad)}")
+
+
+class ProposalJobMessage(CamelModel):
+    """Queue message for a layout proposer run. Told apart from `JobMessage` by `kind`."""
+
+    kind: Literal["propose"] = "propose"
+    lot_id: str
+    view_id: str
+    run_id: str
 
 
 class ClaimResult(CamelModel):

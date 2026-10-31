@@ -42,6 +42,7 @@ from parking_core.models import (
 )
 
 from ..deps import AdaptersDep, AdminDep, NowDep, error
+from ..jobs import rescore_latest
 from ..layout_schemas import (
     DraftErrorResponse,
     DraftLayout,
@@ -94,7 +95,9 @@ def _viewpoint_out(v: Viewpoint, store: ObjectStore) -> DraftViewpoint:
         reference_image=reference,
         outlines={sid: list(poly) for sid, poly in v.outlines.items()},
         outline_review={
-            sid: OutlineReviewOut(source=r.source, status=r.status)
+            sid: OutlineReviewOut(
+                source=r.source, status=r.status, evidence=r.evidence, new_space=r.new_space
+            )
             for sid, r in v.outline_review.items()
         },
     )
@@ -199,7 +202,9 @@ def put_draft(
             "name": v.name,
             "outlines": v.outlines,
             "outline_review": {
-                sid: OutlineReview(source=r.source, status=r.status)
+                sid: OutlineReview(
+                    source=r.source, status=r.status, evidence=r.evidence, new_space=r.new_space
+                )
                 for sid, r in v.outline_review.items()
             },
         }
@@ -275,6 +280,8 @@ def publish(
             VALIDATION_FAILED_MESSAGE,
             report=exc.report.model_dump(mode="json"),
         ) from None
+    # Spaces new in this version get a state from the latest photo, without another upload.
+    rescore_latest(adapters, lot_id, version.version, admin.email, now)
     return _version_out(version)
 
 

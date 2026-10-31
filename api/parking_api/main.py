@@ -15,6 +15,7 @@ from .routes import (
     closures,
     layout,
     lots_admin,
+    proposals,
     public,
     reference,
     snapshots,
@@ -46,6 +47,7 @@ def create_app(settings: Settings | None = None, adapters: Adapters | None = Non
     app.include_router(layout.router)
     app.include_router(lots_admin.router)
     app.include_router(reference.router)
+    app.include_router(proposals.router)
     if settings.app_env == "test":
         app.include_router(testonly.router)
 

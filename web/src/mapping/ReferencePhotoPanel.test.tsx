@@ -378,8 +378,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
     expect(banner).toBeInTheDocument()
 
     // Accept proposal
-    const acceptBtn = screen.getByRole('button', { name: 'Accept' })
-    await user.click(acceptBtn)
+    await user.click(within(banner).getByRole('button', { name: 'Accept proposal for A-02' }))
 
     expect(onChange).toHaveBeenCalledTimes(1)
     const updatedDraft: DraftLayout = onChange.mock.calls[0][0]
@@ -390,8 +389,8 @@ describe('ReferencePhotoPanel (US-08)', () => {
   it('rejecting a proposed outline removes it', async () => {
     const { user, onChange, onSave } = renderPanel({ viewId: 'V1' })
 
-    const rejectBtn = screen.getByRole('button', { name: 'Reject' })
-    await user.click(rejectBtn)
+    const banner = screen.getByTestId('proposal-banner-sp_a02')
+    await user.click(within(banner).getByRole('button', { name: 'Reject proposal for A-02' }))
 
     expect(onChange).toHaveBeenCalledTimes(1)
     expect(onSave).toHaveBeenCalledTimes(1)
@@ -466,21 +465,216 @@ describe('ReferencePhotoPanel (US-08)', () => {
     expect(v1.outlineReview?.['sp_a02']).toEqual({ source: 'proposed', status: 'accepted' })
   })
 
-  // --- The Propose test hook -----------------------------------------------
-  it('offers Propose (a test hook for the review flow) only in dev and test builds', () => {
-    renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
-    expect(screen.getByRole('button', { name: 'Propose' })).toBeInTheDocument()
+  // --- The layout proposer (HDD §4.6) ------------------------------------
+  const STALL = {
+    polygon: [
+      [0.7, 0.7],
+      [0.78, 0.7],
+      [0.78, 0.85],
+      [0.7, 0.85],
+    ],
+    evidence: 0.3,
+    row: 0,
+    col: 0,
+    mapRect: { x: 0, y: 0, w: 0.08, h: 0.15 },
+  }
+  /** The fixture with every active space outlined in V1, so found stalls have nothing to match. */
+  function outlinedDraft(): DraftLayout {
+    const draft = structuredClone(rylanDraftFixture)
+    const v1 = draft.viewpoints.find((v) => v.viewId === 'V1')!
+    v1.outlines.sp_a03 = [
+      [0.4, 0.2],
+      [0.5, 0.2],
+      [0.5, 0.3],
+      [0.4, 0.3],
+    ]
+    v1.outlines.sp_a04 = [
+      [0.5, 0.2],
+      [0.6, 0.2],
+      [0.6, 0.3],
+      [0.5, 0.3],
+    ]
+    return draft
+  }
+  const RUN = {
+    runId: 'r1',
+    lotId: 'test-lot',
+    viewId: 'V1',
+    requestedBy: 'admin@example.edu',
+    requestedAt: '2026-10-30T12:00:00Z',
+    photoChanged: false,
+  }
+
+  it('finds stalls on the photo and adds them as pending proposals', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let polls = 0
+      const fetchMock = mockFetch({
+        'POST /admin/lots/test-lot/views/V1/proposals': { status: 202, body: { ...RUN, status: 'QUEUED', stalls: [] } },
+        'GET /admin/lots/test-lot/views/V1/proposals': () => {
+          polls++
+          return polls < 2
+            ? { body: { ...RUN, status: 'PROCESSING', stalls: [] } }
+            : { body: { ...RUN, status: 'COMPLETE', stalls: [STALL] } }
+        },
+      })
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { onChange, onSave } = renderPanel({ draft: outlinedDraft(), viewId: 'V1' })
+
+      await user.click(screen.getByTestId('find-stalls-btn'))
+      expect(await screen.findByTestId('finding-stalls')).toHaveTextContent('Finding stalls in V1')
+      expect(screen.getByTestId('find-stalls-btn')).toBeDisabled()
+      await pollUntil(() => expect(polls).toBe(1))
+      expect(onChange).not.toHaveBeenCalled() // still processing
+      await pollUntil(() => expect(onChange).toHaveBeenCalledTimes(1))
+      expect(onSave).toHaveBeenCalledTimes(1)
+      const next: DraftLayout = onChange.mock.calls[0][0]
+      const added = next.spaces.filter((sp) => !rylanDraftFixture.spaces.some((o) => o.spaceId === sp.spaceId))
+      expect(added).toHaveLength(1)
+      const v1 = next.viewpoints.find((v) => v.viewId === 'V1')!
+      expect(v1.outlines[added[0].spaceId]).toEqual(STALL.polygon)
+      expect(v1.outlineReview?.[added[0].spaceId]).toEqual({
+        source: 'proposed',
+        status: 'pending',
+        evidence: 0.3,
+        newSpace: true,
+      })
+      expect(screen.getByText(/Proposed 1 stall in V1/)).toBeInTheDocument()
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('leaves Propose out of a production build', () => {
-    vi.stubEnv('DEV', false)
+  /** Let the stall finder's polls run (fake timers) until `check` passes. */
+  async function pollUntil(check: () => void) {
+    await vi.waitFor(async () => {
+      await act(() => vi.advanceTimersByTimeAsync(500))
+      check()
+    })
+  }
+
+  it('follows a run already going for this photo instead of starting another', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
-      renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
-      expect(screen.getByRole('button', { name: 'Delete outline' })).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: 'Propose' })).not.toBeInTheDocument()
+      mockFetch({
+        'POST /admin/lots/test-lot/views/V1/proposals': {
+          status: 409,
+          body: { error: 'proposal_running', message: 'Already finding stalls on this photo', runId: 'r1' },
+        },
+        'GET /admin/lots/test-lot/views/V1/proposals': { body: { ...RUN, status: 'COMPLETE', stalls: [STALL] } },
+      })
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { onChange } = renderPanel({ draft: outlinedDraft(), viewId: 'V1' })
+      await user.click(screen.getByTestId('find-stalls-btn'))
+      await pollUntil(() => expect(onChange).toHaveBeenCalledTimes(1))
     } finally {
-      vi.unstubAllEnvs()
+      vi.useRealTimers()
     }
+  })
+
+  it('says why finding stalls failed', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      mockFetch({
+        'POST /admin/lots/test-lot/views/V1/proposals': { status: 202, body: { ...RUN, status: 'QUEUED' } },
+        'GET /admin/lots/test-lot/views/V1/proposals': {
+          body: { ...RUN, status: 'FAILED', error: 'The reference photo changed; run it again' },
+        },
+      })
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { onChange } = renderPanel({ viewId: 'V1' })
+      await user.click(screen.getByTestId('find-stalls-btn'))
+      await pollUntil(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'Could not find stalls: The reference photo changed; run it again',
+        ),
+      )
+      expect(onChange).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('will not add found stalls it cannot match to the lot\'s spaces', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      mockFetch({
+        'POST /admin/lots/test-lot/views/V1/proposals': { status: 202, body: { ...RUN, status: 'QUEUED' } },
+        'GET /admin/lots/test-lot/views/V1/proposals': { body: { ...RUN, status: 'COMPLETE', stalls: [STALL] } },
+      })
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { onChange } = renderPanel({ viewId: 'V1' }) // A-03 and A-04 have no outline in V1
+      await user.click(screen.getByTestId('find-stalls-btn'))
+      await pollUntil(() => expect(screen.getByRole('alert')).toHaveTextContent(/Outline 4 of this lot's spaces/))
+      expect(onChange).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('lists spaces by label, numbers in order', () => {
+    const draft = structuredClone(rylanDraftFixture)
+    draft.spaces = [
+      { ...draft.spaces[0], spaceId: 'sp_z', label: 'B-10' },
+      { ...draft.spaces[1], spaceId: 'sp_y', label: 'A-02' },
+      { ...draft.spaces[2], spaceId: 'sp_x', label: 'B-02' },
+    ]
+    renderPanel({ draft, viewId: 'V2' })
+    const rows = screen.getAllByTestId(/^space-item-/)
+    expect(rows.map((r) => r.dataset.testid)).toEqual(['space-item-sp_y', 'space-item-sp_x', 'space-item-sp_z'])
+  })
+
+  it('offers to find stalls on a photo with no outlines yet', () => {
+    const draft = structuredClone(rylanDraftFixture)
+    const v1 = draft.viewpoints.find((v) => v.viewId === 'V1')!
+    v1.outlines = {}
+    v1.outlineReview = {}
+    renderPanel({ draft, viewId: 'V1' })
+    expect(screen.getByTestId('find-stalls-prompt')).toHaveTextContent('Find stalls on this photo?')
+  })
+
+  it('has no Find stalls without a reference photo', () => {
+    renderPanel({ viewId: 'V3' })
+    expect(screen.queryByTestId('find-stalls-btn')).not.toBeInTheDocument()
+  })
+
+  it('lists proposals weakest first and rejecting a found stall removes its space', async () => {
+    const draft = structuredClone(rylanDraftFixture)
+    const v1 = draft.viewpoints.find((v) => v.viewId === 'V1')!
+    v1.outlineReview = {
+      ...v1.outlineReview,
+      sp_a01: { source: 'proposed', status: 'pending', evidence: 0.9 },
+      sp_a02: { source: 'proposed', status: 'pending', evidence: 0.2, newSpace: true },
+    }
+    const { user, onChange } = renderPanel({ draft, viewId: 'V1' })
+    const items = within(screen.getByTestId('proposal-review')).getAllByRole('listitem')
+    expect(items.map((li) => li.dataset.testid)).toEqual(['proposal-banner-sp_a02', 'proposal-banner-sp_a01'])
+    expect(items[0]).toHaveTextContent('Weak 20%')
+    expect(items[1]).toHaveTextContent('Strong 90%')
+
+    await user.click(within(items[0]).getByRole('button', { name: 'Reject proposal for A-02' }))
+    const next: DraftLayout = onChange.mock.calls[0][0]
+    expect(next.spaces.some((sp) => sp.spaceId === 'sp_a02')).toBe(false) // the proposer made it
+    expect(next.viewpoints.find((v) => v.viewId === 'V1')!.outlines['sp_a02']).toBeUndefined()
+  })
+
+  it('accepts or rejects every proposal at once', async () => {
+    const draft = structuredClone(rylanDraftFixture)
+    const v1 = draft.viewpoints.find((v) => v.viewId === 'V1')!
+    v1.outlineReview = { ...v1.outlineReview, sp_a01: { source: 'proposed', status: 'pending', evidence: 0.5 } }
+    const { user, onChange } = renderPanel({ draft, viewId: 'V1' })
+
+    await user.click(screen.getByTestId('accept-all-proposals-btn'))
+    const accepted = onChange.mock.calls[0][0].viewpoints.find((v) => v.viewId === 'V1')!
+    expect(accepted.outlineReview?.sp_a01).toEqual({ source: 'proposed', status: 'accepted', evidence: 0.5 })
+    expect(accepted.outlineReview?.sp_a02?.status).toBe('accepted')
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await user.click(screen.getByTestId('reject-all-proposals-btn'))
+    const rejected = onChange.mock.calls[1][0].viewpoints.find((v) => v.viewId === 'V1')!
+    expect(rejected.outlines.sp_a01).toBeUndefined()
+    expect(rejected.outlines.sp_a02).toBeUndefined()
   })
 
   // --- Reference photo loading ---------------------------------------------
