@@ -552,7 +552,14 @@ export function straightenFromPhoto(
     })
     return out.every(([x, y]) => x >= 0 && x <= 1 && y >= 0 && y <= 1) ? out : null
   }
-  const keptLabels = new Set(draft.spaces.filter((sp) => !sp.retired && !renamable(sp.label)).map((sp) => sp.label.trim().toUpperCase()))
+  // Labels no straightened space may take: names like "Gate", and every label of a space not laid out
+  // here (seen only on another photo), which keeps its own.
+  const onRows = new Set(rows.flatMap((row) => row.stalls.map((t) => t.item.space.spaceId)))
+  const keptLabels = new Set(
+    draft.spaces
+      .filter((sp) => !sp.retired && sp.label.trim() && (!renamable(sp.label) || !onRows.has(sp.spaceId)))
+      .map((sp) => sp.label.trim().toUpperCase()),
+  )
   const leans: Record<string, number> = {}
   const paintSupport: Record<string, PaintSupport> = {}
   let y = MARGIN
@@ -649,6 +656,17 @@ export function straightenFromPhoto(
     else delete next.skewDeg
     return next
   })
+  // A straightened space whose row label was taken keeps its old one, unless another space now has
+  // that too: then it is left blank for the admin to name (validation points at it).
+  const finalCount = new Map<string, number>()
+  for (const sp of spaces) if (!sp.retired && sp.label.trim()) finalCount.set(sp.label.trim().toUpperCase(), (finalCount.get(sp.label.trim().toUpperCase()) ?? 0) + 1)
+  for (const sp of spaces) {
+    const p = placed.get(sp.spaceId)
+    const key = sp.label.trim().toUpperCase()
+    if (!p || p.label || !renamable(sp.label) || !key || (finalCount.get(key) ?? 0) < 2) continue
+    finalCount.set(key, finalCount.get(key)! - 1)
+    sp.label = ''
+  }
   // The stalls found in gaps: new spaces with proposed outlines waiting for review.
   const taken = new Set(spaces.map((sp) => sp.spaceId))
   const labels = new Set(spaces.filter((sp) => !sp.retired).map((sp) => sp.label.trim().toUpperCase()))

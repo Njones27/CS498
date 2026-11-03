@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { pklotFixture } from './fixtures/pklot'
 import { fitGrid, cellRect } from './schematic/grid'
+import { duplicateLabelIds } from './schematic/labels'
 import { MIN_STRAIGHTEN, straightenFoundCars, straightenFromPhoto, type StraightenResult } from './straighten'
 import { PKLOT_CAR_STALLS } from './fixtures/pklotCars'
 import { mergeProposals } from './proposals'
@@ -161,6 +162,36 @@ describe('straightenFromPhoto', () => {
     expect(ok(straightenFromPhoto(square, 'V1', { paint: dividers })).leans).toEqual({ A: -45, B: -45 })
     // Too little paint to say leaves the outlines' lean.
     expect(ok(straightenFromPhoto(square, 'V1', { paint: dividers.slice(0, 3) })).leans).toEqual({ A: 0, B: 0 })
+  })
+
+  it('never gives a straightened space the label of a space seen only on another photo', () => {
+    // A second camera sees two more spaces, already named A-01 and B-03; V1 doesn't see them.
+    const lot = obliqueLot(8, 0)
+    const elsewhere = [
+      { spaceId: 'v2a', label: 'A-01', type: 'STANDARD' as const, rect: { x: 700, y: 20, w: 40, h: 80 }, retired: false },
+      { spaceId: 'v2b', label: 'B-03', type: 'STANDARD' as const, rect: { x: 760, y: 20, w: 40, h: 80 }, retired: false },
+    ]
+    lot.spaces.push(...elsewhere)
+    const r = ok(straightenFromPhoto(lot, 'V1'))
+    const active = r.draft.spaces.filter((sp) => !sp.retired)
+    expect(duplicateLabelIds(active)).toEqual(new Set())
+    // Those two keep their names; the V1 stalls that would have taken them keep their old ones.
+    expect(active.filter((sp) => sp.spaceId.startsWith('v2')).map((sp) => sp.label)).toEqual(['A-01', 'B-03'])
+    expect(active.filter((sp) => /^[AB]-\d\d$/.test(sp.label))).toHaveLength(r.placed + r.found)
+    expect(active.filter((sp) => sp.label.startsWith('Z-'))).toHaveLength(2)
+  })
+
+  it('leaves a straightened space blank, not duplicated, when its row label and its old one are both taken', () => {
+    const lot = obliqueLot(8, 0)
+    // Row A's first stall would be A-01, and was Z-1: another camera's spaces have both names.
+    lot.spaces.push(
+      { spaceId: 'v2a', label: 'A-01', type: 'STANDARD', rect: { x: 700, y: 20, w: 40, h: 80 }, retired: false },
+      { spaceId: 'v2z', label: 'Z-1', type: 'STANDARD', rect: { x: 760, y: 20, w: 40, h: 80 }, retired: false },
+    )
+    const r = ok(straightenFromPhoto(lot, 'V1'))
+    const active = r.draft.spaces.filter((sp) => !sp.retired)
+    expect(duplicateLabelIds(active)).toEqual(new Set())
+    expect(active.filter((sp) => !sp.label.trim())).toHaveLength(1)
   })
 
   it('numbers a wide bay right after its neighbour, not a column on', () => {
