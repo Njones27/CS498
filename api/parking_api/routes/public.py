@@ -36,12 +36,15 @@ log = logging.getLogger(__name__)
 RECENT_SNAPSHOTS = 20
 
 
-def find_published(repo: Repository, lot_id: str) -> tuple[Lot, PublishedLayout] | None:
+def find_published(
+    repo: Repository, lot_id: str, lot: Lot | None = None
+) -> tuple[Lot, PublishedLayout] | None:
     """The lot and its current layout, or None when unknown or unpublished.
 
     A snapshot that is missing or no longer loads also counts as unpublished, so one bad lot
     can't fail `GET /lots` for every driver. The unreadable case is logged as an error."""
-    lot = repo.get_lot(lot_id)
+    if lot is None:
+        lot = repo.get_lot(lot_id)
     if lot is None or lot.current_layout_version is None:
         return None
     try:
@@ -75,7 +78,7 @@ def list_lots(adapters: AdaptersDep, now: NowDep) -> list[LotListItem]:
     for candidate in sorted(repo.list_lots(), key=lambda lot: lot.name.lower()):
         if candidate.current_layout_version is None:
             continue
-        found = find_published(repo, candidate.lot_id)
+        found = find_published(repo, candidate.lot_id, lot=candidate)
         if found is None:
             continue
         lot, layout = found
