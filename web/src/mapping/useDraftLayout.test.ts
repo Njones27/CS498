@@ -60,6 +60,7 @@ describe('toDraftUpdate', () => {
       name: 'North corner',
       outlines: draftFixture().viewpoints[0].outlines,
       outlineReview: { 'A-01': { source: 'drawn', status: 'accepted' } },
+      rejectedStalls: [],
     })
   })
 })
@@ -233,6 +234,24 @@ describe('useDraftLayout', () => {
     expect(hook.result.current.draft?.viewpoints[1].referenceImage).toEqual(v2Photo)
   })
 
+  it('a new photo forgets the stalls rejected on the old one, in the draft and its undo history', async () => {
+    const rejected = (d: DraftLayout): DraftLayout => ({
+      ...d,
+      viewpoints: d.viewpoints.map((v) => ({ ...v, rejectedStalls: [[[0.1, 0.1], [0.2, 0.1], [0.2, 0.2], [0.1, 0.2]]] })),
+    })
+    const { hook } = await loaded({ [`GET ${URL}`]: { body: rejected(draftFixture()) } })
+    act(() => hook.result.current.setDraft(renamed(hook.result.current.draft!, 'local')))
+    await act(async () => {
+      await hook.result.current.refreshReferenceImages({ lotId: 'test-lot', viewId: 'V2', referenceImage: v2Photo })
+    })
+    const views = () => hook.result.current.draft!.viewpoints
+    expect(views()[1].rejectedStalls).toEqual([])
+    expect(views()[0].rejectedStalls).toHaveLength(1) // another view's photo didn't change
+    expect(hook.result.current.dirty).toBe(true) // one more save makes sure the server has it too
+    act(() => hook.result.current.undo())
+    expect(views()[1].rejectedStalls).toEqual([])
+  })
+
   it("refreshReferenceImages ignores an upload for another lot", async () => {
     const { hook } = await loaded()
     await act(async () => {
@@ -267,6 +286,37 @@ describe('useDraftLayout', () => {
     expect(s.draft?.viewpoints[1].referenceImage).toEqual(v2Photo)
     expect(s.draft?.revision).toBe(1)
     expect(s.dirty).toBe(false)
+  })
+
+  it('a save in flight during a photo upload cannot bring back the old photo\'s rejected stalls', async () => {
+    const old = [[[0.1, 0.1], [0.2, 0.1], [0.2, 0.2], [0.1, 0.2]]] as [number, number][][]
+    const withRejected = (d: DraftLayout): DraftLayout => ({
+      ...d,
+      viewpoints: d.viewpoints.map((v) => (v.viewId === 'V2' ? { ...v, rejectedStalls: old } : v)),
+    })
+    const hold = deferred<Reply>()
+    const { hook, fetchMock } = await loaded({
+      [`GET ${URL}`]: { body: withRejected(draftFixture()) },
+      [`PUT ${URL}`]: () => hold.promise,
+    })
+    const first = renamed(hook.result.current.draft!, 'first')
+    act(() => hook.result.current.setDraft(first))
+    let pending!: Promise<DraftLayout | null>
+    act(() => {
+      pending = hook.result.current.save()
+    })
+    await act(async () => {
+      await hook.result.current.refreshReferenceImages({ lotId: 'test-lot', viewId: 'V2', referenceImage: v2Photo })
+    })
+    await act(async () => {
+      hold.resolve({ body: saved(first) }) // the PUT landed after the new photo, with the old list
+      await pending
+    })
+    const s = hook.result.current
+    expect(s.draft?.viewpoints[1].rejectedStalls).toEqual([])
+    expect(s.dirty).toBe(true) // so the next save sends the cleared list
+    const puts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')
+    expect(JSON.parse(String(puts[0][1]?.body)).viewpoints[1].rejectedStalls).toEqual(old)
   })
 
   it('a save with no photo refresh during it takes the server response whole', async () => {

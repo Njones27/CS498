@@ -3,8 +3,10 @@ import {
   acceptProposals,
   alignRowsToPhoto,
   findWideStalls,
+  forgetRejected,
   mergeWideStalls,
   insidePolygon,
+  MAX_REJECTED,
   mergeProposals,
   NEEDS_ANCHORS,
   normalizedStallWidth,
@@ -304,6 +306,50 @@ describe('review helpers', () => {
     expect(removedSpaces).toBe(0)
     expect(next.spaces).toHaveLength(1)
     expect(next.viewpoints[0].outlines.s1).toBeUndefined()
+  })
+
+  it('a rejected stall stays rejected: the next Find stalls leaves it out and counts it', () => {
+    const d = reviewed()
+    const drop = d.spaces[1].spaceId
+    const { draft: next } = rejectProposals(d, 'V1', [drop])
+    expect(next.viewpoints[0].rejectedStalls).toEqual([stall(0, 1).polygon])
+    // The proposer finds it again, a little off where it was, along with a stall nobody has seen.
+    const again: ProposedStall = { ...stall(0, 1), polygon: box(0.153, 0.102, 0.05, 0.1) }
+    const merged = mergeProposals(next, 'V1', [stall(0, 0), again, stall(0, 2), stall(0, 5)])
+    expect(merged.skipped).toBe(2) // cols 0 and 2 are still outlined
+    expect(merged.rejected).toBe(1)
+    expect(merged.added).toBe(1)
+    expect(Object.values(merged.draft.viewpoints[0].outlines)).not.toContainEqual(again.polygon)
+  })
+
+  it('a rejected wide stall does not hide the stalls inside it, and a collapsed outline hides nothing', () => {
+    const d = reviewed()
+    // The admin rejected a proposal two stalls wide (cols 6 and 7), and one squashed flat.
+    d.viewpoints[0].rejectedStalls = [box(0.4, 0.1, 0.1, 0.1), box(0.6, 0.1, 0.05, 0)]
+    const merged = mergeProposals(d, 'V1', [stall(0, 6), stall(0, 7), stall(0, 10)])
+    expect(merged.rejected).toBe(0)
+    expect(merged.added).toBe(3)
+  })
+
+  it('remembers only rejected proposals, the latest MAX_REJECTED of them', () => {
+    const d = reviewed()
+    const [first, second] = d.spaces.map((s) => s.spaceId)
+    const accepted = acceptProposals(d, 'V1', [first])
+    expect(rejectProposals(accepted, 'V1', [first]).draft.viewpoints[0].rejectedStalls ?? []).toEqual([])
+    d.viewpoints[0].rejectedStalls = Array.from({ length: MAX_REJECTED }, (_, i) => box(0.9, i / MAX_REJECTED, 0.01, 0.001))
+    const kept = rejectProposals(d, 'V1', [second]).draft.viewpoints[0].rejectedStalls!
+    expect(kept).toHaveLength(MAX_REJECTED)
+    expect(kept.at(-1)).toEqual(stall(0, 1).polygon)
+  })
+
+  it('forgetting the rejected stalls lets Find stalls propose them again', () => {
+    const d = reviewed()
+    const { draft: next } = rejectProposals(d, 'V1', [d.spaces[1].spaceId])
+    const forgotten = forgetRejected(next, 'V1')
+    expect(forgotten.viewpoints[0].rejectedStalls).toEqual([])
+    const merged = mergeProposals(forgotten, 'V1', [stall(0, 1)])
+    expect(merged.rejected).toBe(0)
+    expect(merged.added).toBe(1)
   })
 
   it('insidePolygon', () => {

@@ -11,7 +11,15 @@ import {
 } from './photo/geom'
 import { placeFromPhoto } from './photoGrid'
 import { ProposalReview } from './ProposalReview'
-import { acceptProposals, mergeProposals, mergeWideStalls, rejectProposals, type ProposedStall, type WideStall } from './proposals'
+import {
+  acceptProposals,
+  forgetRejected,
+  mergeProposals,
+  mergeWideStalls,
+  rejectProposals,
+  type ProposedStall,
+  type WideStall,
+} from './proposals'
 import { straightenFoundCars } from './straighten'
 import { canDeleteSpace, removeSpaces } from './schematic/edits'
 import { useStallFinder } from './useStallFinder'
@@ -774,6 +782,8 @@ export function ReferencePhotoPanel({
     cars: number
     newIds?: ReadonlySet<string>
   } | null>(null)
+  // Stalls the last Find stalls left out because the admin had rejected them, with a way to get them back.
+  const [rejectedSkipped, setRejectedSkipped] = useState<{ viewId: string; count: number } | null>(null)
   /**
    * A photo taken at an angle: lay the lot out from the parked cars and the spaces it has, all on the
    * ground (rows levelled, their lean, the empty stalls between cars), so the map matches the photo;
@@ -813,6 +823,7 @@ export function ReferencePhotoPanel({
     const merged = mergeProposals(draft, viewId, stalls, grid ?? null)
     setWide(merged.wide.length > 0 ? { viewId, stalls: merged.wide } : null)
     setFromCars(null)
+    setRejectedSkipped(merged.rejected > 0 ? { viewId, count: merged.rejected } : null)
     if (merged.blocked) {
       setDrawError(merged.blocked)
       return
@@ -831,6 +842,7 @@ export function ReferencePhotoPanel({
     const notes = [
       merged.attached ? `${merged.attached} matched to spaces you have` : '',
       merged.skipped ? `${merged.skipped} already outlined` : '',
+      merged.rejected ? `${merged.rejected} you rejected before` : '',
     ].filter(Boolean)
     const extra = notes.length ? ` (${notes.join(', ')})` : ''
     setStatusNotice(
@@ -941,6 +953,27 @@ export function ReferencePhotoPanel({
           </button>{' '}
           <button type="button" className="button button--sm" onClick={() => setFromCars(null)}>
             Keep my layout
+          </button>
+        </div>
+      )}
+      {rejectedSkipped && rejectedSkipped.viewId === currentViewpoint?.viewId && (
+        <div className="notice" role="status" data-testid="rejected-skipped">
+          <span>
+            Left out {rejectedSkipped.count} {rejectedSkipped.count === 1 ? 'stall' : 'stalls'} you rejected before.
+          </span>{' '}
+          <button
+            type="button"
+            className="button button--sm"
+            onClick={() => {
+              commitOutlines(forgetRejected(draft, rejectedSkipped.viewId))
+              setRejectedSkipped(null)
+              void finder.find()
+            }}
+          >
+            Propose them again
+          </button>{' '}
+          <button type="button" className="button button--ghost button--sm" onClick={() => setRejectedSkipped(null)}>
+            Dismiss
           </button>
         </div>
       )}

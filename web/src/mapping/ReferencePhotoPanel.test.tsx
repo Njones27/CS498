@@ -672,6 +672,53 @@ describe('ReferencePhotoPanel (US-08)', () => {
     }
   })
 
+  it('leaves out a stall rejected before, and proposes it again when asked', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const fetchMock = mockFetch({
+        'POST /admin/lots/test-lot/views/V1/proposals': { status: 202, body: { ...RUN, status: 'QUEUED' } },
+        'GET /admin/lots/test-lot/views/V1/proposals': { body: { ...RUN, status: 'COMPLETE', stalls: [STALL] } },
+      })
+      const draft = outlinedDraft()
+      draft.viewpoints.find((v) => v.viewId === 'V1')!.rejectedStalls = [STALL.polygon as Outline]
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { onChange, onSave, rerender } = renderPanel({ draft, viewId: 'V1' })
+      await user.click(screen.getByTestId('find-stalls-btn'))
+      await pollUntil(() => expect(screen.getByTestId('rejected-skipped')).toHaveTextContent('Left out 1 stall you rejected before.'))
+      expect(onChange).not.toHaveBeenCalled()
+      expect(screen.getByText(/No new stalls found in V1 \(1 you rejected before\)/)).toBeInTheDocument()
+
+      const posts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST').length
+      await user.click(screen.getByRole('button', { name: 'Propose them again' }))
+      const forgotten: DraftLayout = onChange.mock.calls[0][0]
+      expect(forgotten.viewpoints.find((v) => v.viewId === 'V1')!.rejectedStalls).toEqual([])
+      expect(screen.queryByTestId('rejected-skipped')).not.toBeInTheDocument()
+      // The page hands the edited draft back; Find stalls runs again and now proposes the stall.
+      rerender(
+        <ReferencePhotoPanel
+          lotId="test-lot"
+          draft={forgotten}
+          viewId="V1"
+          onViewChange={vi.fn()}
+          onChange={onChange}
+          onReferenceUploaded={vi.fn()}
+          issues={[]}
+          selectedSpaceId={null}
+          onSelectSpace={vi.fn()}
+          hoveredSpaceId={null}
+          onHoverSpace={vi.fn()}
+          onSave={onSave}
+        />,
+      )
+      await pollUntil(() => expect(onChange).toHaveBeenCalledTimes(2))
+      expect(posts()).toBe(2)
+      const proposed: DraftLayout = onChange.mock.calls[1][0]
+      expect(Object.values(proposed.viewpoints.find((v) => v.viewId === 'V1')!.outlines)).toContainEqual(STALL.polygon)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('says why finding stalls failed', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {

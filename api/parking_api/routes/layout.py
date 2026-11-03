@@ -101,6 +101,7 @@ def _viewpoint_out(v: Viewpoint, store: ObjectStore) -> DraftViewpoint:
             )
             for sid, r in v.outline_review.items()
         },
+        rejected_stalls=[list(poly) for poly in v.rejected_stalls],
     )
 
 
@@ -215,6 +216,9 @@ def put_draft(
                 for sid, r in v.outline_review.items()
             },
         }
+        # A client that doesn't send the list (an editor tab from before it existed) keeps it.
+        if "rejected_stalls" in v.model_fields_set:
+            edits["rejected_stalls"] = v.rejected_stalls
         # Write only what the body carries. The reference image fields (set only by the reference
         # photo endpoints, possibly while this save runs) and the camera fields stay as stored.
         if v.view_id in stored_views and repo.update_viewpoint(lot_id, v.view_id, **edits):

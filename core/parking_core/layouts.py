@@ -572,7 +572,7 @@ def restore_version(
 
     restored_views = {v.view_id for v in layout.viewpoints}
     viewpoints = [v.model_copy(update={"lot_id": lot_id}) for v in layout.viewpoints] + [
-        v.model_copy(update={"outlines": {}, "outline_review": {}})
+        v.model_copy(update={"outlines": {}, "outline_review": {}, "rejected_stalls": []})
         for v in draft.viewpoints
         if v.view_id not in restored_views
     ]
