@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { davidFixture, space } from './fixtures/david'
 import { gridSizes } from './schematic/grid'
@@ -52,5 +52,34 @@ describe('useSchematicGrid', () => {
     const after = result.current!.grid
     expect(after).not.toEqual(before)
     expect(gridSizes(after).boxW).toBeLessThan(gridSizes(before).boxW)
+  })
+
+  it('restores the grid on undo after straighten / refit', () => {
+    localStorage.clear()
+    const initial = davidFixture()
+    const { result, rerender } = renderHook(({ d }) => useSchematicGrid('lot-x', d), { initialProps: { d: initial } })
+    const initialGrid = result.current!.grid
+
+    // Straighten from photo creates a new layout and calls refit()
+    const straightened = davidFixture({
+      spaces: [
+        space('A-01', 50, 50, { label: 'B-01', rect: { x: 50, y: 50, w: 30, h: 60 } }),
+        space('A-02', 90, 50, { label: 'B-02', rect: { x: 90, y: 50, w: 30, h: 60 } }),
+      ],
+    })
+    act(() => {
+      result.current!.refit(straightened)
+    })
+    rerender({ d: straightened })
+    const straightenedGrid = result.current!.grid
+    expect(straightenedGrid).not.toEqual(initialGrid)
+
+    // Undo reverts draft to initial
+    rerender({ d: initial })
+    expect(result.current!.grid).toEqual(initialGrid)
+
+    // Redo reverts draft to straightened
+    rerender({ d: straightened })
+    expect(result.current!.grid).toEqual(straightenedGrid)
   })
 })

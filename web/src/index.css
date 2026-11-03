@@ -695,6 +695,10 @@ a { color: var(--accent); }
 .schematic-space--error .schematic-space__rect { stroke: var(--nearly-full); stroke-width: 4; stroke-dasharray: 10 4; }
 .schematic-space__note { fill: var(--nearly-full); font-weight: 700; pointer-events: none; }
 .schematic-space__marker { fill: var(--muted); font-weight: 700; pointer-events: none; }
+.schematic-space__coverage { pointer-events: none; }
+.schematic-space__coverage--in-view { fill: var(--plenty); stroke: var(--surface); stroke-width: 0.5; }
+.schematic-space__coverage--other-view { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.schematic-space__coverage--unmapped { fill: none; stroke: var(--warning, #e69138); stroke-width: 1.5; stroke-dasharray: 2 1; }
 .schematic-badge { pointer-events: none; }
 .schematic-badge rect { fill: var(--accent); }
 .schematic-badge text { fill: var(--accent-text); font-weight: 700; }

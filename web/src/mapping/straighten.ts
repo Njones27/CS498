@@ -719,13 +719,16 @@ export function straightenFoundCars(
   viewId: string,
   paint: [number, number, number, number][] = [],
   stalls: { polygon: Point[]; fromCar?: boolean | null }[] = [],
+  newIds?: ReadonlySet<string>,
 ): (StraightenResult & { dropped: number }) | string {
   let current = draft
   let dropped = 0
   for (let round = 0; ; round++) {
     const view = current.viewpoints.find((v) => v.viewId === viewId)!
     const review = view.outlineReview
-    const found = new Set(Object.keys(review).filter((id) => review[id]?.newSpace && review[id]?.status === 'pending'))
+    const found = newIds
+      ? new Set([...newIds].filter((id) => review[id]?.status === 'pending'))
+      : new Set(Object.keys(review).filter((id) => review[id]?.newSpace && review[id]?.status === 'pending'))
     // The fit sees each space the lot had by the car outline on it, if any.
     const cars = new Set(found)
     const seen: Record<string, Outline> = { ...view.outlines }

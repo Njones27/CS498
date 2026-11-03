@@ -410,10 +410,12 @@ describe('wide stalls drawn as several spaces', () => {
     expect(mergeProposals(d, 'V1', photoRow()).wide.map((w) => w.spaceIds)).toEqual([['s3', 's4']])
   })
 
-  it('merging keeps the first space over both cells with the wide outline to review, and retires the other', () => {
+  it('merging keeps the first space over both cells with the wide outline to review, and retires published spaces', () => {
     const d = drawnEvenly()
+    d.basedOnVersion = 1
+    const published = new Set(d.spaces.map((sp) => sp.spaceId))
     const wide = findWideStalls(d, 'V1', photoRow())
-    const next = mergeWideStalls(d, 'V1', wide)
+    const next = mergeWideStalls(d, 'V1', wide, published)
     const kept = next.spaces.find((sp) => sp.spaceId === 's3')!
     expect(kept.rect).toEqual({ x: 170, y: 20, w: 100, h: 100 }) // C-04's and C-05's cells
     expect(next.spaces.find((sp) => sp.spaceId === 's4')!.retired).toBe(true)
@@ -422,6 +424,30 @@ describe('wide stalls drawn as several spaces', () => {
     expect(v1.outlineReview.s3).toEqual({ source: 'proposed', status: 'pending', evidence: 0.8 })
     expect(v1.outlines.s4).toBeUndefined()
     expect(next.spaces.filter((sp) => !sp.retired)).toHaveLength(5)
+  })
+
+  it('merging deletes never-published spaces instead of retiring them', () => {
+    const d = drawnEvenly() // basedOnVersion is null
+    const wide = findWideStalls(d, 'V1', photoRow())
+    const next = mergeWideStalls(d, 'V1', wide)
+    const kept = next.spaces.find((sp) => sp.spaceId === 's3')!
+    expect(kept.rect).toEqual({ x: 170, y: 20, w: 100, h: 100 })
+    expect(next.spaces.find((sp) => sp.spaceId === 's4')).toBeUndefined()
+    expect(next.spaces).toHaveLength(5)
+  })
+
+  it('does not falsely flag near-camera perspective stalls as wide', () => {
+    // In perspective, near-camera stalls have larger 2D area (e.g. 0.08x0.16 vs 0.04x0.08) but identical 0.5 aspect ratio
+    const stalls: ProposedStall[] = [
+      { polygon: box(0.1, 0.1, 0.08, 0.16), evidence: 0.8, row: 0, col: 0, mapRect: { x: 0, y: 0, w: 0.08, h: 0.16 }, partial: false },
+      { polygon: box(0.2, 0.1, 0.06, 0.12), evidence: 0.8, row: 0, col: 1, mapRect: { x: 0.08, y: 0, w: 0.06, h: 0.12 }, partial: false },
+      { polygon: box(0.3, 0.1, 0.04, 0.08), evidence: 0.8, row: 0, col: 2, mapRect: { x: 0.14, y: 0, w: 0.04, h: 0.08 }, partial: false },
+    ]
+    const d = emptyDraft()
+    d.spaces = [0, 1, 2].map((k) => space(`s${k}`, `A-0${k + 1}`, 20 + 50 * k, 20))
+    d.viewpoints[0].outlines = Object.fromEntries(d.spaces.map((sp, k) => [sp.spaceId, stalls[k].polygon as Outline]))
+    // Even though stall 0 has 4x the 2D area of stall 2, it is not a wide stall
+    expect(findWideStalls(d, 'V1', stalls)).toEqual([])
   })
 })
 
