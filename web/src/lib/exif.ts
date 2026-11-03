@@ -1,8 +1,7 @@
-import exifr from 'exifr'
-
 /** EXIF DateTimeOriginal, or null when the photo has none or cannot be parsed. */
 export async function readCaptureTime(file: Blob): Promise<Date | null> {
   try {
+    const exifr = (await import('exifr')).default
     const tags = (await exifr.parse(file, ['DateTimeOriginal'])) as
       | { DateTimeOriginal?: Date | string }
       | undefined

@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { Link, Outlet } from 'react-router-dom'
 import { AdminLotProvider, useAdminLot } from '../admin/AdminLotContext'
 import { LotPicker } from '../admin/LotPicker'
@@ -36,7 +37,9 @@ function Shell() {
         </div>
       </header>
       {/* Switching lots in the picker remounts the page, so pages that read the lot once reload. */}
-      <Outlet key={generation} />
+      <Suspense fallback={<main className="page"><p className="muted">Loading…</p></main>}>
+        <Outlet key={generation} />
+      </Suspense>
     </>
   )
 }
