@@ -16,7 +16,7 @@ import {
   type ProposedStall,
 } from './proposals'
 import { cellRect, fitGrid } from './schematic/grid'
-import { photoToSchematic } from './sync'
+import { afterRectChange, photoToSchematic, proposeOutlines } from './sync'
 import type { DraftLayout, DraftSpace, Outline, Point } from './types'
 
 const box = (x: number, y: number, w: number, h: number): Outline => [
@@ -195,11 +195,35 @@ describe('mergeProposals', () => {
     expect(rejected.spaces.map((s) => s.spaceId)).toContain('s5')
   })
 
-  it('accepted found stalls anchor the photo fit; pending ones do not', () => {
+  it('found stalls anchor the photo fit, reviewed or not; proposals made from the fit do not', () => {
     const { draft } = mergeProposals(emptyDraft(), 'V1', [stall(0, 0), stall(0, 1), stall(1, 0), stall(1, 1)])
-    expect(photoToSchematic(draft, draft.viewpoints[0])).toBeNull()
+    expect(photoToSchematic(draft, draft.viewpoints[0])).not.toBeNull()
     const accepted = acceptProposals(draft, 'V1', draft.spaces.map((s) => s.spaceId))
     expect(photoToSchematic(accepted, accepted.viewpoints[0])).not.toBeNull()
+    const v = draft.viewpoints[0]
+    const fromFit = Object.fromEntries(Object.keys(v.outlineReview).map((id) => [id, { source: 'proposed' as const, status: 'pending' as const }]))
+    const projected = { ...draft, viewpoints: [{ ...v, outlineReview: fromFit }, draft.viewpoints[1]] }
+    expect(photoToSchematic(projected, projected.viewpoints[0])).toBeNull()
+  })
+
+  it('right after Find stalls, moving a found stall on the schematic moves its photo outline instead of dropping it', () => {
+    const { draft } = mergeProposals(emptyDraft(), 'V1', [stall(0, 0), stall(0, 1), stall(0, 2), stall(1, 0), stall(1, 1), stall(1, 2)])
+    const last = draft.spaces.find((s) => s.label === 'A-03')!
+    const moved = { ...draft, spaces: draft.spaces.map((s) => (s === last ? { ...s, rect: { ...s.rect, x: s.rect.x + s.rect.w } } : s)) }
+    const v = afterRectChange(draft, moved, [last.spaceId]).draft.viewpoints[0]
+    expect(v.outlineReview[last.spaceId]).toMatchObject({ source: 'proposed', status: 'pending' })
+    const midX = (o: Outline) => o.reduce((t, p) => t + p[0], 0) / 4
+    expect(midX(v.outlines[last.spaceId])).toBeCloseTo(midX(draft.viewpoints[0].outlines[last.spaceId]) + 0.05, 3)
+  })
+
+  it('right after Find stalls, a space with a name of its own gets a proposed outline on the photo', () => {
+    const { draft } = mergeProposals(emptyDraft(), 'V1', [stall(0, 0), stall(0, 1), stall(1, 0), stall(1, 1)])
+    // "Gate" names no row or number, so only the photo fit can place it.
+    const b2 = draft.spaces.find((s) => s.label === 'B-02')!
+    const gate = { ...space('gate', 'Gate', 0, 0), rect: { ...b2.rect, x: b2.rect.x + b2.rect.w } }
+    const next = proposeOutlines({ ...draft, spaces: [...draft.spaces, gate] }, ['gate'])
+    expect(next.viewpoints[0].outlines.gate).toBeDefined()
+    expect(next.viewpoints[0].outlineReview.gate).toEqual({ source: 'proposed', status: 'pending' })
   })
 
   it('does nothing for an unknown view or no stalls', () => {
