@@ -154,15 +154,16 @@ const rectCenter = (r: DraftRect): Point => [r.x + r.w / 2, r.y + r.h / 2]
 
 /**
  * Outlines that stand as ground truth for the fit: drawn by an admin (or seeded) on active spaces, or
- * found on the photo by the layout proposer and accepted (they carry an evidence score; their map rect
- * was laid out from the photo). Proposals made from the fit itself are left out even once accepted:
- * they add nothing, and one pulled onto the photo edge would bend the map.
+ * found on the photo by the layout proposer (they carry an evidence score; their map rect was placed
+ * from the photo), reviewed or not: right after Find stalls they are all a new lot has, and the photo and
+ * the schematic must still follow each other. Proposals made from the fit itself are left out even once
+ * accepted: they add nothing, and one pulled onto the photo edge would bend the map.
  */
 function anchorOutlines(draft: DraftLayout, view: DraftViewpoint): [DraftSpace, Outline][] {
   return draft.spaces.flatMap((s): [DraftSpace, Outline][] => {
     const outline = view.outlines[s.spaceId]
     const review = view.outlineReview?.[s.spaceId]
-    const fromFit = review?.source === 'proposed' && (review.status === 'pending' || review.evidence == null)
+    const fromFit = review?.source === 'proposed' && review.evidence == null
     // A cut-off stall's outline is the part in view only: its middle is not the space's middle.
     if (s.retired || !outline || fromFit || cutByBorder(outline)) return []
     return [[s, outline]]
