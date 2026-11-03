@@ -60,7 +60,6 @@ jobs:
   worker-vision-image:
     name: Worker image with the vision extra
     runs-on: ubuntu-latest
-    needs: lint-test
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
@@ -120,11 +119,13 @@ jobs:
       # variables size torch's pool, and the worker sets torch/OpenCV threads from the quota.
       # --photo-long-edge 4032 (the default, spelled out) also times every lot at 12 MP size.
       # `timeout` stops a hang early enough for this step to still write the summary.
+      # PRs run 3 jobs per lot (12 timed runs) for fast feedback; main runs 10 (40 runs) for full benchmark.
       - name: NFR-1 worker timing (docker --cpus=2 --memory=4g, real models, p95 <= 30 s)
         timeout-minutes: 25
         run: |
           out="$RUNNER_TEMP/nfr1"; mkdir -p "$out"
           name="nfr1-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          jobs_per_lot="${{ github.event_name == 'pull_request' && '3' || '10' }}"
           set +e
           docker run --name "$name" --network none \
             --cpus=2 --cpuset-cpus=0,1 --memory=4g --memory-swap=4g \
@@ -132,7 +133,7 @@ jobs:
             -v "$PWD:/repo:ro" -v "$PWD/models:/app/models:ro" -v "$out:/out" \
             parking-worker:vision \
             timeout --kill-after=1m 20m \
-            python /repo/scripts/worker_timing.py --jobs-per-lot 10 --photo-long-edge 4032 \
+            python /repo/scripts/worker_timing.py --jobs-per-lot "$jobs_per_lot" --photo-long-edge 4032 \
               --json /out/nfr1.json --markdown /out/nfr1.md
           rc=$?
           set -e
@@ -153,7 +154,6 @@ jobs:
   compose:
     name: Compose stack end to end
     runs-on: ubuntu-latest
-    needs: lint-test
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
