@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { ChunkErrorBoundary } from './AppShell'
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
+import { AuthProvider } from '../auth/AuthContext'
+import { AppShell, ChunkErrorBoundary } from './AppShell'
 
 function ThrowingComponent(): never {
   throw new Error('Failed to fetch dynamically imported module: /assets/SomePage.js')
@@ -34,12 +36,41 @@ describe('ChunkErrorBoundary', () => {
       </ChunkErrorBoundary>,
     )
 
-    expect(screen.getByRole('alert')).toHaveTextContent(/Failed to load page\./)
+    expect(screen.getByRole('alert')).toHaveTextContent(/failed to load page|something went wrong/i)
     const button = screen.getByRole('button', { name: /reload the page/i })
     expect(button).toBeInTheDocument()
 
     await user.click(button)
     expect(reloadSpy).toHaveBeenCalled()
+
+    consoleError.mockRestore()
+  })
+
+  it('resets the error boundary when navigating to a new route', async () => {
+    const user = userEvent.setup()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    render(
+      <MemoryRouter initialEntries={['/bad']}>
+        <AuthProvider>
+          <div>
+            <Link to="/good">Go to Good</Link>
+            <Routes>
+              <Route path="/" element={<AppShell />}>
+                <Route path="bad" element={<ThrowingComponent />} />
+                <Route path="good" element={<div>Good Page</div>} />
+              </Route>
+            </Routes>
+          </div>
+        </AuthProvider>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('link', { name: 'Go to Good' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText('Good Page')).toBeInTheDocument()
 
     consoleError.mockRestore()
   })

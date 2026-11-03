@@ -2,7 +2,7 @@
 export async function readCaptureTime(file: Blob): Promise<Date | null> {
   try {
     const exifr = (await import('exifr/dist/lite.esm.mjs')).default
-    const tags = (await exifr.parse(file, ['DateTimeOriginal'])) as
+    const tags = (await exifr.parse(file)) as
       | { DateTimeOriginal?: Date | string }
       | undefined
     const v = tags?.DateTimeOriginal
