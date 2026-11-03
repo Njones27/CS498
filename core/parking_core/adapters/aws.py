@@ -54,6 +54,7 @@ from ..settings import Adapters, Settings
 TYPE_ATTR = "entityType"
 TTL_ATTR = "expiresAt"
 _KEY_ATTRS = {k.PK, k.SK, k.GSI1PK, k.GSI1SK, TYPE_ATTR, TTL_ATTR}
+LAYOUT_CACHE_SIZE = 128  # Maximum number of published layout snapshots cached in memory
 
 
 # --- item (de)serialization ---------------------------------------------------
@@ -481,6 +482,9 @@ class DynamoRepository:
             raise
 
     def get_published_layout(self, lot_id: str) -> PublishedLayout | None:
+        # Note: Returned PublishedLayout instances are cached in-memory and shared across
+        # callers in this process. Callers must never mutate them or their child objects in place
+        # (use model_copy or copy instead).
         lot = self.get_lot(lot_id)
         if lot is None or lot.current_layout_version is None:
             return None
@@ -496,7 +500,7 @@ class DynamoRepository:
         except KeyError as exc:
             raise NotPublishedError(f"layout snapshot missing: {key}") from exc
         loaded = PublishedLayout.model_validate_json(raw)
-        if len(self._layout_cache) >= 128:
+        if len(self._layout_cache) >= LAYOUT_CACHE_SIZE:
             self._layout_cache.clear()
         self._layout_cache[cache_key] = loaded
         return loaded
