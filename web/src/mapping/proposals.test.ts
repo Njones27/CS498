@@ -7,6 +7,7 @@ import {
   insidePolygon,
   mergeProposals,
   NEEDS_ANCHORS,
+  normalizedStallWidth,
   pendingProposals,
   touchesPhotoEdge,
   rejectProposals,
@@ -448,6 +449,55 @@ describe('wide stalls drawn as several spaces', () => {
     d.viewpoints[0].outlines = Object.fromEntries(d.spaces.map((sp, k) => [sp.spaceId, stalls[k].polygon as Outline]))
     // Even though stall 0 has 4x the 2D area of stall 2, it is not a wide stall
     expect(findWideStalls(d, 'V1', stalls)).toEqual([])
+  })
+
+  it('flags a quadruple-width bay (4x2) in a row of normal 1x2 stalls', () => {
+    // Normal stalls are 0.05 wide x 0.1 deep (ratio 0.5); the wide bay is 0.20 wide x 0.1 deep (ratio 2.0)
+    const stalls: ProposedStall[] = [
+      { polygon: box(0.10, 0.1, 0.05, 0.1), evidence: 0.8, row: 0, col: 0, mapRect: { x: 0, y: 0, w: 0.05, h: 0.1 }, partial: false },
+      { polygon: box(0.15, 0.1, 0.05, 0.1), evidence: 0.8, row: 0, col: 1, mapRect: { x: 0.05, y: 0, w: 0.05, h: 0.1 }, partial: false },
+      { polygon: box(0.20, 0.1, 0.20, 0.1), evidence: 0.8, row: 0, col: 2, mapRect: { x: 0.10, y: 0, w: 0.20, h: 0.1 }, partial: false },
+      { polygon: box(0.40, 0.1, 0.05, 0.1), evidence: 0.8, row: 0, col: 3, mapRect: { x: 0.30, y: 0, w: 0.05, h: 0.1 }, partial: false },
+    ]
+    const d = emptyDraft()
+    // The lot drew the 4x2 bay as four separate spaces: s2, s3, s4, s5
+    d.spaces = [
+      space('s0', 'A-01', 20, 20),
+      space('s1', 'A-02', 70, 20),
+      space('s2', 'A-03', 120, 20),
+      space('s3', 'A-04', 170, 20),
+      space('s4', 'A-05', 220, 20),
+      space('s5', 'A-06', 270, 20),
+      space('s6', 'A-07', 320, 20),
+    ]
+    d.viewpoints[0].outlines = {
+      s0: box(0.10, 0.1, 0.05, 0.1),
+      s1: box(0.15, 0.1, 0.05, 0.1),
+      s2: box(0.20, 0.1, 0.05, 0.1),
+      s3: box(0.25, 0.1, 0.05, 0.1),
+      s4: box(0.30, 0.1, 0.05, 0.1),
+      s5: box(0.35, 0.1, 0.05, 0.1),
+      s6: box(0.40, 0.1, 0.05, 0.1),
+    }
+
+    const wide = findWideStalls(d, 'V1', stalls)
+    expect(wide).toHaveLength(1)
+    expect(wide[0].stall.col).toBe(2)
+    expect(wide[0].spaceIds).toEqual(['s2', 's3', 's4', 's5'])
+  })
+
+  it('normalizedStallWidth measures non-4-sided outlines as a width/depth ratio rather than raw area', () => {
+    // 5-sided polygon: 0.05 wide, 0.1 deep with a clipped corner
+    const pentagon: Point[] = [
+      [0.1, 0.1],
+      [0.14, 0.1],
+      [0.15, 0.12],
+      [0.15, 0.2],
+      [0.1, 0.2],
+    ]
+    const ratio = normalizedStallWidth(pentagon, [1, 0])
+    // Width is 0.05 (0.10 to 0.15), depth is 0.1 (0.10 to 0.20), ratio = 0.5
+    expect(ratio).toBeCloseTo(0.5, 2)
   })
 })
 

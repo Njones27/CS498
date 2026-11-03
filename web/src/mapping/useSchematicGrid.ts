@@ -91,11 +91,39 @@ export function layoutSignature(draft: DraftLayout): string {
 
 function recordGrid(history: Map<string, Grid>, sig: string, grid: Grid): Map<string, Grid> {
   const next = new Map(history)
-  if (next.size >= 50) {
+  if (next.has(sig)) {
+    next.delete(sig)
+  } else if (next.size >= 50) {
     const firstKey = next.keys().next().value
     if (firstKey !== undefined) next.delete(firstKey)
   }
   next.set(sig, grid)
+  return next
+}
+
+function applySizesToGrid(g: Grid, sizes: Partial<GridSizes>): Grid {
+  const currentSizes = gridSizes(g)
+  const nextSizes = { ...currentSizes, ...sizes }
+  const gapX = nextSizes.gapX
+  const gapY = nextSizes.gapY
+  const boxW = nextSizes.boxW
+  const boxH = nextSizes.boxH
+  const cellW = boxW + gapX
+  const cellH = boxH + gapY
+  return {
+    ...g,
+    boxW,
+    boxH,
+    cellW,
+    cellH,
+  }
+}
+
+function updateHistorySizes(history: Map<string, Grid>, sizes: Partial<GridSizes>): Map<string, Grid> {
+  const next = new Map<string, Grid>()
+  for (const [sig, g] of history) {
+    next.set(sig, applySizesToGrid(g, sizes))
+  }
   return next
 }
 
@@ -136,8 +164,7 @@ export function useSchematicGrid(lotId: string, draft: DraftLayout | null): Grid
     } else {
       const shift = uniformShift(state.seen, draft)
       const nextGrid = shift ? shiftGrid(state.grid, shift.dx, shift.dy) : state.grid
-      const history = recordGrid(state.history, sig, nextGrid)
-      setState({ ...state, seen: draft, grid: nextGrid, history })
+      setState({ ...state, seen: draft, grid: nextGrid })
     }
   }
   if (!draft || !state || state.key !== baseKey) return null
@@ -156,20 +183,22 @@ export function useSchematicGrid(lotId: string, draft: DraftLayout | null): Grid
       const next = { ...gridSizes(state.grid), ...current.sizes, ...sizes }
       update({ ...current, sizes: next })
       const newGrid = fitGrid(draft.spaces, next)
-      const history = recordGrid(state.history, layoutSignature(draft), newGrid)
-      setState({ ...state, grid: newGrid, history })
+      const history = updateHistorySizes(state.history, next)
+      setState({ ...state, seen: draft, grid: newGrid, history })
     },
     fitTo: (space) => {
       if (!space) {
         update({ ...current, sizes: {} })
         const newGrid = fitGrid(draft.spaces)
-        const history = recordGrid(state.history, layoutSignature(draft), newGrid)
-        return setState({ ...state, grid: newGrid, history })
+        const sizes = gridSizes(newGrid)
+        const history = updateHistorySizes(state.history, sizes)
+        return setState({ ...state, seen: draft, grid: newGrid, history })
       }
       const grid = anchorGrid(state.grid, space.rect, space.label)
-      update({ ...current, sizes: gridSizes(grid) })
-      const history = recordGrid(state.history, layoutSignature(draft), grid)
-      setState({ ...state, grid, history })
+      const sizes = gridSizes(grid)
+      update({ ...current, sizes })
+      const history = updateHistorySizes(state.history, sizes)
+      setState({ ...state, seen: draft, grid, history })
     },
     shiftBy: (next, dx, dy) => {
       const shifted = shiftGrid(state.grid, dx, dy)

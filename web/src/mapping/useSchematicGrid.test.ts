@@ -82,4 +82,17 @@ describe('useSchematicGrid', () => {
     rerender({ d: straightened })
     expect(result.current!.grid).toEqual(straightenedGrid)
   })
+
+  it('undo of a space move keeps a grid size change made afterwards', () => {
+    localStorage.clear()
+    const a = davidFixture()
+    const { result, rerender } = renderHook(({ d }) => useSchematicGrid('lot-x', d), { initialProps: { d: a } })
+    const b = { ...a, spaces: a.spaces.map((s, i) => (i === 0 ? { ...s, rect: { ...s.rect, x: s.rect.x + 7 } } : s)) }
+    rerender({ d: b }) // move a space
+    const before = gridSizes(result.current!.grid)
+    act(() => result.current!.setSizes({ boxW: before.boxW + 20 })) // widen the grid
+    rerender({ d: b })
+    rerender({ d: a }) // undo the move
+    expect(gridSizes(result.current!.grid).boxW).toBe(before.boxW + 20)
+  })
 })

@@ -790,4 +790,32 @@ describe('orienting the map', () => {
     const dot3 = screen.getByTestId('coverage-A-03')
     expect(dot3).toHaveClass('schematic-space__coverage--unmapped')
   })
+
+  it('distinguishes pending proposals from accepted outlines in viewpoint coverage indicators', () => {
+    const draft = davidFixture()
+    draft.viewpoints = [
+      {
+        viewId: 'V1',
+        name: 'View 1',
+        referenceImage: null,
+        outlines: {
+          'A-01': [[0.1, 0.1], [0.2, 0.1], [0.2, 0.2], [0.1, 0.2]],
+          'A-02': [[0.2, 0.1], [0.3, 0.1], [0.3, 0.2], [0.2, 0.2]],
+        },
+        outlineReview: {
+          'A-02': { source: 'proposed', status: 'pending' },
+        },
+      },
+    ]
+
+    setup({ draft, photoViewId: 'V1' })
+
+    const dot1 = screen.getByTestId('coverage-A-01')
+    expect(dot1).toHaveClass('schematic-space__coverage--in-view')
+
+    const dot2 = screen.getByTestId('coverage-A-02')
+    expect(dot2).toHaveClass('schematic-space__coverage--pending')
+    expect(dot2).not.toHaveClass('schematic-space__coverage--in-view')
+    expect(screen.getByLabelText(/A-02.*Proposed outline pending review/i)).toBeInTheDocument()
+  })
 })
