@@ -119,7 +119,8 @@ jobs:
       # variables size torch's pool, and the worker sets torch/OpenCV threads from the quota.
       # --photo-long-edge 4032 (the default, spelled out) also times every lot at 12 MP size.
       # `timeout` stops a hang early enough for this step to still write the summary.
-      # PRs run 3 jobs per lot (12 timed runs) for fast feedback; main runs 10 (40 runs) for full benchmark.
+      # PRs run 3 jobs per lot (12 timed runs) for fast feedback; main runs 10 (40 runs) for the full benchmark.
+      # With 12 runs the p95 is close to the slowest single job, so the PR gate is stricter on outliers than main's.
       - name: NFR-1 worker timing (docker --cpus=2 --memory=4g, real models, p95 <= 30 s)
         timeout-minutes: 25
         run: |

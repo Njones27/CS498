@@ -29,10 +29,10 @@ after download; a mismatch is deleted and reported.
 ## NFR-1 timing (2 CPU / 4 GB)
 
 `scripts/worker_timing.py` seeds `drone-lot` (124 stalls) and `pklot-ufpr04` (27) in memory,
-runs 10 jobs per lot and photo size through the real worker path (photo fetch, ORB alignment,
-ACPDS + YOLO26m, status writes) and reports p50/p95 per job, with model load and one warm-up
-job per lot shown apart. It exits 1 when p95 is over 30 s (`--limit-s`) and 2 when the run
-itself failed (an import, missing weights, a job that did not complete).
+runs 3 jobs per lot and photo size on pull requests and 10 on pushes to `main` (the script's own default is 10)
+through the real worker path (photo fetch, ORB alignment, ACPDS + YOLO26m, status writes) and reports p50/p95
+per job, with model load and one warm-up job per lot shown apart. It exits 1 when p95 is over 30 s (`--limit-s`)
+and 2 when the run itself failed (an import, missing weights, a job that did not complete).
 
 What is gated, so the number is not flattering:
 
