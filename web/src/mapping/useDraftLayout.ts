@@ -325,9 +325,10 @@ export function useDraftLayout(lotId: string, options?: UseDraftLayoutOptions): 
       return newPhotoView ? forgetRejected(withRefs, newPhotoView) : withRefs
     }
     const hadRejected = (local.viewpoints.find((v) => v.viewId === newPhotoView)?.rejectedStalls?.length ?? 0) > 0
-    if (hadRejected && inFlight.current) {
-      // A save in flight carries the old photo's rejected stalls and may land after the server
-      // cleared them: count the clearing as an edit, so one more save sends it.
+    if (hadRejected) {
+      // The server cleared them with the new photo, but a save carrying the old list may have
+      // landed after that (or still be on its way): count the clearing as an edit, so one more
+      // save sends it.
       editsRef.current += 1
       setDirtyTracked(true)
     }

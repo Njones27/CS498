@@ -247,6 +247,7 @@ describe('useDraftLayout', () => {
     const views = () => hook.result.current.draft!.viewpoints
     expect(views()[1].rejectedStalls).toEqual([])
     expect(views()[0].rejectedStalls).toHaveLength(1) // another view's photo didn't change
+    expect(hook.result.current.dirty).toBe(true) // one more save makes sure the server has it too
     act(() => hook.result.current.undo())
     expect(views()[1].rejectedStalls).toEqual([])
   })
