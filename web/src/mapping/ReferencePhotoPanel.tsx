@@ -116,6 +116,20 @@ function useTransientNotice(ms: number) {
   return [notice, setNotice] as const
 }
 
+/**
+ * Whether the admin has mapped this lot already: it was published, or it has a space that isn't a
+ * new stall Find stalls proposed and nobody has reviewed yet.
+ */
+function isMapped(draft: DraftLayout): boolean {
+  if (draft.basedOnVersion !== null) return true
+  const unreviewed = (id: string) =>
+    draft.viewpoints.some((v) => {
+      const review = v.outlineReview?.[id]
+      return review?.newSpace === true && review.status === 'pending'
+    })
+  return draft.spaces.some((sp) => !sp.retired && !unreviewed(sp.spaceId))
+}
+
 export function ReferencePhotoPanel({
   lotId,
   draft,
@@ -752,31 +766,47 @@ export function ReferencePhotoPanel({
   // proposed outlines, saved at once like any outline edit.
   // Wide stalls on the photo the lot has drawn as several spaces, found by the last Find stalls.
   const [wide, setWide] = useState<{ viewId: string; stalls: WideStall[] } | null>(null)
+  // Stalls found from parked cars on a lot the admin has already mapped: laying the lot out from them
+  // moves and renames every space, so it waits for the admin to ask.
+  const [fromCars, setFromCars] = useState<{ viewId: string; stalls: ProposedStall[]; cars: number } | null>(null)
+  /**
+   * A photo taken at an angle: lay the lot out from the parked cars and the spaces it has, all on the
+   * ground (rows levelled, their lean, the empty stalls between cars), so the map matches the photo;
+   * cars standing off the rows are left out. False when it can't be done.
+   */
+  const layOutFromCars = (base: DraftLayout, viewId: string, stalls: ProposedStall[], cars: number): boolean => {
+    // The paint next to the cars lies on the ground, so it tells how far the stalls lean.
+    const straight = straightenFoundCars(base, viewId, stalls.flatMap((s) => s.paint ?? []), stalls as { polygon: Point[]; fromCar?: boolean | null }[])
+    if (typeof straight === 'string') {
+      setStatusNotice(straight)
+      return false
+    }
+    onRelaid?.(straight.draft)
+    commitOutlines(straight.draft)
+    const kept = cars - straight.dropped
+    const parts = [
+      `Found ${kept} parked ${kept === 1 ? 'car' : 'cars'} in ${viewId} and laid the lot out from above in ${straight.rows} ${straight.rows === 1 ? 'row' : 'rows'}`,
+      straight.found ? `${straight.found} empty ${straight.found === 1 ? 'stall' : 'stalls'} between them` : '',
+      straight.dropped ? `${straight.dropped} ${straight.dropped === 1 ? 'car' : 'cars'} off the rows left out` : '',
+    ].filter(Boolean)
+    setStatusNotice(`${parts.join('; ')}. Review them, weakest first.`)
+    return true
+  }
   const handleStalls = (viewId: string, stalls: ProposedStall[]) => {
     const merged = mergeProposals(draft, viewId, stalls, grid ?? null)
     setWide(merged.wide.length > 0 ? { viewId, stalls: merged.wide } : null)
+    setFromCars(null)
     if (merged.blocked) {
       setDrawError(merged.blocked)
       return
     }
-    // A photo taken at an angle: the stalls came from parked cars, so the lot is laid out from them
-    // and the spaces it has, all on the ground (rows levelled, their lean, the empty stalls between
-    // cars), so the map matches the photo; cars standing off the rows are left out.
-    const fromCars = stalls.filter((s) => s.fromCar).length > stalls.length / 2
-    if (fromCars && merged.added > 0) {
-      // The paint next to the cars lies on the ground, so it tells how far the stalls lean.
-      const straight = straightenFoundCars(merged.draft, viewId, stalls.flatMap((s) => s.paint ?? []), stalls as { polygon: Point[]; fromCar?: boolean | null }[])
-      if (typeof straight !== 'string') {
-        onRelaid?.(straight.draft)
-        commitOutlines(straight.draft)
-        const cars = merged.added - straight.dropped
-        const parts = [
-          `Found ${cars} parked ${cars === 1 ? 'car' : 'cars'} in ${viewId} and laid the lot out from above in ${straight.rows} ${straight.rows === 1 ? 'row' : 'rows'}`,
-          straight.found ? `${straight.found} empty ${straight.found === 1 ? 'stall' : 'stalls'} between them` : '',
-          straight.dropped ? `${straight.dropped} ${straight.dropped === 1 ? 'car' : 'cars'} off the rows left out` : '',
-        ].filter(Boolean)
-        setStatusNotice(`${parts.join('; ')}. Review them, weakest first.`)
-        return
+    const carStalls = stalls.filter((s) => s.fromCar).length > stalls.length / 2
+    if (carStalls && merged.added > 0) {
+      // A new lot is laid out at once; a mapped one gets the stalls as proposals and a button.
+      if (!isMapped(draft)) {
+        if (layOutFromCars(merged.draft, viewId, stalls, merged.added)) return
+      } else {
+        setFromCars({ viewId, stalls, cars: merged.added })
       }
     }
     const proposed = merged.added + merged.attached
@@ -873,6 +903,27 @@ export function ReferencePhotoPanel({
           )}
           <button type="button" className="button button--ghost button--sm" onClick={() => onSelectSpaces?.(NO_IDS)}>
             Clear selection
+          </button>
+        </div>
+      )}
+      {fromCars && (
+        <div className="notice" role="status" data-testid="lay-out-from-cars">
+          <span>
+            These stalls came from parked cars on a photo taken at an angle. Laying the lot out from them moves and
+            renames every space to match the photo (Undo takes it back).
+          </span>{' '}
+          <button
+            type="button"
+            className="button button--sm"
+            onClick={() => {
+              layOutFromCars(draft, fromCars.viewId, fromCars.stalls, fromCars.cars)
+              setFromCars(null)
+            }}
+          >
+            Lay out the lot from the cars
+          </button>{' '}
+          <button type="button" className="button button--sm" onClick={() => setFromCars(null)}>
+            Keep my layout
           </button>
         </div>
       )}
