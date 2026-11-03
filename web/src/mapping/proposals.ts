@@ -39,6 +39,20 @@ function alreadyOutlined(view: DraftViewpoint, stall: Outline): boolean {
   return Object.values(view.outlines).some((o) => insidePolygon(mid, o) || insidePolygon(centroid(o), stall))
 }
 
+/** Rejected stalls kept per viewpoint; the oldest go first (the API takes at most this many). */
+export const MAX_REJECTED = 1000
+
+/** A found stall is one the admin rejected when most of it, or of the rejected outline, overlaps. */
+const REJECTED_OVERLAP = 0.5
+
+function wasRejected(view: DraftViewpoint, stall: Outline): boolean {
+  const a = area(stall)
+  return (view.rejectedStalls ?? []).some((r) => {
+    const shared = area(clipPolygon(stall, r as Point[]))
+    return shared >= REJECTED_OVERLAP * Math.min(a, area(r as Point[]))
+  })
+}
+
 /** Rows back to back on the photo are at most this share of a stall's depth apart; further is an aisle. */
 const BACK_TO_BACK = 0.5
 
@@ -94,6 +108,8 @@ export interface MergeResult extends Grown {
   attached: number
   /** Stalls left out: already outlined in this view, or not placeable on the map. */
   skipped: number
+  /** Stalls left out because the admin rejected them on an earlier run (see `rejectProposals`). */
+  rejected: number
   /** Set when nothing was merged because the stalls cannot be matched to the lot's spaces. */
   blocked?: string
   /** Wide stalls the lot has drawn as more than one space (see `findWideStalls`). */
@@ -370,16 +386,19 @@ export function mergeProposals(
   grid: Grid | null = null,
 ): MergeResult {
   const wide = findWideStalls(draft, viewId, stalls)
-  const none = { draft, dx: 0, dy: 0, added: 0, attached: 0, wide }
+  const none = { draft, dx: 0, dy: 0, added: 0, attached: 0, rejected: 0, wide }
   const view = draft.viewpoints.find((v) => v.viewId === viewId)
   if (!view) return { ...none, skipped: stalls.length }
-  const fresh = stalls.filter((s) => !alreadyOutlined(view, s.polygon as Outline))
-  const skipped = stalls.length - fresh.length
-  if (fresh.length === 0) return { ...none, skipped }
+  const open = stalls.filter((s) => !alreadyOutlined(view, s.polygon as Outline))
+  const skipped = stalls.length - open.length
+  // Stalls the admin rejected on an earlier run stay rejected.
+  const fresh = open.filter((s) => !wasRejected(view, s.polygon as Outline))
+  const rejected = open.length - fresh.length
+  if (fresh.length === 0) return { ...none, skipped, rejected }
 
   const unmatched = draft.spaces.filter((sp) => !sp.retired && !view.outlines[sp.spaceId])
   const fit = photoToSchematic(draft, view)
-  if (!fit && unmatched.length > 0) return { ...none, skipped, blocked: NEEDS_ANCHORS }
+  if (!fit && unmatched.length > 0) return { ...none, skipped, rejected, blocked: NEEDS_ANCHORS }
 
   // Which space each stall's outline goes to; `created` marks spaces made for a stall.
   const found = new Map<string, ProposedStall>()
@@ -440,7 +459,7 @@ export function mergeProposals(
   // laid out as wide as the photo shows them.
   next = leanLikeRows(next, created)
   next = alignRowsToPhoto(next, viewId)
-  return { draft: next, dx, dy, added: created.size, attached: found.size - created.size, skipped, wide, createdIds: created }
+  return { draft: next, dx, dy, added: created.size, attached: found.size - created.size, skipped, rejected, wide, createdIds: created }
 }
 
 /** The view's outlines still waiting for review, weakest evidence first (those without a score last). */
@@ -493,6 +512,11 @@ export function rejectProposals(
 ): { draft: DraftLayout; removedSpaces: number } {
   const view = draft.viewpoints.find((v) => v.viewId === viewId)
   if (!view) return { draft, removedSpaces: 0 }
+  // Find stalls skips these from now on, so a rejected stall doesn't come back on the next run.
+  const rejected = spaceIds
+    .filter((id) => view.outlineReview?.[id]?.source === 'proposed' && view.outlineReview[id].status === 'pending')
+    .map((id) => view.outlines[id])
+    .filter((o): o is Outline => o !== undefined)
   let next = draft
   let removedSpaces = 0
   for (const id of spaceIds) {
@@ -513,7 +537,23 @@ export function rejectProposals(
       }),
     }
   }
+  if (rejected.length > 0) {
+    next = {
+      ...next,
+      viewpoints: next.viewpoints.map((v) =>
+        v.viewId === viewId ? { ...v, rejectedStalls: [...(v.rejectedStalls ?? []), ...rejected].slice(-MAX_REJECTED) } : v,
+      ),
+    }
+  }
   return { draft: next, removedSpaces }
+}
+
+/** Forget the stalls rejected in a view, so Find stalls proposes them again. */
+export function forgetRejected(draft: DraftLayout, viewId: string): DraftLayout {
+  return {
+    ...draft,
+    viewpoints: draft.viewpoints.map((v) => (v.viewId === viewId ? { ...v, rejectedStalls: [] } : v)),
+  }
 }
 
 export { touchesPhotoEdge }

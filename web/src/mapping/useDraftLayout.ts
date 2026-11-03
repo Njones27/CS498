@@ -56,11 +56,12 @@ export function toDraftUpdate(draft: DraftLayout): DraftLayoutUpdate {
     revision: draft.revision,
     schematic: draft.schematic,
     spaces: draft.spaces,
-    viewpoints: draft.viewpoints.map(({ viewId, name, outlines, outlineReview }) => ({
+    viewpoints: draft.viewpoints.map(({ viewId, name, outlines, outlineReview, rejectedStalls }) => ({
       viewId,
       name,
       outlines,
       outlineReview,
+      rejectedStalls: rejectedStalls ?? [],
     })),
   }
 }

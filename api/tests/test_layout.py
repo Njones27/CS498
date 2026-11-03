@@ -159,6 +159,24 @@ def test_draft_survives_reload(app, client, admin_headers, settings, clock):
     assert reloaded["schematic"] == {"width": 1200, "height": 650}
 
 
+def test_rejected_stalls_survive_reload_and_publish(adapters, client, admin_headers):
+    """Find stalls skips stalls an admin rejected; the list lives with the viewpoint, so it
+    outlasts a reload and a publish, and viewpoints without any store as before."""
+    assert view(get_draft(client, admin_headers), "V1")["rejectedStalls"] == []
+    body = as_body(get_draft(client, admin_headers))
+    view(body, "V1")["rejectedStalls"] = [C01_OUTLINE]
+    r = put(client, admin_headers, body)
+    assert r.status_code == 200, r.text
+    assert view(get_draft(client, admin_headers), "V1")["rejectedStalls"] == [C01_OUTLINE]
+
+    publish_ok(client, admin_headers)
+    layout = adapters.repository.get_published_layout("test-lot")
+    assert layout is not None
+    assert layout.viewpoint("V1").rejected_stalls == [[tuple(p) for p in C01_OUTLINE]]
+    assert '"rejectedStalls"' not in layout.viewpoint("V2").model_dump_json()
+    assert view(get_draft(client, admin_headers), "V1")["rejectedStalls"] == [C01_OUTLINE]
+
+
 def test_stale_revision_returns_409(client, admin_headers):
     base = as_body(get_draft(client, admin_headers))
     first = copy.deepcopy(base)
@@ -295,6 +313,7 @@ def test_new_viewpoint_is_added(client, admin_headers):
         "referenceImage": None,
         "outlines": {},
         "outlineReview": {},
+        "rejectedStalls": [],
     }
 
 

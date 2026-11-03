@@ -156,6 +156,10 @@ class Viewpoint(CamelModel):
     camera_angle_deg: float | None = None
     outline_review: dict[str, OutlineReview] = Field(default_factory=dict)
     """spaceId -> review state of that outline; optional per outline."""
+    rejected_stalls: list[Polygon] = Field(default_factory=list, exclude_if=lambda v: not v)
+    """Stalls an admin rejected when Find stalls proposed them, as their outlines on the reference
+    image, so a later Find stalls doesn't propose them again. Left out when empty, so viewpoints
+    without any store and serialize as before."""
 
 
 class PublishedLayout(CamelModel):

@@ -720,6 +720,14 @@ export interface components {
             };
             /** @description Null until a reference photo is uploaded */
             referenceImage: components["schemas"]["ReferenceImageOut"] | null;
+            /**
+             * Rejectedstalls
+             * @description Stalls an admin rejected when Find stalls proposed them; it skips them
+             */
+            rejectedStalls?: [
+                number,
+                number
+            ][][];
             /** Viewid */
             viewId: string;
         };
@@ -741,6 +749,11 @@ export interface components {
                     number
                 ][];
             };
+            /** Rejectedstalls */
+            rejectedStalls?: [
+                number,
+                number
+            ][][];
             /** Viewid */
             viewId: string;
         };

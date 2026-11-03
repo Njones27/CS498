@@ -635,6 +635,30 @@
             ],
             "description": "Null until a reference photo is uploaded"
           },
+          "rejectedStalls": {
+            "description": "Stalls an admin rejected when Find stalls proposed them; it skips them",
+            "items": {
+              "description": "Four corners as fractions of the photo (0..1), clockwise",
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            },
+            "title": "Rejectedstalls",
+            "type": "array"
+          },
           "viewId": {
             "title": "Viewid",
             "type": "string"
@@ -686,6 +710,30 @@
             },
             "title": "Outlines",
             "type": "object"
+          },
+          "rejectedStalls": {
+            "items": {
+              "description": "Four corners as fractions of the photo (0..1), clockwise",
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            },
+            "maxItems": 1000,
+            "title": "Rejectedstalls",
+            "type": "array"
           },
           "viewId": {
             "minLength": 1,

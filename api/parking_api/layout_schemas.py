@@ -24,6 +24,8 @@ Outline = Annotated[
         description="Four corners as fractions of the photo (0..1), clockwise",
     ),
 ]
+MAX_REJECTED_STALLS = 1000
+"""Per viewpoint; the editor keeps the latest this many (web/src/mapping/proposals.ts)."""
 
 
 class DraftSchematic(CamelModel):
@@ -104,6 +106,10 @@ class DraftViewpoint(CamelModel):
     )
     outlines: dict[str, Outline] = Field(description="spaceId -> outline on the reference photo")
     outline_review: dict[str, OutlineReviewOut]
+    rejected_stalls: list[Outline] = Field(
+        default_factory=list,
+        description="Stalls an admin rejected when Find stalls proposed them; it skips them",
+    )
 
 
 class DraftLayout(CamelModel):
@@ -126,6 +132,7 @@ class DraftViewpointIn(CamelModel):
     name: str
     outlines: dict[str, Outline] = Field(default_factory=dict)
     outline_review: dict[str, OutlineReviewOut] = Field(default_factory=dict)
+    rejected_stalls: list[Outline] = Field(default_factory=list, max_length=MAX_REJECTED_STALLS)
 
 
 class DraftLayoutUpdate(CamelModel):

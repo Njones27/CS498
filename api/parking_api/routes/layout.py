@@ -101,6 +101,7 @@ def _viewpoint_out(v: Viewpoint, store: ObjectStore) -> DraftViewpoint:
             )
             for sid, r in v.outline_review.items()
         },
+        rejected_stalls=[list(poly) for poly in v.rejected_stalls],
     )
 
 
@@ -214,6 +215,7 @@ def put_draft(
                 )
                 for sid, r in v.outline_review.items()
             },
+            "rejected_stalls": v.rejected_stalls,
         }
         # Write only what the body carries. The reference image fields (set only by the reference
         # photo endpoints, possibly while this save runs) and the camera fields stay as stored.

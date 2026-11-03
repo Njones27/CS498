@@ -672,6 +672,33 @@ describe('ReferencePhotoPanel (US-08)', () => {
     }
   })
 
+  it('leaves out a stall rejected before, and proposes it again when asked', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const fetchMock = mockFetch({
+        'POST /admin/lots/test-lot/views/V1/proposals': { status: 202, body: { ...RUN, status: 'QUEUED' } },
+        'GET /admin/lots/test-lot/views/V1/proposals': { body: { ...RUN, status: 'COMPLETE', stalls: [STALL] } },
+      })
+      const draft = outlinedDraft()
+      draft.viewpoints.find((v) => v.viewId === 'V1')!.rejectedStalls = [STALL.polygon as Outline]
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { onChange } = renderPanel({ draft, viewId: 'V1' })
+      await user.click(screen.getByTestId('find-stalls-btn'))
+      await pollUntil(() => expect(screen.getByTestId('rejected-skipped')).toHaveTextContent('Left out 1 stall you rejected before.'))
+      expect(onChange).not.toHaveBeenCalled()
+      expect(screen.getByText(/No new stalls found in V1 \(1 you rejected before\)/)).toBeInTheDocument()
+
+      const posts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST').length
+      await user.click(screen.getByRole('button', { name: 'Propose them again' }))
+      const forgotten: DraftLayout = onChange.mock.calls[0][0]
+      expect(forgotten.viewpoints.find((v) => v.viewId === 'V1')!.rejectedStalls).toEqual([])
+      expect(screen.queryByTestId('rejected-skipped')).not.toBeInTheDocument()
+      await vi.waitFor(() => expect(posts()).toBe(2)) // and Find stalls runs again
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('says why finding stalls failed', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {

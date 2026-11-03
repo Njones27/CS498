@@ -60,6 +60,7 @@ describe('toDraftUpdate', () => {
       name: 'North corner',
       outlines: draftFixture().viewpoints[0].outlines,
       outlineReview: { 'A-01': { source: 'drawn', status: 'accepted' } },
+      rejectedStalls: [],
     })
   })
 })
