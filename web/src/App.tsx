@@ -1,19 +1,23 @@
+import { lazy } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { RequireAdmin } from './auth/RequireAdmin'
 import { AppShell } from './components/AppShell'
-import { LotMappingPage } from './mapping/LotMappingPage'
-import { VersionsPage } from './mapping/VersionsPage'
 import { AdminHomePage } from './pages/AdminHomePage'
-import { ClosuresPage } from './pages/ClosuresPage'
 import { LotListPage } from './pages/LotListPage'
 import { LotMapPage } from './pages/LotMapPage'
-import { NewLotPage } from './pages/NewLotPage'
-import { OverridesPage } from './pages/OverridesPage'
 import { SignInPage } from './pages/SignInPage'
-import { SnapshotPhotoPage } from './pages/SnapshotPhotoPage'
-import { SnapshotsPage } from './pages/SnapshotsPage'
-import { UploadPage } from './pages/UploadPage'
+
+const LotMappingPage = lazy(() => import('./mapping/LotMappingPage').then((m) => ({ default: m.LotMappingPage })))
+const VersionsPage = lazy(() => import('./mapping/VersionsPage').then((m) => ({ default: m.VersionsPage })))
+const ClosuresPage = lazy(() => import('./pages/ClosuresPage').then((m) => ({ default: m.ClosuresPage })))
+const NewLotPage = lazy(() => import('./pages/NewLotPage').then((m) => ({ default: m.NewLotPage })))
+const OverridesPage = lazy(() => import('./pages/OverridesPage').then((m) => ({ default: m.OverridesPage })))
+const SnapshotPhotoPage = lazy(() =>
+  import('./pages/SnapshotPhotoPage').then((m) => ({ default: m.SnapshotPhotoPage })),
+)
+const SnapshotsPage = lazy(() => import('./pages/SnapshotsPage').then((m) => ({ default: m.SnapshotsPage })))
+const UploadPage = lazy(() => import('./pages/UploadPage').then((m) => ({ default: m.UploadPage })))
 
 /** Route table; split out so tests can mount it inside a MemoryRouter. */
 export function AppRoutes() {

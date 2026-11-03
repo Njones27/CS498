@@ -54,6 +54,7 @@ from ..settings import Adapters, Settings
 TYPE_ATTR = "entityType"
 TTL_ATTR = "expiresAt"
 _KEY_ATTRS = {k.PK, k.SK, k.GSI1PK, k.GSI1SK, TYPE_ATTR, TTL_ATTR}
+LAYOUT_CACHE_SIZE = 128  # Maximum number of published layout snapshots cached in memory
 
 
 # --- item (de)serialization ---------------------------------------------------
@@ -365,6 +366,7 @@ class DynamoRepository:
         self._table = self._resource.Table(settings.table_name)
         self._table_name = settings.table_name
         self._store = object_store
+        self._layout_cache: dict[tuple[str, int], PublishedLayout] = {}
 
     # helpers
     def _get(self, pk: str, sk: str) -> dict[str, Any] | None:
@@ -480,9 +482,16 @@ class DynamoRepository:
             raise
 
     def get_published_layout(self, lot_id: str) -> PublishedLayout | None:
+        # Note: Returned PublishedLayout instances are cached in-memory and shared across
+        # callers in this process. Callers must never mutate them or their child objects in place
+        # (use model_copy or copy instead).
         lot = self.get_lot(lot_id)
         if lot is None or lot.current_layout_version is None:
             return None
+        cache_key = (lot_id, lot.current_layout_version)
+        cached = self._layout_cache.get(cache_key)
+        if cached is not None:
+            return cached
         key = k.layout_snapshot_key(lot_id, lot.current_layout_version)
         if self._store is None:
             raise NotPublishedError("no object store configured for layout snapshots")
@@ -490,7 +499,11 @@ class DynamoRepository:
             raw = self._store.get(key)
         except KeyError as exc:
             raise NotPublishedError(f"layout snapshot missing: {key}") from exc
-        return PublishedLayout.model_validate_json(raw)
+        loaded = PublishedLayout.model_validate_json(raw)
+        if len(self._layout_cache) >= LAYOUT_CACHE_SIZE:
+            self._layout_cache.clear()
+        self._layout_cache[cache_key] = loaded
+        return loaded
 
     # Snapshots and jobs
     def put_snapshot(self, snapshot: Snapshot) -> None:

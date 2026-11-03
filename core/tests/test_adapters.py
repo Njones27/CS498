@@ -562,3 +562,53 @@ def test_status_condition_expression():
     # A status without a version stores no layoutVersion attribute, so the tie check sees none.
     assert "layoutVersion" not in aws.status_item(status(NOW))
     assert aws.status_item(_versioned(NOW, 3))["layoutVersion"] == 3
+
+
+def test_get_published_layout_caching_dynamo(aws_creds):
+    store = MemoryObjectStore()
+    repo = aws.DynamoRepository(AWS_SETTINGS, object_store=store)
+    layout = PublishedLayout(
+        lot_id="L",
+        version=1,
+        spaces=[ParkingSpace(lot_id="L", space_id="s1", label="1", rect=Rect(x=0, y=0, w=1, h=1))],
+        viewpoints=[],
+        published_at=NOW,
+        published_by="a",
+    )
+    key = layout_snapshot_key("L", 1)
+    store.put(key, layout.model_dump_json().encode(), "application/json")
+
+    def raw_item(lot_id: str, version: int = 1) -> dict:
+        return {
+            "PK": {"S": f"LOT#{lot_id}"},
+            "SK": {"S": "META"},
+            "lotId": {"S": lot_id},
+            "name": {"S": "Lot"},
+            "createdAt": {"S": aws.format_dt(NOW)},
+            "currentLayoutVersion": {"N": str(version)},
+        }
+
+    with Stubber(repo._table.meta.client) as stub:
+        # First call queries DynamoDB for lot and reads snapshot from object store
+        stub.add_response("get_item", {"Item": raw_item("L", 1)})
+        first = repo.get_published_layout("L")
+        assert first == layout
+        assert ("L", 1) in repo._layout_cache
+
+        # Mutate object store to ensure subsequent call is served from cache, not store
+        store.put(key, b"{}", "application/json")
+        stub.add_response("get_item", {"Item": raw_item("L", 1)})
+        second = repo.get_published_layout("L")
+        assert second == layout  # returns cached layout
+
+        # Exceeding cache capacity clears old entries
+        for i in range(aws.LAYOUT_CACHE_SIZE):
+            repo._layout_cache[(f"other-{i}", 1)] = layout
+        assert len(repo._layout_cache) > aws.LAYOUT_CACHE_SIZE
+
+        key2 = layout_snapshot_key("L2", 1)
+        store.put(key2, layout.model_dump_json().encode(), "application/json")
+        stub.add_response("get_item", {"Item": raw_item("L2", 1)})
+        repo.get_published_layout("L2")
+        assert len(repo._layout_cache) == 1
+        assert ("L2", 1) in repo._layout_cache
