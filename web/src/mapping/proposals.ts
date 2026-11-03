@@ -132,33 +132,101 @@ export interface WideStall {
 }
 
 /**
- * Rows the photo shows with wide stalls in them (an outline WIDE times the row's typical one) are laid
- * out again left to right as the photo has them: each space as wide as its stall (whole and half cells),
- * side by side from where the row starts, so a row of wide bays lines up with the rows beside it instead
- * of leaving holes. Labels stay; rows with no wide stall are left as they are.
+ * How much ground each outline covers, against what a typical stall covers at its spot on the photo:
+ * 1 for a stall like the others, 1.5 for a bay half as wide again. A camera at an angle draws stalls
+ * near it far bigger than those across the lot, so raw areas can't be compared. On flat ground the
+ * cube root of a stall's area on the photo grows linearly across the photo (the ground-to-photo map's
+ * scale), so that is fitted over the outlines and each is measured against the fit at its middle.
+ * The fit stands on the FIT_SHARE of outlines it fits best (trimmed least squares), so wide bays and
+ * loose outlines, up to the rest of them, are left out of it rather than pulling it their way. An
+ * overhead photo fits a constant; a view of fewer than MIN_SLOPE_FIT outlines is measured against its
+ * median (a slope across the photo needs more to stand on).
+ */
+export function groundSizes(outlines: Outline[]): number[] {
+  const n = outlines.length
+  if (n === 0) return []
+  const mids = outlines.map((o) => centroid(o))
+  const sizes = outlines.map((o) => Math.cbrt(area(o as Point[])))
+  const typical = median(sizes)
+  if (!(typical > 0)) return sizes.map(() => 1)
+  // Centred and scaled for a well-conditioned fit.
+  const [mx, my] = [mids.reduce((t, p) => t + p[0], 0) / n, mids.reduce((t, p) => t + p[1], 0) / n]
+  const spread = Math.sqrt(mids.reduce((t, p) => t + (p[0] - mx) ** 2 + (p[1] - my) ** 2, 0) / n) || 1
+  const rows = mids.map(([x, y]) => [(x - mx) / spread, (y - my) / spread, 1])
+  let fit = [0, 0, typical]
+  const expect = (r: number[]) => fit[0] * r[0] + fit[1] * r[1] + fit[2]
+  /** Least squares on `on`; a light pull on the slopes keeps one row (all on a line) solvable. */
+  const fitOn = (on: number[]) =>
+    solve3(
+      [0, 1, 2].map((i) => [0, 1, 2].map((k) => on.reduce((t, j) => t + rows[j][i] * rows[j][k], 0) + (i === k && i < 2 ? 1e-6 * n : 0))),
+      [0, 1, 2].map((i) => on.reduce((t, j) => t + rows[j][i] * sizes[j], 0)),
+    )
+  if (n >= MIN_SLOPE_FIT) {
+    // From the fit on all of them, refit on the ones it fits best until they stay the same.
+    const keep = Math.ceil(FIT_SHARE * n)
+    let on = rows.map((_, j) => j)
+    for (let it = 0; it < 20; it++) {
+      const next = fitOn(on)
+      if (!next) break
+      fit = next
+      const best = rows.map((r, j) => ({ j, miss: Math.abs(sizes[j] - expect(r)) })).sort((p, q) => p.miss - q.miss).slice(0, keep).map((m) => m.j).sort((p, q) => p - q)
+      if (best.length === on.length && best.every((j, k) => j === on[k])) break
+      on = best
+    }
+  }
+  // Past the outlines (towards the horizon) the fit can run small; it never says a stall is under half
+  // the typical size, which would make a loose outline there look like a bay.
+  return rows.map((r, j) => (sizes[j] / Math.max(expect(r), 0.5 * typical)) ** 3)
+}
+
+/** Share of a view's outlines its ground fit stands on (see `groundSizes`). */
+const FIT_SHARE = 0.6
+/** Fewest outlines that fit a slope across the photo. */
+const MIN_SLOPE_FIT = 6
+
+/** Cramer's rule for a 3 x 3 system; null when singular. */
+function solve3(a: number[][], b: number[]): number[] | null {
+  const det = (m: number[][]) =>
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+  const d = det(a)
+  if (!(Math.abs(d) > 1e-12)) return null
+  return [0, 1, 2].map((c) => det(a.map((row, i) => row.map((v, k) => (k === c ? b[i] : v)))) / d)
+}
+
+/** A stall is drawn wider than one cell only when it is this much bigger than its row's typical one on
+ * the ground: outlines (car boxes, hand-drawn ones) miss their stall by up to about a third. */
+const WIDE_ON_MAP = 1.4
+
+/**
+ * Rows the photo shows with wide stalls in them (WIDE_ON_MAP times the row's typical stall on the
+ * ground, see `groundSizes`) are laid out again left to right as the photo has them: each space as wide
+ * as its stall (whole and half cells), side by side from where the row starts, so a row of wide bays
+ * lines up with the rows beside it instead of leaving holes. Labels stay; rows with no wide stall are
+ * left as they are.
  */
 export function alignRowsToPhoto(draft: DraftLayout, viewId: string): DraftLayout {
   const view = draft.viewpoints.find((v) => v.viewId === viewId)
   if (!view) return draft
   const key = (r: DraftRect) => `${Math.round(r.y)}:${Math.round(r.h)}`
   const rows = new Map<string, DraftSpace[]>()
-  for (const sp of draft.spaces) {
-    if (sp.retired || !view.outlines[sp.spaceId]) continue
-    rows.set(key(sp.rect), [...(rows.get(key(sp.rect)) ?? []), sp])
-  }
+  const outlined = draft.spaces.filter((sp) => !sp.retired && view.outlines[sp.spaceId])
+  const sizes = groundSizes(outlined.map((sp) => view.outlines[sp.spaceId]))
+  const size = new Map(outlined.map((sp, k) => [sp.spaceId, sizes[k]]))
+  for (const sp of outlined) rows.set(key(sp.rect), [...(rows.get(key(sp.rect)) ?? []), sp])
   const moved = new Map<string, DraftRect>()
   for (const row of rows.values()) {
     if (row.length < 3) continue
-    const areas = row.map((sp) => area(view.outlines[sp.spaceId] as Point[]))
-    const typical = [...areas].sort((a, b) => a - b)[Math.floor(areas.length / 2)]
-    if (!areas.some((a) => a >= WIDE * typical)) continue
+    const areas = row.map((sp) => size.get(sp.spaceId)!)
+    const typical = median(areas)
+    if (!(typical > 0) || !areas.some((a) => a >= WIDE_ON_MAP * typical)) continue
     const order = row.map((sp, k) => ({ sp, a: areas[k], x: centroid(view.outlines[sp.spaceId] as Outline)[0] })).sort((p, q) => p.x - q.x)
     const cell = Math.min(...row.map((sp) => sp.rect.w))
     const gaps = [...row].sort((p, q) => p.rect.x - q.rect.x)
     const gap = Math.max(0, Math.min(...gaps.slice(1).map((sp, k) => sp.rect.x - (gaps[k].rect.x + gaps[k].rect.w))))
     let x = Math.min(...row.map((sp) => sp.rect.x))
     for (const { sp, a } of order) {
-      const cells = Math.max(1, Math.round((2 * a) / typical) / 2) // whole and half cells
+      // Whole and half cells; one under WIDE_ON_MAP is one cell.
+      const cells = a < WIDE_ON_MAP * typical ? 1 : Math.round((2 * a) / typical) / 2
       const w = Math.round((cells * cell + (cells - 1) * gap) * 100) / 100
       moved.set(sp.spaceId, { ...sp.rect, x: Math.round(x * 100) / 100, w })
       x += w + gap
