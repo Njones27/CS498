@@ -14,7 +14,7 @@ It is not a realistic photo; it only exercises the upload -> worker -> status pi
 ## `fixtures/drone-lot.jpg` (overhead test photo)
 
 A straight-down 1982x2000 photo of a real lot (team test photo, Oct 22 2026) with
-`seed/lots/drone-lot.json`: 124 stalls in six rows (B to G) outlined from the painted
+`seed/lots/drone-lot.json`: 122 stalls in six rows (B to G) outlined from the painted
 lines (86 px pitch; the two rows cut off at the top and bottom edges are left out). With
 the real models it processes in about 17 s and every stall matches the photo except one
 empty stall marked UNKNOWN by a neighbour's car box spilling over the line. Seed it with:
@@ -171,9 +171,9 @@ stall counts and run time. `--cars` adds the production YOLO26m detector (vision
 weights needed; its time is printed apart). `--out` draws ground truth in white and proposals
 coloured by evidence (red 0 to green 1), unmatched proposals thick.
 
-On `drone-lot.jpg` (Oct 2026): lines only, precision 93.8% and recall 97.6% (129 proposed, 124
-drawn), corner error 0.27% of width, 0.2 s on one core; with cars, 93.8% and 98.4% (130
-proposed), plus 0.6 s of YOLO. The extra proposals are real stalls the hand-drawn layout leaves
-out (the left column beside the hatched islands, row B's two ends); the two misses are row B's
-four wide stalls, which the layout draws as six regular ones. Oblique pole cameras (PKLot) are
+On `drone-lot.jpg` (Nov 2026): lines only, precision 93.1% and recall 99.2% (130 proposed, 122
+drawn), corner error 0.25% of width, 0.2 s on one core. The extra proposals are real stalls the
+hand-drawn layout leaves out (the left column beside the hatched islands, row B's two ends). Row
+B's four wide stalls were drawn as six regular ones until Nov 3 2026; Find stalls now flags such
+spaces (`findWideStalls`) and the layout draws them as four. Oblique pole cameras (PKLot) are
 not what the proposer is for and score near zero.

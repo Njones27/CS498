@@ -11,7 +11,9 @@ import {
 } from './photo/geom'
 import { placeFromPhoto } from './photoGrid'
 import { ProposalReview } from './ProposalReview'
-import { acceptProposals, mergeProposals, rejectProposals, type ProposedStall } from './proposals'
+import { acceptProposals, mergeProposals, mergeWideStalls, rejectProposals, type ProposedStall, type WideStall } from './proposals'
+import { straightenFoundCars } from './straighten'
+import { canDeleteSpace, removeSpaces } from './schematic/edits'
 import { useStallFinder } from './useStallFinder'
 import { addSpaceFromOutline, followOutline, suggestOutline } from './sync'
 import type {
@@ -55,6 +57,7 @@ function clampMove(pts: Point[], d: Point): Point {
 }
 
 const round4 = (v: number) => Number(v.toFixed(4))
+const NO_IDS: ReadonlySet<string> = new Set()
 
 /**
  * The outline while a drag is at photo point `p`: a corner goes to `p`; a side moves straight out or in
@@ -128,6 +131,10 @@ export function ReferencePhotoPanel({
   onSave,
   grid = null,
   snap = false,
+  onRelaid,
+  publishedSpaceIds = NO_IDS,
+  selectedSpaceIds = NO_IDS,
+  onSelectSpaces,
 }: ReferencePhotoPanelProps) {
   const currentViewId = viewId ?? draft.viewpoints[0]?.viewId ?? null
   const currentViewpoint = draft.viewpoints.find((v) => v.viewId === currentViewId) ?? null
@@ -185,6 +192,22 @@ export function ReferencePhotoPanel({
   const boxReleasedAt = useRef(-Infinity)
 
   const selectedSpace = draft.spaces.find((s) => s.spaceId === selectedSpaceId) ?? null
+  /**
+   * Shift+click adds a space to the selection, or takes it out (the one selected alone joins too);
+   * a plain click selects just that space.
+   */
+  const pickSpace = (spaceId: string, shift: boolean) => {
+    if (shift && onSelectSpaces) {
+      const next = new Set(selectedSpaceIds)
+      if (selectedSpaceId) next.add(selectedSpaceId)
+      if (next.has(spaceId)) next.delete(spaceId)
+      else next.add(spaceId)
+      onSelectSpace(null)
+      onSelectSpaces(next)
+      return
+    }
+    onSelectSpace(spaceId)
+  }
   const selectedOutline =
     (currentViewpoint && selectedSpaceId && currentViewpoint.outlines[selectedSpaceId]) || null
   const selectedReview =
@@ -247,6 +270,8 @@ export function ReferencePhotoPanel({
           setIsDrawing(false)
         } else if (selectedSpaceId) {
           onSelectSpace(null)
+        } else if (selectedSpaceIds.size > 0) {
+          onSelectSpaces?.(NO_IDS)
         }
       }
     }
@@ -255,7 +280,7 @@ export function ReferencePhotoPanel({
     // corner and a draft edit.
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [clicks.length, isDrawing, selectedOutline, selectedSpaceId, onSelectSpace])
+  }, [clicks.length, isDrawing, selectedOutline, selectedSpaceId, onSelectSpace, selectedSpaceIds, onSelectSpaces])
 
   // Zoom into the photo: the stage holding the photo and its outlines is scaled by k and shifted by
   // (tx, ty) screen pixels inside the frame. Ctrl/Cmd + scroll zooms at the pointer; scrolling or a
@@ -510,6 +535,8 @@ export function ReferencePhotoPanel({
       // The page applies the stored photo to its latest draft and refetches the rest. Do not rebuild
       // the draft here: `draft` is from before the save above, so its revision is stale by now.
       onReferenceUploaded({ lotId, viewId: completed.viewId, referenceImage: completed.referenceImage })
+      // Find the stalls on it straight away (HDD §4.6), as if the admin had pressed Find stalls.
+      void finder.find()
     } catch (err) {
       setErrorMsg(errorMessage(err))
     } finally {
@@ -675,6 +702,24 @@ export function ReferencePhotoPanel({
     setStatusNotice(`Removed outline for ${sp?.label ?? spaceId}`)
   }
 
+  /** Remove spaces from the lot, as the schematic does: both panels show it (removeSpaces). */
+  const handleRemoveSpaces = (spaceIds: string[]) => {
+    if (spaceIds.length === 0) return
+    const labels = spaceIds.map((id) => draft.spaces.find((s) => s.spaceId === id)?.label ?? id)
+    const retired = spaceIds.filter((id) => !canDeleteSpace(id, draft.basedOnVersion, publishedSpaceIds)).length
+    commitOutlines(removeSpaces(draft, spaceIds, publishedSpaceIds))
+    if (selectedSpaceId && spaceIds.includes(selectedSpaceId)) onSelectSpace(null)
+    onSelectSpaces?.(NO_IDS)
+    const what = labels.length <= 3 ? labels.join(', ') : `${labels.length} spaces`
+    setStatusNotice(
+      retired === 0
+        ? `Removed ${what} from the lot`
+        : retired === spaceIds.length
+          ? `Retired ${what} (published, so kept in the history); they leave the map when you publish`
+          : `Removed ${what}; ${retired} published ${retired === 1 ? 'one is' : 'ones are'} retired`,
+    )
+  }
+
   const handleAcceptProposals = (spaceIds: string[]) => {
     if (!currentViewpoint || spaceIds.length === 0) return
     commitOutlines(acceptProposals(draft, currentViewpoint.viewId, spaceIds))
@@ -705,11 +750,34 @@ export function ReferencePhotoPanel({
 
   // HDD §4.6: the worker finds stalls on the reference photo; they arrive as new spaces with pending
   // proposed outlines, saved at once like any outline edit.
+  // Wide stalls on the photo the lot has drawn as several spaces, found by the last Find stalls.
+  const [wide, setWide] = useState<{ viewId: string; stalls: WideStall[] } | null>(null)
   const handleStalls = (viewId: string, stalls: ProposedStall[]) => {
     const merged = mergeProposals(draft, viewId, stalls, grid ?? null)
+    setWide(merged.wide.length > 0 ? { viewId, stalls: merged.wide } : null)
     if (merged.blocked) {
       setDrawError(merged.blocked)
       return
+    }
+    // A photo taken at an angle: the stalls came from parked cars, so the lot is laid out from them
+    // and the spaces it has, all on the ground (rows levelled, their lean, the empty stalls between
+    // cars), so the map matches the photo; cars standing off the rows are left out.
+    const fromCars = stalls.filter((s) => s.fromCar).length > stalls.length / 2
+    if (fromCars && merged.added > 0) {
+      // The paint next to the cars lies on the ground, so it tells how far the stalls lean.
+      const straight = straightenFoundCars(merged.draft, viewId, stalls.flatMap((s) => s.paint ?? []), stalls as { polygon: Point[]; fromCar?: boolean | null }[])
+      if (typeof straight !== 'string') {
+        onRelaid?.(straight.draft)
+        commitOutlines(straight.draft)
+        const cars = merged.added - straight.dropped
+        const parts = [
+          `Found ${cars} parked ${cars === 1 ? 'car' : 'cars'} in ${viewId} and laid the lot out from above in ${straight.rows} ${straight.rows === 1 ? 'row' : 'rows'}`,
+          straight.found ? `${straight.found} empty ${straight.found === 1 ? 'stall' : 'stalls'} between them` : '',
+          straight.dropped ? `${straight.dropped} ${straight.dropped === 1 ? 'car' : 'cars'} off the rows left out` : '',
+        ].filter(Boolean)
+        setStatusNotice(`${parts.join('; ')}. Review them, weakest first.`)
+        return
+      }
     }
     const proposed = merged.added + merged.attached
     if (proposed > 0) commitOutlines(merged.draft, { dx: merged.dx, dy: merged.dy })
@@ -769,6 +837,68 @@ export function ReferencePhotoPanel({
         <p className="notice notice--ok" role="status">
           {statusNotice}
         </p>
+      )}
+      {selectedSpaceIds.size > 0 && currentViewpoint && (
+        <div className="notice ref-bulk" role="group" aria-label="Selected spaces" data-testid="bulk-selection">
+          <span>
+            {selectedSpaceIds.size} {selectedSpaceIds.size === 1 ? 'space' : 'spaces'} selected (Shift+click to add or
+            remove)
+          </span>{' '}
+          <button type="button" className="button button--sm" onClick={() => handleRemoveSpaces([...selectedSpaceIds])}>
+            Remove spaces
+          </button>{' '}
+          {[...selectedSpaceIds].some((id) => currentViewpoint.outlineReview?.[id]?.status === 'pending') && (
+            <>
+              <button
+                type="button"
+                className="button button--sm"
+                onClick={() => {
+                  handleAcceptProposals([...selectedSpaceIds].filter((id) => currentViewpoint.outlineReview?.[id]?.status === 'pending'))
+                  onSelectSpaces?.(NO_IDS)
+                }}
+              >
+                Accept proposals
+              </button>{' '}
+              <button
+                type="button"
+                className="button button--sm"
+                onClick={() => {
+                  handleRejectProposals([...selectedSpaceIds].filter((id) => currentViewpoint.outlineReview?.[id]?.status === 'pending'))
+                  onSelectSpaces?.(NO_IDS)
+                }}
+              >
+                Reject proposals
+              </button>{' '}
+            </>
+          )}
+          <button type="button" className="button button--ghost button--sm" onClick={() => onSelectSpaces?.(NO_IDS)}>
+            Clear selection
+          </button>
+        </div>
+      )}
+      {wide && (
+        <div className="notice notice--warn" role="status" data-testid="wide-stalls">
+          <span>
+            {wide.stalls.length === 1 ? 'A wide stall on the photo is' : `${wide.stalls.length} wide stalls on the photo are`} drawn as
+            more than one space:{' '}
+            {wide.stalls.map((w) => w.spaceIds.map((id) => draft.spaces.find((sp) => sp.spaceId === id)?.label ?? id).join(' + ')).join(', ')}.
+          </span>{' '}
+          <button
+            type="button"
+            className="button button--sm"
+            onClick={() => {
+              const live = wide.stalls.filter((w) => w.spaceIds.every((id) => draft.spaces.some((sp) => sp.spaceId === id && !sp.retired)))
+              commitOutlines(mergeWideStalls(draft, wide.viewId, live))
+              setStatusNotice(`Merged ${live.length} wide ${live.length === 1 ? 'stall' : 'stalls'} into one space each; review the outline${live.length === 1 ? '' : 's'}.`)
+              setWide(null)
+            }}
+          >
+            Merge into one space each
+          </button>{' '}
+          <button type="button" className="button button--sm" onClick={() => setWide(null)}>
+            Keep as drawn
+          </button>
+        </div>
       )}
       {finding && (
         <p className="notice" role="status" data-testid="finding-stalls">
@@ -981,6 +1111,7 @@ export function ReferencePhotoPanel({
               {Object.entries(currentViewpoint.outlines).map(([sId, outline]) => {
                 const space = draft.spaces.find((s) => s.spaceId === sId)
                 const isSelected = selectedSpaceId === sId
+                const isPicked = selectedSpaceIds.has(sId)
                 const isHovered = hoveredSpaceId === sId
                 const isRetired = space?.retired === true
                 const review = currentViewpoint.outlineReview?.[sId]
@@ -1013,7 +1144,7 @@ export function ReferencePhotoPanel({
                   stroke = 'var(--photo-car)'
                   fill = 'rgba(56, 189, 248, 0.3)'
                   strokeWidth = 3.5
-                } else if (isSelected) {
+                } else if (isSelected || isPicked) {
                   stroke = 'var(--accent)'
                   fill = 'rgba(31, 95, 191, 0.28)'
                   strokeWidth = 3.5
@@ -1043,7 +1174,7 @@ export function ReferencePhotoPanel({
                     onClick={(e) => {
                       if (isActivelyDrawing) return
                       e.stopPropagation()
-                      onSelectSpace(sId)
+                      pickSpace(sId, e.shiftKey)
                     }}
                   >
                     <polygon
@@ -1423,9 +1554,18 @@ export function ReferencePhotoPanel({
                       <button
                         type="button"
                         className="button button--ghost button--sm"
-                        onClick={() => handleDeleteOutline(selectedSpace.spaceId)}
+                        onClick={() => handleRemoveSpaces([selectedSpace.spaceId])}
+                        title="Remove the space from the lot: the map and every photo (a published space is retired)"
                       >
-                        Delete outline
+                        Remove space
+                      </button>
+                      <button
+                        type="button"
+                        className="button button--ghost button--sm"
+                        onClick={() => handleDeleteOutline(selectedSpace.spaceId)}
+                        title="Clear only this photo's outline; the space stays on the map"
+                      >
+                        Clear outline
                       </button>
                       <button
                         type="button"
@@ -1577,8 +1717,8 @@ export function ReferencePhotoPanel({
                       <tr
                         key={space.spaceId}
                         data-testid={`space-item-${space.spaceId}`}
-                        className={`${isSelected ? 'is-selected' : ''} ${isHovered ? 'is-hovered' : ''}`}
-                        onClick={() => onSelectSpace(space.spaceId)}
+                        className={`${isSelected || selectedSpaceIds.has(space.spaceId) ? 'is-selected' : ''} ${isHovered ? 'is-hovered' : ''}`}
+                        onClick={(e) => pickSpace(space.spaceId, e.shiftKey)}
                         onPointerEnter={() => onHoverSpace(space.spaceId)}
                         onPointerLeave={() => onHoverSpace(null)}
                       >

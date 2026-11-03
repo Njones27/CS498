@@ -21,6 +21,8 @@ export interface GridControls {
    * with them. Edits say so exactly; undo and redo, which don't, are recognised by uniformShift.
    */
   shiftBy: (next: DraftLayout, dx: number, dy: number) => void
+  /** An edit that laid the whole lot out again (Straighten from photo): fit the grid to `next` afresh. */
+  refit: (next: DraftLayout) => void
 }
 
 interface Prefs {
@@ -124,5 +126,9 @@ export function useSchematicGrid(lotId: string, draft: DraftLayout | null): Grid
       setState({ ...state, grid })
     },
     shiftBy: (next, dx, dy) => setState({ ...state, seen: next, grid: shiftGrid(state.grid, dx, dy) }),
+    refit: (next) => {
+      update({ ...current, sizes: {} })
+      setState({ ...state, seen: next, grid: fitGrid(next.spaces) })
+    },
   }
 }

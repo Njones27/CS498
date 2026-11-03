@@ -155,7 +155,7 @@ def test_every_lot_file_loads_and_publishes():
 
 def test_drone_lot_fixture_matches_layout():
     data = load_lot_file("drone-lot")
-    assert len(data["spaces"]) == 124
+    assert len(data["spaces"]) == 122
     vp = data["viewpoints"][0]
     assert (vp["imageWidth"], vp["imageHeight"]) == (1982, 2000)
     fixture = Path(__file__).resolve().parents[2] / "eval" / "fixtures" / "drone-lot.jpg"

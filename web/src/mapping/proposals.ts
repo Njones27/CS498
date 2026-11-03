@@ -1,6 +1,6 @@
 import type { components } from '../api/types.gen'
 import { MARGIN, MIN_SIDE, yBelowAll } from './schematic/geometry'
-import { addSpacesAt, deleteSpace, type Grown } from './schematic/edits'
+import { addSpacesAt, deleteSpace, fitSchematic, leanLikeRows, type Grown } from './schematic/edits'
 import { formatLabel, nextRowStart, parseLabel } from './schematic/labels'
 import { type Grid, shiftGrid } from './schematic/grid'
 import { touchesPhotoEdge } from './photo/geom'
@@ -39,48 +39,52 @@ function alreadyOutlined(view: DraftViewpoint, stall: Outline): boolean {
   return Object.values(view.outlines).some((o) => insidePolygon(mid, o) || insidePolygon(centroid(o), stall))
 }
 
-/** Rects for a lot with too few outlines to place by the photo fit: the proposer's top-down layout,
- * scaled to fit the map's width (within a sensible stall size), under any spaces already there. */
-function layoutRects(draft: DraftLayout, stalls: ProposedStall[]): DraftRect[] {
-  const width = Math.max(...stalls.map((s) => s.mapRect.x + s.mapRect.w))
-  const widths = stalls.map((s) => s.mapRect.w).sort((a, b) => a - b)
-  const stallW = widths[Math.floor(widths.length / 2)]
+/** Rows back to back on the photo are at most this share of a stall's depth apart; further is an aisle. */
+const BACK_TO_BACK = 0.5
+
+const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
+
+/**
+ * A new lot's stalls on a clean grid, for a lot with too few outlines to place by the photo fit: every
+ * stall the same size, in the cell its label names, so the schematic grid fits them exactly (labels,
+ * snapping and drawing all line up). Proposer rows become the next free row letters, top to bottom, under
+ * any spaces already there; rows back to back on the photo touch, and a drive between them stays as an
+ * aisle, scaled like the photo. Stalls are numbered left to right; a row starting further right than the
+ * others starts at the matching column (C-03, say). The map is scaled to its width, within a sensible
+ * stall size. A label is undefined past row Z (the space then keeps its place, unnamed).
+ */
+function layoutOnGrid(draft: DraftLayout, stalls: ProposedStall[]): { rect: DraftRect; label?: string }[] {
+  const left = Math.min(...stalls.map((s) => s.mapRect.x))
+  const width = Math.max(...stalls.map((s) => s.mapRect.x + s.mapRect.w)) - left
+  const stallW = median(stalls.map((s) => s.mapRect.w))
+  const stallH = median(stalls.map((s) => s.mapRect.h))
   let scale = (draft.schematic.width - 2 * MARGIN) / width
   scale = Math.min(Math.max(scale, MIN_STALL_W / stallW), MAX_STALL_W / stallW)
-  const x0 = MARGIN
-  const y0 = draft.spaces.length > 0 ? yBelowAll(draft.spaces) : MARGIN
-  return stalls.map(({ mapRect: r }) => {
-    // Edges are rounded, not sizes, so neighbours that touch on the photo touch on the map.
-    const left = Math.round(x0 + r.x * scale)
-    const top = Math.round(y0 + r.y * scale)
-    const right = Math.round(x0 + (r.x + r.w) * scale)
-    const bottom = Math.round(y0 + (r.y + r.h) * scale)
-    return { x: left, y: top, w: Math.max(MIN_SIDE, right - left), h: Math.max(MIN_SIDE, bottom - top) }
-  })
-}
+  const boxW = Math.max(MIN_SIDE, Math.round(stallW * scale))
+  const boxH = Math.max(MIN_SIDE, Math.round(stallH * scale))
 
-/** Labels for a new lot's stalls: proposer rows become the next free row letters, top to bottom, and
- * stalls are numbered 01 onward left to right. Undefined past Z (the label then follows the map). */
-function layoutLabels(draft: DraftLayout, stalls: ProposedStall[]): (string | undefined)[] {
   const first = parseLabel(nextRowStart(draft.spaces))?.row
   const rows = [...new Set(stalls.map((s) => s.row))].sort((a, b) => a - b)
-  const letter = new Map(
-    rows.map((row, i) => {
-      const code = first && first.length === 1 ? first.charCodeAt(0) + i : NaN
-      return [row, code <= 'Z'.charCodeAt(0) ? String.fromCharCode(code) : undefined]
-    }),
-  )
-  const order = new Map<ProposedStall, number>()
-  for (const row of rows) {
-    stalls
-      .filter((s) => s.row === row)
-      .sort((a, b) => a.mapRect.x - b.mapRect.x)
-      .forEach((s, i) => order.set(s, i + 1))
-  }
-  return stalls.map((s) => {
-    const row = letter.get(s.row)
-    return row ? formatLabel(row, order.get(s)!) : undefined
+  const out = new Map<ProposedStall, { rect: DraftRect; label?: string }>()
+  let y = draft.spaces.length > 0 ? yBelowAll(draft.spaces) : MARGIN
+  let prevBottom: number | null = null
+  rows.forEach((row, i) => {
+    const inRow = stalls.filter((s) => s.row === row).sort((a, b) => a.mapRect.x - b.mapRect.x)
+    const top = median(inRow.map((s) => s.mapRect.y))
+    if (prevBottom != null) {
+      const gap = top - prevBottom
+      y += boxH + (gap > BACK_TO_BACK * stallH ? Math.round(gap * scale) : 0)
+    }
+    prevBottom = top + median(inRow.map((s) => s.mapRect.h))
+    const code = first && first.length === 1 ? first.charCodeAt(0) + i : NaN
+    const letter = code <= 'Z'.charCodeAt(0) ? String.fromCharCode(code) : undefined
+    const start = Math.max(0, Math.round((inRow[0].mapRect.x - left) / stallW))
+    inRow.forEach((s, k) => {
+      const col = start + k
+      out.set(s, { rect: { x: MARGIN + col * boxW, y, w: boxW, h: boxH }, label: letter && formatLabel(letter, col + 1) })
+    })
   })
+  return stalls.map((s) => out.get(s)!)
 }
 
 export interface MergeResult extends Grown {
@@ -92,6 +96,175 @@ export interface MergeResult extends Grown {
   skipped: number
   /** Set when nothing was merged because the stalls cannot be matched to the lot's spaces. */
   blocked?: string
+  /** Wide stalls the lot has drawn as more than one space (see `findWideStalls`). */
+  wide: WideStall[]
+}
+
+/** One stall on the photo, wider than its row's others, that the lot has drawn as several spaces. */
+export interface WideStall {
+  stall: ProposedStall
+  /** The spaces drawn in it, left to right on the photo; the first one is kept by `mergeWideStalls`. */
+  spaceIds: string[]
+}
+
+/**
+ * Rows the photo shows with wide stalls in them (an outline WIDE times the row's typical one) are laid
+ * out again left to right as the photo has them: each space as wide as its stall (whole and half cells),
+ * side by side from where the row starts, so a row of wide bays lines up with the rows beside it instead
+ * of leaving holes. Labels stay; rows with no wide stall are left as they are.
+ */
+export function alignRowsToPhoto(draft: DraftLayout, viewId: string): DraftLayout {
+  const view = draft.viewpoints.find((v) => v.viewId === viewId)
+  if (!view) return draft
+  const key = (r: DraftRect) => `${Math.round(r.y)}:${Math.round(r.h)}`
+  const rows = new Map<string, DraftSpace[]>()
+  for (const sp of draft.spaces) {
+    if (sp.retired || !view.outlines[sp.spaceId]) continue
+    rows.set(key(sp.rect), [...(rows.get(key(sp.rect)) ?? []), sp])
+  }
+  const moved = new Map<string, DraftRect>()
+  for (const row of rows.values()) {
+    if (row.length < 3) continue
+    const areas = row.map((sp) => area(view.outlines[sp.spaceId] as Point[]))
+    const typical = [...areas].sort((a, b) => a - b)[Math.floor(areas.length / 2)]
+    if (!areas.some((a) => a >= WIDE * typical)) continue
+    const order = row.map((sp, k) => ({ sp, a: areas[k], x: centroid(view.outlines[sp.spaceId] as Outline)[0] })).sort((p, q) => p.x - q.x)
+    const cell = Math.min(...row.map((sp) => sp.rect.w))
+    const gaps = [...row].sort((p, q) => p.rect.x - q.rect.x)
+    const gap = Math.max(0, Math.min(...gaps.slice(1).map((sp, k) => sp.rect.x - (gaps[k].rect.x + gaps[k].rect.w))))
+    let x = Math.min(...row.map((sp) => sp.rect.x))
+    for (const { sp, a } of order) {
+      const cells = Math.max(1, Math.round((2 * a) / typical) / 2) // whole and half cells
+      const w = Math.round((cells * cell + (cells - 1) * gap) * 100) / 100
+      moved.set(sp.spaceId, { ...sp.rect, x: Math.round(x * 100) / 100, w })
+      x += w + gap
+    }
+  }
+  if (moved.size === 0) return draft
+  return fitSchematic({ ...draft, spaces: draft.spaces.map((sp) => (moved.has(sp.spaceId) ? { ...sp, rect: moved.get(sp.spaceId)! } : sp)) }).draft
+}
+
+/** A stall this much wider than its row's typical one (by area) is a wide stall (an accessible bay, say). */
+const WIDE = 1.3
+/** A space is drawn in a wide stall when at least this share of its outline lies inside it: a space
+ * only reaching into it (a missed divider beside it, say) is not. */
+const INSIDE = 0.45
+
+/** Area of a polygon (shoelace). */
+export function area(poly: Point[]): number {
+  let a = 0
+  poly.forEach(([x, y], i) => {
+    const [x2, y2] = poly[(i + 1) % poly.length]
+    a += x * y2 - x2 * y
+  })
+  return Math.abs(a) / 2
+}
+
+/** The part of `subject` inside the convex polygon `clip` (Sutherland-Hodgman). */
+export function clipPolygon(subject: Point[], clip: Point[]): Point[] {
+  const sign = Math.sign(
+    clip.reduce((t, [x, y], i) => {
+      const [x2, y2] = clip[(i + 1) % clip.length]
+      return t + x * y2 - x2 * y
+    }, 0),
+  )
+  let out = subject
+  clip.forEach((a, i) => {
+    const b = clip[(i + 1) % clip.length]
+    const inside = ([x, y]: Point) => sign * ((b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0])) >= 0
+    const input = out
+    out = []
+    input.forEach((p, k) => {
+      const q = input[(k + 1) % input.length]
+      const [pin, qin] = [inside(p), inside(q)]
+      if (pin) out.push(p)
+      if (pin !== qin) {
+        const [dx, dy] = [q[0] - p[0], q[1] - p[1]]
+        const [ex, ey] = [b[0] - a[0], b[1] - a[1]]
+        const t = (ex * (a[1] - p[1]) - ey * (a[0] - p[0])) / (ex * dy - ey * dx)
+        out.push([p[0] + t * dx, p[1] + t * dy])
+      }
+    })
+  })
+  return out
+}
+
+/**
+ * Stalls on the photo wider than the others in their row (WIDE times their typical area) that the lot
+ * has drawn as two or more spaces in this view: a space belongs to the wide stall holding most of its
+ * outline (INSIDE of it at least). Four wide bays drawn as six narrow spaces, for one, give the lot two
+ * spaces too many; `mergeWideStalls` puts each back as one space.
+ */
+export function findWideStalls(draft: DraftLayout, viewId: string, stalls: ProposedStall[]): WideStall[] {
+  const view = draft.viewpoints.find((v) => v.viewId === viewId)
+  if (!view) return []
+  const typical = new Map<number, number>()
+  for (const row of new Set(stalls.map((s) => s.row))) {
+    const areas = stalls.filter((s) => s.row === row && !s.partial).map((s) => area(s.polygon as Point[])).sort((a, b) => a - b)
+    if (areas.length > 0) typical.set(row, areas[Math.floor(areas.length / 2)])
+  }
+  const wide = stalls.filter((s) => !s.partial && area(s.polygon as Point[]) >= WIDE * (typical.get(s.row) ?? Infinity))
+  if (wide.length === 0) return []
+  const home = new Map<ProposedStall, string[]>()
+  for (const sp of draft.spaces) {
+    const outline = view.outlines[sp.spaceId] as Point[] | undefined
+    if (sp.retired || !outline || outline.length < 3) continue
+    const own = area(outline)
+    let best: ProposedStall | null = null
+    let most = 0
+    for (const w of wide) {
+      const share = area(clipPolygon(outline, w.polygon as Point[])) / (own || 1)
+      if (share >= INSIDE && share > most) [best, most] = [w, share]
+    }
+    if (best) home.set(best, [...(home.get(best) ?? []), sp.spaceId])
+  }
+  const x = (id: string) => centroid(view.outlines[id] as Outline)[0]
+  return [...home]
+    .filter(([, ids]) => ids.length >= 2)
+    .map(([stall, ids]) => ({ stall, spaceIds: [...ids].sort((a, b) => x(a) - x(b)) }))
+}
+
+/**
+ * Each wide stall drawn as several spaces becomes one: the first space is kept, spanning all their
+ * cells on the map, with the wide stall's outline proposed for review; the others are retired (and lose
+ * their outlines and pending proposals), so publishing takes them off the map. Undo takes it back.
+ */
+export function mergeWideStalls(draft: DraftLayout, viewId: string, wide: WideStall[]): DraftLayout {
+  const keep = new Map<string, WideStall>()
+  const retire = new Set<string>()
+  for (const w of wide) {
+    keep.set(w.spaceIds[0], w)
+    w.spaceIds.slice(1).forEach((id) => retire.add(id))
+  }
+  const rectOf = (id: string) => draft.spaces.find((sp) => sp.spaceId === id)!.rect
+  const spaces = draft.spaces.map((sp) => {
+    const w = keep.get(sp.spaceId)
+    if (w) {
+      const rects = w.spaceIds.map(rectOf)
+      const x0 = Math.min(...rects.map((r) => r.x))
+      const y0 = Math.min(...rects.map((r) => r.y))
+      const x1 = Math.max(...rects.map((r) => r.x + r.w))
+      const y1 = Math.max(...rects.map((r) => r.y + r.h))
+      return { ...sp, rect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } }
+    }
+    return retire.has(sp.spaceId) ? { ...sp, retired: true } : sp
+  })
+  const viewpoints = draft.viewpoints.map((v) => {
+    const outlines = { ...v.outlines }
+    const outlineReview = { ...v.outlineReview }
+    for (const id of retire) {
+      delete outlines[id]
+      delete outlineReview[id]
+    }
+    if (v.viewId === viewId) {
+      for (const [id, w] of keep) {
+        outlines[id] = w.stall.polygon as Outline
+        outlineReview[id] = { source: 'proposed', status: 'pending', evidence: w.stall.evidence }
+      }
+    }
+    return { ...v, outlines, outlineReview }
+  })
+  return { ...draft, spaces, viewpoints }
 }
 
 /** Where a stall is, for placing it on the map: the whole stall, even past the photo's border. */
@@ -111,8 +284,8 @@ const contains = (r: DraftRect, [x, y]: Point) => x >= r.x && x <= r.x + r.w && 
  * placed go first.
  *
  * Without a fit, stalls can only be matched to nothing: on a lot whose spaces are all outlined here (a new
- * lot, typically) they become new spaces in the proposer's top-down layout, rows labeled A, B, C (after any
- * rows in use) and stalls 01 onward; on a lot with spaces this photo does not show yet, nothing is merged
+ * lot, typically) they become new spaces laid out on a clean grid (`layoutOnGrid`), rows labeled A, B, C
+ * (after any rows in use) and stalls 01 onward; on a lot with spaces this photo does not show yet, nothing is merged
  * (`blocked`), so a second viewpoint never duplicates the stalls of the first.
  */
 export function mergeProposals(
@@ -121,7 +294,8 @@ export function mergeProposals(
   stalls: ProposedStall[],
   grid: Grid | null = null,
 ): MergeResult {
-  const none = { draft, dx: 0, dy: 0, added: 0, attached: 0 }
+  const wide = findWideStalls(draft, viewId, stalls)
+  const none = { draft, dx: 0, dy: 0, added: 0, attached: 0, wide }
   const view = draft.viewpoints.find((v) => v.viewId === viewId)
   if (!view) return { ...none, skipped: stalls.length }
   const fresh = stalls.filter((s) => !alreadyOutlined(view, s.polygon as Outline))
@@ -165,12 +339,7 @@ export function mergeProposals(
       created.add(placed.space.spaceId)
     }
   } else {
-    const rects = layoutRects(draft, fresh)
-    const labels = layoutLabels(draft, fresh)
-    const grown = addSpacesAt(
-      draft,
-      fresh.map((_, i) => ({ rect: rects[i], label: labels[i] })),
-    )
+    const grown = addSpacesAt(draft, layoutOnGrid(draft, fresh))
     next = grown.draft
     dx = grown.dx
     dy = grown.dy
@@ -192,7 +361,11 @@ export function mergeProposals(
     ...next,
     viewpoints: next.viewpoints.map((v) => (v.viewId === viewId ? { ...v, outlines, outlineReview } : v)),
   }
-  return { draft: next, dx, dy, added: created.size, attached: found.size - created.size, skipped }
+  // A stall placed in a row of angled stalls leans like them, and rows with wide stalls in them are
+  // laid out as wide as the photo shows them.
+  next = leanLikeRows(next, created)
+  next = alignRowsToPhoto(next, viewId)
+  return { draft: next, dx, dy, added: created.size, attached: found.size - created.size, skipped, wide }
 }
 
 /** The view's outlines still waiting for review, weakest evidence first (those without a score last). */

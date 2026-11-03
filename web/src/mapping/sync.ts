@@ -1,5 +1,5 @@
 import { MIN_SIDE, clearOf, medianSize } from './schematic/geometry'
-import { addSpace, addSpaceAt, addSpacesAt, fitSchematic, updateSpace, type Grown } from './schematic/edits'
+import { addSpace, addSpaceAt, addSpacesAt, fitSchematic, leanLikeRows, updateSpace, type Grown } from './schematic/edits'
 import { applyLabels, cellAt, cellLabel, cellRect, cellTaken, labelDigits, relabelMoved, rowIndex, type Cell, type Grid } from './schematic/grid'
 import { parseLabel } from './schematic/labels'
 import { outlineLike, photoCell, placeFromPhoto } from './photoGrid'
@@ -567,7 +567,7 @@ export function addSpaceFromOutline(
     // addSpaceAt may have grown the map left or up, moving every space: the grid moves with them.
     const shifted = { ...grid, x0: grid.x0 + added.dx, y0: grid.y0 + added.dy }
     const placed = placeFromPhoto(outlined, viewId, id, shifted)
-    const next = proposeOutlines(placed.draft, [id])
+    const next = proposeOutlines(leanLikeRows(placed.draft, [id]), [id])
     return {
       draft: next,
       dx: added.dx + placed.dx,
@@ -632,6 +632,43 @@ export function addSpacesInCells(draft: DraftLayout, grid: Grid, cells: Cell[]):
   if (items.length === 0) return { draft, dx: 0, dy: 0, spaces: [] }
   const added = addSpacesAt(draft, items)
   return { ...added, draft: proposeOutlines(added.draft, added.spaces.map((s) => s.spaceId)) }
+}
+
+/**
+ * A copy of space `sourceId`, with its type and lean, and a proposed outline on the photos. With a grid
+ * it goes in `cell` (by default the first free cell right of the source in its row) and is named for the
+ * cell; without one it sits at `rect` (by default just right of the source) and is labeled for its row.
+ * Returns null when the cell is taken or there is no source.
+ */
+export function copySpace(
+  draft: DraftLayout,
+  grid: Grid | null,
+  sourceId: string,
+  at?: { cell?: Cell; rect?: DraftRect },
+): (Grown & { space: DraftSpace }) | null {
+  const source = draft.spaces.find((s) => s.spaceId === sourceId)
+  if (!source) return null
+  const like = (added: Grown & { spaces: DraftSpace[] }) => {
+    const [space] = added.spaces
+    if (!space) return null
+    const patch: Partial<DraftSpace> = { type: source.type }
+    if (source.skewDeg) patch.skewDeg = source.skewDeg
+    const next = updateSpace(added.draft, space.spaceId, patch)
+    return { ...added, draft: next, space: next.spaces.find((s) => s.spaceId === space.spaceId)! }
+  }
+  if (grid) {
+    let cell = at?.cell
+    if (!cell) {
+      const from = cellAt(grid, [source.rect.x + source.rect.w / 2, source.rect.y + source.rect.h / 2])
+      const digits = labelDigits(draft.spaces)
+      cell = { row: from.row, col: from.col + 1 }
+      for (let n = 0; n < 200 && cellTaken(grid, draft.spaces, cell, cellLabel(cell, digits)); n++) cell = { ...cell, col: cell.col + 1 }
+    }
+    return like(addSpacesInCells(draft, grid, [cell]))
+  }
+  const rect = at?.rect ?? { ...source.rect, x: source.rect.x + source.rect.w + Math.max(MIN_SIDE, source.rect.w * 0.1) }
+  const added = addSpaceAt(draft, rect)
+  return like({ ...added, draft: proposeOutlines(added.draft, [added.space.spaceId]), spaces: [added.space] })
 }
 
 /** After `spaceIds` moved or resized (`before` -> `after`): their outlines follow, and the map grows to hold them. */

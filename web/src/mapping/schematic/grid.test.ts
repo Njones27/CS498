@@ -14,8 +14,10 @@ import {
   gridSizes,
   labelDigits,
   relabelMoved,
+  rowAt,
   rowIndex,
   rowLetter,
+  rowTop,
   snapMove,
   snapResize,
   type Grid,
@@ -62,6 +64,50 @@ describe('fitGrid', () => {
   })
 })
 
+describe('aisles', () => {
+  /** Rows A+B back to back, a 100-unit aisle, then C+D: pitch 90 (box 72), five columns at pitch 45. */
+  function pairedRows() {
+    const top: Record<string, number> = { A: 34, B: 124, C: 314, D: 404 }
+    return Object.entries(top).flatMap(([row, y]) =>
+      [1, 2, 3, 4, 5].map((n) => space(`${row}-0${n}`, 0, 0, { rect: { x: 32 + (n - 1) * 45, y, w: 40, h: 72 } })),
+    )
+  }
+
+  it('fits the pitch to rows back to back and an aisle before the row after a drive', () => {
+    const g = fitGrid(pairedRows())
+    expect(g).toMatchObject({ cellH: 90, boxH: 72, y0: 25, aisles: [{ row: 2, gap: 100 }] })
+    expect(cellRect(g, { row: 1, col: 0 }).y).toBe(124) // B-01 where it is
+    expect(cellRect(g, { row: 2, col: 0 }).y).toBe(314) // C-01 past the aisle
+    expect(cellRect(g, { row: 3, col: 4 })).toEqual({ x: 212, y: 404, w: 40, h: 72 }) // D-05
+    expect(rowTop(g, 4)).toBe(485) // E, after D with no new aisle
+  })
+
+  it('puts a point in an aisle in the nearer row, and the rows on either side in their own', () => {
+    const g = fitGrid(pairedRows())
+    expect([150, 220, 260, 300, 350, 480].map((y) => rowAt(g, y))).toEqual([1, 1, 2, 2, 2, 3])
+    expect(snapMove(g, { x: 70, y: 270, w: 40, h: 72 })).toEqual({ rect: { x: 77, y: 314, w: 40, h: 72 }, cell: { row: 2, col: 1 } })
+  })
+
+  it('snaps a resized bottom edge to a box bottom across the aisle', () => {
+    const g = fitGrid(pairedRows())
+    expect(snapResize(g, { x: 32, y: 124, w: 40, h: 250 }, 'se').h).toBe(262) // B's top to C's bottom
+  })
+
+  it('draws both edges of an aisle and labels only the rows', () => {
+    const g = fitGrid(pairedRows())
+    const { ys, rows } = gridInView(g, { x: 0, y: 0, w: 300, h: 500 })
+    expect(ys).toEqual([25, 115, 205, 305, 395, 485])
+    expect(rows).toEqual([0, 1, 2, 3])
+  })
+
+  it('keeps the aisles when fitted to one space', () => {
+    const g = anchorGrid(fitGrid(pairedRows()), { x: 32, y: 320, w: 40, h: 72 }, 'C-01')
+    expect(g.aisles).toEqual([{ row: 2, gap: 100 }])
+    expect(cellRect(g, { row: 2, col: 0 }).y).toBe(320)
+    expect(cellRect(g, { row: 3, col: 0 }).y).toBe(410)
+  })
+})
+
 describe('cells', () => {
   it('finds the cell under a point and labels it', () => {
     expect(cellAt(G, [80, 130])).toEqual({ row: 2, col: 1 })
@@ -88,6 +134,13 @@ describe('cells', () => {
       { row: 1, col: 2 },
     ])
     expect(cellsIn(G, [0, 0], [100000, 1000])).toEqual([])
+  })
+
+  it('a cell is taken by a wide space reaching well into it, not by one touching its edge', () => {
+    const wide = space('w', 0, 0, { rect: { x: 32, y: 34, w: 70, h: 72 } }) // B-01 and most of B-02
+    expect(cellTaken(G, [wide], { row: 1, col: 1 }, null)).toBe(true)
+    const touching = space('t', 0, 0, { rect: { x: 32, y: 34, w: 50, h: 72 } }) // 5 into B-02's 40
+    expect(cellTaken(G, [touching], { row: 1, col: 1 }, null)).toBe(false)
   })
 
   it('a cell is taken by a space in it or by its label elsewhere', () => {

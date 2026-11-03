@@ -117,13 +117,19 @@ def get_lot(lot_id: str, adapters: AdaptersDep) -> LotDetail:
         ),
         layout=LayoutOut(
             version=layout.version,
-            schematic=SchematicOut(width=layout.schematic.width, height=layout.schematic.height),
+            schematic=SchematicOut(
+                width=layout.schematic.width,
+                height=layout.schematic.height,
+                north_deg=layout.schematic.north_deg,
+                rotation_deg=layout.schematic.rotation_deg,
+            ),
             spaces=[
                 SchematicSpace(
                     space_id=s.space_id,
                     label=s.label,
                     type=s.space_type,
                     rect=RectOut(x=s.rect.x, y=s.rect.y, w=s.rect.w, h=s.rect.h),
+                    skew_deg=s.skew_deg or None,
                 )
                 for s in layout.active_spaces()
             ],

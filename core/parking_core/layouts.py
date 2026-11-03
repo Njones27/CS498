@@ -427,6 +427,7 @@ def diff_draft(draft: Draft, published: PublishedLayout | None) -> LayoutDiff:
             old.label != s.label
             or old.space_type != s.space_type
             or old.rect != s.rect
+            or (old.skew_deg or 0) != (s.skew_deg or 0)
             or _outlines_of(s.space_id, before_views) != _outlines_of(s.space_id, draft.viewpoints)
         ):
             changed.append(s.space_id)

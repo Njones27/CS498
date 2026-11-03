@@ -40,10 +40,13 @@ def test_publish_rescores_the_latest_photo_for_new_spaces(
     assert status_of(client, NEW_SPACE["spaceId"]) is None  # not in the layout yet
 
     edit(client, admin_headers, add_new_space)
-    version = publish_ok(client, admin_headers)["version"]
+    published = publish_ok(client, admin_headers)
+    version = published["version"]
 
     (rescore,) = queued(adapters)
     assert rescore.rescore_of == original and rescore.layout_version == version
+    # The admin's page follows the re-score by the ids publish returns.
+    assert published["rescoring"] == [rescore.image_id]
     snap = adapters.repository.get_snapshot(original)
     assert (rescore.s3_key, rescore.sha256, rescore.capture_time) == (
         snap.s3_key,

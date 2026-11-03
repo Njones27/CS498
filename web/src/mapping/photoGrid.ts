@@ -259,7 +259,27 @@ export function photoCell(draft: DraftLayout, view: DraftViewpoint, outline: Out
   const me = box(lay.level(inProportion(view, outline)))
   const { row, at: rowAt } = photoRow(lay, me.x, me.y)
   const at = photoColumn(lay, row, me.x, me.y)
-  return { row, col: Math.round(at), at, rowAt, named: Math.round(at + offsetNear(lay, row, me.x)) }
+  const named = besideNumber(lay, row, me) ?? Math.round(at + offsetNear(lay, row, me.x))
+  return { row, col: Math.round(at), at, rowAt, named }
+}
+
+/** Outlines this close along the row (a share of the narrower one's width) are side by side. */
+const BESIDE = 0.35
+
+/**
+ * The number right after (or before) the space of `row` the outline sits beside on the photo, or null
+ * when it touches none. Side by side means no stall between them, whatever the lattice says: a wide
+ * stall (a van bay) or the photo's perspective can put the lattice's count a column off.
+ */
+function besideNumber(lay: Layout, row: number, me: { x: number; y: number; w: number; h: number }): number | null {
+  const near = (lay.byRow.get(row) ?? [])
+    .filter((m) => Math.abs(m.y - me.y) <= 0.5 * Math.max(m.h, me.h))
+    .map((m) => ({ m, gap: Math.abs(me.x - m.x) - (me.w + m.w) / 2 }))
+    .filter(({ m, gap }) => gap <= BESIDE * Math.min(me.w, m.w))
+    .sort((a, b) => a.gap - b.gap)[0]
+  if (!near) return null
+  // Numbers run the way the lattice's pitch does.
+  return near.m.col + Math.sign(me.x - near.m.x) * Math.sign(lay.pitch)
 }
 
 /**

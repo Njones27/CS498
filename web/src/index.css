@@ -118,6 +118,24 @@ a { color: var(--accent); }
 
 .space { cursor: pointer; }
 .space__rect { stroke-width: 2; }
+.compass__ring { fill: var(--surface); stroke: var(--border); stroke-width: 1.5; }
+.compass__north { fill: var(--nearly-full); }
+.compass__south { fill: var(--muted); }
+.compass__n { fill: var(--text); font-weight: 700; }
+/* Any map: the compass sits in its top right corner, above the drawing. */
+.map-frame { position: relative; }
+.map-compass { position: absolute; top: 0.25rem; right: 0.25rem; pointer-events: none; filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.35)); }
+.schematic-north { display: inline-flex; align-items: center; gap: 0.35rem; }
+.schematic-orient { position: relative; display: inline-flex; }
+.schematic-orient__button { display: inline-flex; align-items: center; gap: 0.35rem; }
+.schematic-orient__panel {
+  position: absolute; top: calc(100% + 0.35rem); left: 0; z-index: 5; display: grid; gap: 0.5rem;
+  padding: 0.6rem 0.75rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.25); min-width: max-content;
+}
+.schematic-orient__row { display: flex; align-items: center; gap: 0.5rem; }
+.schematic-orient__row input[type="range"] { width: 10rem; }
+.schematic-north input { width: 4.5rem; }
 .space__label { fill: var(--text); font-weight: 600; pointer-events: none; }
 .glyph { fill: currentColor; stroke: currentColor; }
 .glyph text { stroke: none; }

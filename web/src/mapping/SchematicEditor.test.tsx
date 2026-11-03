@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { davidFixture, space } from './fixtures/david'
+import { pklotFixture } from './fixtures/pklot'
 import { SchematicEditor } from './SchematicEditor'
 import { useSchematicGrid } from './useSchematicGrid'
 import type { DraftLayout, DraftSpace, Issue } from './types'
@@ -13,10 +14,11 @@ interface Options {
   issues?: Issue[]
   publishedSpaceIds?: ReadonlySet<string>
   withGrid?: boolean // the page's grid (useSchematicGrid), snapping on unless a test turns it off
+  photoViewId?: string | null
 }
 
 /** Render the editor alone, holding draft, selection and hover in state like the mapping page does. */
-function setup({ draft = davidFixture(), selectedSpaceId = null, issues = [], publishedSpaceIds, withGrid = false }: Options = {}) {
+function setup({ draft = davidFixture(), selectedSpaceId = null, issues = [], publishedSpaceIds, withGrid = false, photoViewId = null }: Options = {}) {
   const onChange = vi.fn<(next: DraftLayout) => void>()
   const onSelectSpace = vi.fn<(id: string | null) => void>()
   const onHoverSpace = vi.fn<(id: string | null) => void>()
@@ -29,6 +31,7 @@ function setup({ draft = davidFixture(), selectedSpaceId = null, issues = [], pu
       <SchematicEditor
         draft={d}
         grid={withGrid ? grid : undefined}
+        photoViewId={photoViewId}
         onChange={(next, shift) => {
           onChange(next)
           // As the mapping page does: an edit that shifted every space moves the grid with them.
@@ -462,6 +465,15 @@ describe('SchematicEditor', () => {
   // Test Lot fits a grid of 110 x 130 cells (box 100 x 120) with row A's boxes at y 40 and column 1's at
   // x 40: column c's box starts at 40 + 110c, row B's at y 170. In jsdom a pixel is a unit from the view's
   // corner (-60, -60).
+  it('without a grid, Ctrl/Cmd+D duplicates the selected space just right of it, labeled for its row', async () => {
+    const { last, user } = setup({ selectedSpaceId: 'A-04' })
+    spaceEl('A-04').focus()
+    await user.keyboard('{Meta>}d{/Meta}')
+    const copy = last().spaces.at(-1)!
+    expect(copy).toMatchObject({ type: 'EV', rect: { x: 480, y: 40, w: 100, h: 120 } })
+    expect(copy.label).toMatch(/^A-/)
+  })
+
   describe('grid and snapping', () => {
     beforeEach(() => localStorage.clear())
 
@@ -525,6 +537,41 @@ describe('SchematicEditor', () => {
       await user.click(screen.getByRole('checkbox', { name: 'Snap to grid' }))
       drag(screen.getByTestId('schematic-handle-se'), 250, 0) // middle moves 125 to the right
       expect(byId(last(), 'A-03')).toMatchObject({ label: 'A-03', rect: { x: 260, w: 350 } })
+    })
+
+    it('Ctrl/Cmd+C then Ctrl/Cmd+V pastes a copy in the next free cell, named for it, and selects it', async () => {
+      const { last, user, onSelectSpace } = setup({ withGrid: true, selectedSpaceId: 'A-02' })
+      spaceEl('A-02').focus()
+      await user.keyboard('{Meta>}c{/Meta}')
+      expect(screen.getByText('Copied A-02: Ctrl/Cmd+V pastes it in the next free cell')).toBeInTheDocument()
+      await user.keyboard('{Control>}v{/Control}')
+      const copy = last().spaces.at(-1)!
+      expect(copy).toMatchObject({ label: 'A-05', type: 'ADA', rect: { x: 480, y: 40, w: 100, h: 120 } })
+      expect(byId(last(), 'A-02').rect).toMatchObject({ x: 150, y: 40 }) // the original stays
+      expect(onSelectSpace).toHaveBeenLastCalledWith(copy.spaceId)
+      expect(screen.getByText('Pasted a copy of A-02 as A-05; drag it where it belongs')).toBeInTheDocument()
+    })
+
+    it('Duplicate space puts copies one after another along the row', async () => {
+      const { last, user } = setup({ withGrid: true, selectedSpaceId: 'A-04' })
+      await user.click(within(panel()).getByRole('button', { name: 'Duplicate space' }))
+      await user.click(within(panel()).getByRole('button', { name: 'Duplicate space' }))
+      expect(last().spaces.slice(-2).map((s) => [s.label, s.type, s.rect.x])).toEqual([
+        ['A-05', 'EV', 480],
+        ['A-06', 'EV', 590],
+      ])
+    })
+
+    it('Alt/Option-drag leaves the space and drops a copy in the cell where it is let go', () => {
+      const { last } = setup({ withGrid: true })
+      fireEvent.pointerDown(spaceEl('A-02'), { clientX: 100, clientY: 100, button: 0, altKey: true })
+      fireEvent.pointerMove(window, { clientX: 260, clientY: 165 })
+      expect(screen.getByTestId('schematic-drawbox')).toBeInTheDocument() // the copy's ghost
+      fireEvent.pointerUp(window, { clientX: 430, clientY: 230 })
+      expect(byId(last(), 'A-02').rect).toMatchObject({ x: 150, y: 40 })
+      expect(last().spaces.at(-1)).toMatchObject({ label: 'B-05', type: 'ADA', rect: { x: 480, y: 170 } })
+      expect(screen.queryByTestId('schematic-drawbox')).not.toBeInTheDocument()
+      expect(screen.getByText('Dropped a copy of A-02 as B-05')).toBeInTheDocument()
     })
 
     it('a snapped drag that ends in the same cell keeps the label', () => {
@@ -606,5 +653,109 @@ describe('SchematicEditor', () => {
       expect(byId(last(), 'A-03').rect).toEqual({ x: 250, y: 40, w: 80, h: 120 })
       expect(byId(last(), 'A-01').rect).toEqual({ x: 70, y: 40, w: 80, h: 120 })
     })
+  })
+})
+
+
+describe('straighten, north and angled stalls', () => {
+  it('Straighten from photo lays the angled camera lot out in level rows on the grid', async () => {
+    const { user, last } = setup({ draft: pklotFixture(), withGrid: true, photoViewId: 'V1' })
+    await user.click(screen.getByRole('button', { name: 'Straighten from photo' }))
+    const next = last()
+    expect(new Set(next.spaces.map((s) => s.label[0]))).toEqual(new Set(['A', 'B', 'C', 'D']))
+    expect(screen.getByText(/Straightened 27 spaces into 4 rows.*angled rows A 45°, B 45°, C 45°, D 45°/)).toBeInTheDocument()
+    // Angled stalls are drawn leaning.
+    const leaning = next.spaces.find((s) => s.skewDeg)
+    expect(leaning).toBeDefined()
+    expect(spaceEl(leaning!.spaceId).querySelector('polygon.schematic-space__rect')).not.toBeNull()
+  })
+
+  it('is offered only with a photo beside the map, and says what it needs', async () => {
+    setup({ withGrid: true })
+    expect(screen.queryByRole('button', { name: 'Straighten from photo' })).not.toBeInTheDocument()
+    const few = pklotFixture()
+    few.viewpoints[0].outlines = Object.fromEntries(Object.entries(few.viewpoints[0].outlines).slice(0, 3))
+    const { user } = setup({ draft: few, withGrid: true, photoViewId: 'V1' })
+    await user.click(screen.getByRole('button', { name: 'Straighten from photo' }))
+    expect(screen.getByText(/Outline at least 6 spaces on this photo first \(3 so far\)/)).toBeInTheDocument()
+  })
+
+  it('sets north, shows the compass, and clears it', async () => {
+    const { user, last } = setup()
+    await user.click(screen.getByRole('button', { name: 'Orient map' }))
+    const field = screen.getByRole('spinbutton', { name: /North/ })
+    await user.type(field, '370{Enter}')
+    expect(last().schematic.northDeg).toBe(10)
+    // On the map, top right, and on the Orient button.
+    expect(screen.getAllByRole('img', { name: 'North is 10° clockwise from up' }).some((c) => c.classList.contains('map-compass'))).toBe(true)
+    await user.clear(field)
+    await user.keyboard('{Enter}')
+    expect('northDeg' in last().schematic).toBe(false)
+  })
+
+  it("sets a space's lean, and 0 makes it square again", async () => {
+    const draft = davidFixture()
+    const id = draft.spaces[0].spaceId
+    const { user, last } = setup({ draft, selectedSpaceId: id })
+    const lean = screen.getByRole('spinbutton', { name: /Lean/ })
+    await user.clear(lean)
+    await user.type(lean, '45{Enter}')
+    expect(byId(last(), id).skewDeg).toBe(45)
+    expect(spaceEl(id).querySelector('polygon')).not.toBeNull()
+    await user.clear(lean)
+    await user.type(lean, '0{Enter}')
+    expect('skewDeg' in byId(last(), id)).toBe(false)
+    expect(spaceEl(id).querySelector('polygon')).toBeNull()
+  })
+})
+
+
+describe('orienting the map', () => {
+  it('turns the map a quarter, like a photo, and the compass with it; north up turns it back', async () => {
+    const draft = davidFixture()
+    draft.schematic = { ...draft.schematic, northDeg: 90 }
+    const { user, last } = setup({ draft })
+    await user.click(screen.getByRole('button', { name: 'Orient map' }))
+    await user.click(screen.getByRole('button', { name: 'Turn right a quarter' }))
+    expect(last().schematic.rotationDeg).toBe(90)
+    expect(last().spaces).toEqual(draft.spaces) // the layout itself is unchanged
+    expect(screen.getByTestId('schematic-turn')).toHaveAttribute('transform', 'rotate(90 500 300)')
+    // The whole turned map fits the view: 600 wide, 1000 tall, about the same middle.
+    expect(screen.getByRole('group', { name: 'Schematic editor' })).toHaveAttribute('viewBox', '140 -260 720 1120')
+    expect(screen.getAllByRole('img', { name: 'North is 180° clockwise from up' }).length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('button', { name: 'North up' }))
+    expect(last().schematic.rotationDeg).toBe(270)
+    expect(screen.getAllByRole('img', { name: 'North is 0° clockwise from up' }).length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('button', { name: 'Reset' }))
+    expect('rotationDeg' in last().schematic).toBe(false)
+  })
+
+  it('turns to any angle with the slider, kept when you let go', async () => {
+    const { last, onChange } = setup()
+    fireEvent.click(screen.getByRole('button', { name: 'Orient map' }))
+    const slider = screen.getByRole('slider', { name: 'Turn map (degrees)' })
+    fireEvent.change(slider, { target: { value: '30' } })
+    expect(screen.getByTestId('schematic-turn')).toHaveAttribute('transform', 'rotate(30 500 300)')
+    expect(onChange).not.toHaveBeenCalled() // only shown while dragging
+    fireEvent.pointerUp(slider)
+    expect(last().schematic.rotationDeg).toBe(30)
+  })
+
+  it('on a turned map, a drag moves the space along the map as shown', () => {
+    const draft = davidFixture()
+    draft.schematic = { ...draft.schematic, rotationDeg: 90 }
+    const [id, other] = [draft.spaces[0].spaceId, draft.spaces[1].spaceId]
+    const gap = (d: DraftLayout) => {
+      const [a, b] = [d.spaces.find((sp) => sp.spaceId === id)!.rect, d.spaces.find((sp) => sp.spaceId === other)!.rect]
+      return [a.x - b.x, a.y - b.y]
+    }
+    const before = gap(draft)
+    const { last } = setup({ draft })
+    // Dragged 50 to the right on screen: on a map turned a quarter right, that is 50 up the map (the map
+    // grows to hold it, moving every space alike, so it is measured against a neighbour).
+    drag(spaceEl(id), 50, 0)
+    const after = gap(last())
+    expect(after[0] - before[0]).toBe(0)
+    expect(after[1] - before[1]).toBe(-50)
   })
 })

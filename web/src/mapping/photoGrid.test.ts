@@ -45,6 +45,28 @@ describe('photoCell', () => {
   })
 })
 
+describe('a box drawn right beside a space of its row', () => {
+  it('takes the next number, though it is wide enough for the lattice to count a column more', () => {
+    const draft = lot()
+    // A van bay right after E-05 (which ends at x 0.295), two columns wide: its middle is nearer
+    // column 6 than 5, so the lattice alone would call it E-07 and leave E-06 out.
+    const van: Outline = [
+      [0.297, 0.7],
+      [0.37, 0.7],
+      [0.37, 0.8],
+      [0.297, 0.8],
+    ]
+    expect(photoCell(draft, draft.viewpoints[0], van)).toMatchObject({ row: 4, named: 5 })
+    const { space: added } = addSpaceFromOutline(draft, 'V1', van, fitGrid(draft.spaces))
+    expect(added.label).toBe('E-06')
+  })
+
+  it('a box with a stall-sized gap before it keeps the lattice count', () => {
+    const draft = lot()
+    expect(photoCell(draft, draft.viewpoints[0], at(6, ROW_Y.E))).toMatchObject({ row: 4, named: 6 })
+  })
+})
+
 describe('a box drawn on the photo before the first space of a row', () => {
   it('becomes B-01; the rest of row B is renumbered to the photo and moved into its cells', () => {
     const draft = lot()

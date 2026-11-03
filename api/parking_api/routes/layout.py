@@ -78,6 +78,7 @@ def _space_out(s: ParkingSpace) -> DraftSpace:
         type=s.space_type,
         rect=DraftRect(x=s.rect.x, y=s.rect.y, w=s.rect.w, h=s.rect.h),
         retired=s.retired,
+        skew_deg=s.skew_deg or None,
     )
 
 
@@ -113,7 +114,12 @@ def draft_out(
         based_on_version=meta.based_on_version,
         updated_at=meta.updated_at,
         updated_by=meta.updated_by,
-        schematic=DraftSchematic(width=meta.schematic.width, height=meta.schematic.height),
+        schematic=DraftSchematic(
+            width=meta.schematic.width,
+            height=meta.schematic.height,
+            north_deg=meta.schematic.north_deg,
+            rotation_deg=meta.schematic.rotation_deg,
+        ),
         spaces=[_space_out(s) for s in sorted(spaces, key=lambda s: s.space_id)],
         viewpoints=[_viewpoint_out(v, store) for v in sorted(views, key=lambda v: v.view_id)],
     )
@@ -194,6 +200,7 @@ def put_draft(
             space_type=s.type,
             rect=Rect(x=s.rect.x, y=s.rect.y, w=s.rect.w, h=s.rect.h),
             retired=s.retired,
+            skew_deg=s.skew_deg or None,
         )
         for s in body.spaces
     )
@@ -224,7 +231,12 @@ def _saved_meta(meta: DraftMeta, schematic: DraftSchematic, email: str, now: dat
     return meta.model_copy(
         update={
             "revision": meta.revision + 1,
-            "schematic": Schematic(width=schematic.width, height=schematic.height),
+            "schematic": Schematic(
+                width=schematic.width,
+                height=schematic.height,
+                north_deg=schematic.north_deg,
+                rotation_deg=schematic.rotation_deg,
+            ),
             "updated_at": now,
             "updated_by": email,
         }
@@ -281,8 +293,8 @@ def publish(
             report=exc.report.model_dump(mode="json"),
         ) from None
     # Spaces new in this version get a state from the latest photo, without another upload.
-    rescore_latest(adapters, lot_id, version.version, admin.email, now)
-    return _version_out(version)
+    rescoring = rescore_latest(adapters, lot_id, version.version, admin.email, now)
+    return _version_out(version).model_copy(update={"rescoring": rescoring or []})
 
 
 @router.get(

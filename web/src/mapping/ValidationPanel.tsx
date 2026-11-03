@@ -8,8 +8,27 @@ export interface ValidationPanelProps {
   onSelectSpace: (spaceId: string) => void
 }
 
+/** What Validate does, for its tooltip and the empty report. */
+export const VALIDATE_HELP =
+  'Saves the draft and checks it the way Publish will: errors (duplicate or missing labels, outlines off the photo, ' +
+  'found stalls not yet reviewed, spaces off the map) block publishing; warnings (spaces with no outline, ' +
+  'overlapping spaces) do not. Publish runs the same check, so this is a dry run.'
+
+/** The report's element id, so the page can scroll it into view after a check. */
+export const VALIDATION_ID = 'mapping-validation'
+
 function comparedWith(report: ValidationReport): string {
   return report.comparedWith == null ? 'Nothing published yet' : `Draft compared with v${report.comparedWith}`
+}
+
+/** One line on whether the draft can be published. */
+function verdict(report: ValidationReport): string {
+  const e = report.errors.length
+  const w = report.warnings.length
+  const warnings = w === 0 ? '' : ` ${w} ${w === 1 ? 'warning' : 'warnings'} (these don't block it).`
+  return e === 0
+    ? `Ready to publish.${warnings}`
+    : `${e} ${e === 1 ? 'problem blocks' : 'problems block'} publishing; fix ${e === 1 ? 'it' : 'them'} first.${warnings}`
 }
 
 function diffSummary(report: ValidationReport): string | null {
@@ -26,19 +45,20 @@ function diffSummary(report: ValidationReport): string | null {
 export function ValidationPanel({ report, draft, onSelectSpace }: ValidationPanelProps) {
   if (!report) {
     return (
-      <section className="mapping-panel mapping-validation" aria-label="Validation">
+      <section className="mapping-panel mapping-validation" aria-label="Validation" id={VALIDATION_ID}>
         <h2>Validation</h2>
-        <p className="muted">Press Validate to check the draft before publishing.</p>
+        <p className="muted">Press Validate to check the draft before publishing. {VALIDATE_HELP}</p>
       </section>
     )
   }
   const labels = new Map(draft.spaces.map((s) => [s.spaceId, s.label.trim() || s.spaceId]))
   const summary = diffSummary(report)
   return (
-    <section className="mapping-panel mapping-validation" aria-label="Validation">
+    <section className="mapping-panel mapping-validation" aria-label="Validation" id={VALIDATION_ID}>
       <h2>
         Validation <span className="mapping-head__part">{comparedWith(report)}</span>
       </h2>
+      <p className="hint">{verdict(report)}</p>
       {summary && <p className="hint">{summary}</p>}
       {report.errors.length === 0 && report.warnings.length === 0 && <p className="validation-ok">No problems found.</p>}
       {(report.errors.length > 0 || report.warnings.length > 0) && (

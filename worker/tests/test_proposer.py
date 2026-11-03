@@ -202,6 +202,22 @@ def test_cars_extend_a_painted_row():
     assert len(truth) == 2 * N_STALLS
 
 
+def test_row_runs_on_past_the_border():
+    """A row stopping short of the photo's side goes on to it, car or not: the stalls up to the
+    border are filled and the one it cuts off is proposed as partial. A row ending two stalls
+    from the side, flush with it, does not (the test photo's own rows)."""
+    img = asphalt()
+    double_row(img, 200)
+    shift = SIZE - (X0 + N_STALLS * PITCH) - int(1.6 * PITCH)  # 1.6 stalls short of the side
+    img = np.roll(img, shift, axis=1)
+    img[:, :shift] = 95
+    stalls = proposer().propose(jpeg(img))
+    assert len(stalls) == 2 * (N_STALLS + 2)
+    cut = [s for s in stalls if s.partial]
+    assert len(cut) == 2 and all(max(x for x, _ in s.polygon) == 1.0 for s in cut)
+    assert all(s.evidence < 0.1 for s in cut)  # a filled stall, mostly in view
+
+
 def test_empty_photo_proposes_nothing():
     assert proposer().propose(jpeg(np.full((480, 640, 3), 100, np.uint8))) == []
     assert proposer().propose(jpeg(asphalt())) == []
@@ -243,19 +259,23 @@ def _drone_scores(stalls) -> tuple[float, float]:
 
 
 def test_drone_photo_lines_only():
-    """Measured: precision 93.8%, recall 97.6% (129 proposed, 124 hand-drawn). The extras
+    """Measured: precision 93.1%, recall 99.2% (130 proposed, 122 hand-drawn). The extras
     are real stalls the hand-drawn layout leaves out (the left column beside the hatched
-    island, row B's ends); two misses are row B's four wide stalls drawn as six."""
+    island, row B's ends, the stall past row D's end); the miss is row B's last stall."""
     found = proposer().propose(DRONE.read_bytes())
     stalls = [s for s in found if not s.partial]  # the hand-drawn layout has whole stalls only
     precision, recall = _drone_scores(stalls)
     assert precision >= 0.9 and recall >= 0.93
     assert len({s.row for s in stalls}) == 6
     # The rows the photo cuts off at the top and bottom come as partial stalls: outlined up
-    # to the border, weaker than any whole stall with the same paint.
+    # to the border, weaker than any whole stall with the same paint. Every row between runs
+    # on past the right border, so its last stall is cut off there.
     cut = [s for s in found if s.partial]
-    assert len(cut) >= 30 and len({s.row for s in cut}) == 2
-    assert all(any(y in (0.0, 1.0) for _, y in s.polygon) for s in cut)
+    top_bottom = [s for s in cut if any(y in (0.0, 1.0) for _, y in s.polygon)]
+    assert len(top_bottom) >= 30 and len({s.row for s in top_bottom}) == 2
+    right = [s for s in cut if s not in top_bottom]
+    assert all(any(x == 1.0 for x, _ in s.polygon) for s in right)
+    assert sorted(s.row for s in right) == [1, 2, 3, 4, 5, 6]
     assert max(s.evidence for s in cut) < 0.8
 
 

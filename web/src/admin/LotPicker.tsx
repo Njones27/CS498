@@ -1,9 +1,10 @@
 import type { ChangeEvent } from 'react'
 import { Link, generatePath, matchPath, useLocation, useNavigate } from 'react-router-dom'
 import { useAdminLot } from './AdminLotContext'
-import { LOT_ROUTE } from './adminLot'
+import { LOT_ROUTE, PHOTO_ROUTE } from './adminLot'
 
-/** Header lot picker for admins (US-16 #3). Pages with the lot in their URL move to the new lot. */
+/** Header lot picker for admins (US-16 #3). Pages with the lot in their URL move to the new lot; a photo of
+ * the old lot gives way to the new lot's photos. */
 export function LotPicker() {
   const { lotId, lots, error, switchLot } = useAdminLot()
   const { pathname } = useLocation()
@@ -25,6 +26,8 @@ export function LotPicker() {
     const match = matchPath(LOT_ROUTE, pathname)
     if (match && match.params.lotId !== 'new') {
       navigate(generatePath(LOT_ROUTE, { lotId: next, '*': match.params['*'] ?? '' }))
+    } else if (matchPath(PHOTO_ROUTE, pathname)) {
+      navigate('/admin/snapshots')
     }
   }
 

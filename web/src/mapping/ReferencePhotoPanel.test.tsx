@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { putFile } from '../lib/putFile'
 import { mockFetch } from '../test/helpers'
 import { rylanDraftFixture } from './fixtures/rylan'
+import { PKLOT_CAR_STALLS } from './fixtures/pklotCars'
 import { ReferencePhotoPanel } from './ReferencePhotoPanel'
 import { cellRect, fitGrid } from './schematic/grid'
 import type { DraftLayout, DraftSpace, ReferencePhotoPanelProps } from './types'
@@ -404,7 +405,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
   it('allows deleting an existing outline', async () => {
     const { user, onChange, onSave } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
 
-    const deleteBtn = screen.getByRole('button', { name: 'Delete outline' })
+    const deleteBtn = screen.getByRole('button', { name: 'Clear outline' })
     await user.click(deleteBtn)
 
     expect(onChange).toHaveBeenCalledTimes(1)
@@ -542,6 +543,37 @@ describe('ReferencePhotoPanel (US-08)', () => {
       })
       expect(screen.getByText(/Proposed 1 stall in V1/)).toBeInTheDocument()
       expect(fetchMock).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('on a new lot seen at an angle, lays the stalls found from parked cars out in rows from above', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      mockFetch({
+        'POST /admin/lots/test-lot/views/V1/proposals': { status: 202, body: { ...RUN, status: 'QUEUED', stalls: [] } },
+        'GET /admin/lots/test-lot/views/V1/proposals': { body: { ...RUN, status: 'COMPLETE', stalls: PKLOT_CAR_STALLS } },
+      })
+      const base = rylanDraftFixture
+      const draft: DraftLayout = {
+        ...base,
+        spaces: [],
+        viewpoints: base.viewpoints.map((v) =>
+          v.viewId === 'V1'
+            ? { ...v, referenceImage: { ...v.referenceImage!, width: 1280, height: 720 }, outlines: {}, outlineReview: {} }
+            : { ...v, outlines: {}, outlineReview: {} },
+        ),
+      }
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { onChange } = renderPanel({ draft, viewId: 'V1' })
+      await user.click(screen.getByTestId('find-stalls-btn'))
+      await pollUntil(() => expect(onChange).toHaveBeenCalledTimes(1))
+      const next: DraftLayout = onChange.mock.calls[0][0]
+      expect(new Set(next.spaces.map((sp) => sp.label[0])).size).toBe(7)
+      // The paint beside the cars gives the angle: every stall at 45 degrees.
+      expect(next.spaces.every((sp) => sp.skewDeg === 45)).toBe(true)
+      expect(screen.getByText(/Found 39 parked cars in V1 and laid the lot out from above in 7 rows; 7 empty stalls between them; 8 cars off the rows left out/)).toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }

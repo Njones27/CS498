@@ -221,6 +221,20 @@ describe('US-16 #3: lot picker on every admin page', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/admin/lots/north-lot/map')
   })
 
+  it("a photo's page picks the photo's lot, and switching lots goes to the new lot's photos", async () => {
+    const photo = { ...snapshot('img-north', 'north-lot'), photoUrl: null, detections: [], observations: [] }
+    mockFetch({
+      ...routes,
+      'GET /admin/snapshots/img-north': { body: photo },
+      'GET /admin/snapshots?lotId=test-lot': { body: [snapshot('img-test', 'test-lot')] },
+    })
+    renderApp('/admin/snapshots/img-north/photo', ADMIN)
+    await waitFor(async () => expect((await picker()).value).toBe('north-lot'))
+    await userEvent.setup().selectOptions(await picker(), 'test-lot')
+    expect(screen.getByTestId('location').textContent).toBe('/admin/snapshots')
+    expect(await screen.findByTestId('snapshot-img-test')).toBeInTheDocument()
+  })
+
   it('a lot in the URL becomes the picked lot', async () => {
     mockFetch({ ...routes, 'GET /admin/lots/north-lot/layout/draft': { body: draftFixture({ lotId: 'north-lot' }) } })
     renderApp('/admin/lots/north-lot/map', ADMIN)

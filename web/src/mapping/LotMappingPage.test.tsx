@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LotDetail } from '../api/schemas'
@@ -418,6 +418,43 @@ describe('Publish (US-09 #2, #4)', () => {
     expect(JSON.parse(String(publish?.[1]?.body))).toEqual({ revision: 5 })
   })
 
+  it('after publishing, says it is re-checking the latest photo, then what it found', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let polls = 0
+      const snap = (finished: boolean) => ({
+        imageId: 'img-9', lotId: 'test-lot', viewId: 'V1', captureTime: '2026-11-03T12:00:00Z',
+        jobStatus: finished ? 'COMPLETE' : 'PROCESSING', attempts: 1, finished, processingMs: null, modelVersion: null,
+        error: null, layoutVersion: 4, createdAt: '2026-11-03T12:00:00Z', photoUrl: null, detections: [],
+        observations: finished
+          ? [
+              { spaceId: 'A-01', state: 'FREE', acpdsScore: 0, carOverlap: 0, inFrame: true, polygon: null },
+              { spaceId: 'A-02', state: 'OCCUPIED', acpdsScore: 1, carOverlap: 0, inFrame: true, polygon: null },
+            ]
+          : [],
+      })
+      let gets = 0
+      mockFetch({
+        'GET /lots/test-lot': { body: detail },
+        [`GET ${URL}`]: () => ({ body: gets++ === 0 ? draftFixture({ basedOnVersion: 3 }) : savedDraft(6, 4) }),
+        [`PUT ${URL}`]: { body: savedDraft(5, 3) },
+        [PUBLISH]: { status: 201, body: { version: 4, publishedBy: 'admin@example.edu', publishedAt: '2026-10-28T15:00:00Z', rescoring: ['img-9'] } },
+        'GET /admin/snapshots/img-9': () => ({ body: snap(polls++ > 0) }),
+      })
+      renderApp('/admin/lots/test-lot/map', ADMIN)
+      await waitFor(() => expect(heading()).toHaveTextContent('Draft based on v3'))
+      await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(screen.getByRole('button', { name: 'Publish' }))
+      expect(await screen.findByText(/Re-checking the latest photo against v4/)).toBeInTheDocument()
+      await vi.waitFor(async () => {
+        await act(() => vi.advanceTimersByTimeAsync(3000))
+        expect(screen.getByTestId('rescoring')).toHaveTextContent('Re-checked the latest photo against v4: 1 free, 1 occupied, 0 unknown.')
+      })
+      expect(screen.getByRole('link', { name: 'View V1 photo' })).toHaveAttribute('href', '/admin/snapshots/img-9/photo')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('shows the report when the server refuses with validation_failed', async () => {
     mockFetch({
       'GET /lots/test-lot': { body: detail },
@@ -517,7 +554,14 @@ describe('Reference photo panel with the real draft (US-08)', () => {
   it('uploading a photo keeps the revision the pre-upload save returned, so the next Save is not stale', async () => {
     vi.mocked(putFile).mockResolvedValue()
     const server = draftServer(draftFixture())
-    mockFetch({ 'GET /lots/test-lot': { body: detail }, ...server.routes })
+    const run = { runId: 'r1', lotId: 'test-lot', viewId: 'V1', requestedBy: 'a', requestedAt: '2026-11-03T12:00:00Z', photoChanged: false }
+    const fetchMock = mockFetch({
+      'GET /lots/test-lot': { body: detail },
+      ...server.routes,
+      // Find stalls runs on the new photo straight away.
+      'POST /admin/lots/test-lot/views/V1/proposals': { status: 202, body: { ...run, status: 'QUEUED', stalls: [] } },
+      'GET /admin/lots/test-lot/views/V1/proposals': { body: { ...run, status: 'COMPLETE', stalls: [] } },
+    })
     renderApp('/admin/lots/test-lot/map', ADMIN)
     await screen.findByText('Revision 0')
 
@@ -527,6 +571,9 @@ describe('Reference photo panel with the real draft (US-08)', () => {
       expect(screen.getByRole('img', { name: 'Reference for North corner' })).toHaveAttribute('src', NEW_PHOTO.url),
     )
     expect(server.puts.map((p) => p.revision)).toEqual([0]) // the save before the upload
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([u, init]) => init?.method === 'POST' && String(u).endsWith('/views/V1/proposals'))).toBe(true),
+    )
 
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(server.puts).toHaveLength(2))
@@ -588,7 +635,7 @@ describe('Reference photo panel with the real draft (US-08)', () => {
 
     // A draft edit to undo: delete A-01's outline. A-01 is then ready to be outlined again.
     await userEvent.click(screen.getByTestId('space-item-A-01'))
-    await userEvent.click(screen.getByRole('button', { name: 'Delete outline' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear outline' }))
     await waitFor(() => expect(server.puts).toHaveLength(1))
     expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
 
@@ -599,5 +646,59 @@ describe('Reference photo panel with the real draft (US-08)', () => {
     expect(screen.getByText(/Click the 4 corners of A-01 \(0 of 4\)/)).toBeInTheDocument()
     expect(screen.queryByTestId('space-polygon-A-01')).not.toBeInTheDocument() // still deleted
     expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
+  })
+})
+
+
+describe('selecting several spaces and removing spaces from the photo', () => {
+  it('Shift+click picks several spaces on the photo, both panels show them, and Remove takes them off both', async () => {
+    const draft = draftFixture()
+    // A space added since v1 (never published) next to the published A-01 and A-02.
+    draft.spaces.push({ spaceId: 'sp_new00001', label: 'A-04', type: 'STANDARD', rect: { x: 440, y: 80, w: 110, h: 180 }, retired: false })
+    draft.viewpoints[0].outlines['A-02'] = [[0.3, 0.2], [0.4, 0.2], [0.4, 0.5], [0.3, 0.5]]
+    draft.viewpoints[0].outlines.sp_new00001 = [[0.7, 0.2], [0.8, 0.2], [0.8, 0.5], [0.7, 0.5]]
+    const server = draftServer(draft)
+    // v1, live: A-01 and A-02.
+    const live: LotDetail = {
+      ...detail,
+      layout: { ...detail.layout, spaces: draft.spaces.slice(0, 2).map(({ spaceId, label, type, rect }) => ({ spaceId, label, type, rect })) },
+    }
+    mockFetch({ 'GET /lots/test-lot': { body: live }, ...server.routes })
+    renderApp('/admin/lots/test-lot/map', ADMIN)
+    await screen.findByText('Revision 0')
+
+    fireEvent.click(screen.getByTestId('space-polygon-A-02'), { shiftKey: true })
+    fireEvent.click(screen.getByTestId('space-polygon-sp_new00001'), { shiftKey: true })
+    expect(screen.getByTestId('bulk-selection')).toHaveTextContent('2 spaces selected')
+    // The schematic shows the same two spaces picked.
+    expect(screen.getByTestId('schematic-space-A-02')).toHaveClass('schematic-space--selected')
+    expect(screen.getByTestId('schematic-space-sp_new00001')).toHaveClass('schematic-space--selected')
+    expect(screen.getByTestId('schematic-space-A-01')).not.toHaveClass('schematic-space--selected')
+
+    await userEvent.click(within(screen.getByTestId('bulk-selection')).getByRole('button', { name: 'Remove spaces' }))
+    await waitFor(() => expect(server.puts).toHaveLength(1))
+    const saved = server.puts[0]
+    // The published A-02 is retired; the new space is gone, from the map and the photo alike.
+    expect(saved.spaces.find((sp) => sp.spaceId === 'A-02')?.retired).toBe(true)
+    expect(saved.spaces.some((sp) => sp.spaceId === 'sp_new00001')).toBe(false)
+    expect(saved.viewpoints[0].outlines?.sp_new00001).toBeUndefined()
+    expect(screen.queryByTestId('schematic-space-sp_new00001')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('bulk-selection')).not.toBeInTheDocument()
+  })
+
+  it('Remove space on one selected space retires it on the schematic too', async () => {
+    const server = draftServer(draftFixture())
+    const live: LotDetail = {
+      ...detail,
+      layout: { ...detail.layout, spaces: draftFixture().spaces.slice(0, 2).map(({ spaceId, label, type, rect }) => ({ spaceId, label, type, rect })) },
+    }
+    mockFetch({ 'GET /lots/test-lot': { body: live }, ...server.routes })
+    renderApp('/admin/lots/test-lot/map', ADMIN)
+    await screen.findByText('Revision 0')
+    fireEvent.click(screen.getByTestId('space-polygon-A-01'))
+    await userEvent.click(screen.getByRole('button', { name: 'Remove space' }))
+    await waitFor(() => expect(server.puts).toHaveLength(1))
+    expect(server.puts[0].spaces.find((sp) => sp.spaceId === 'A-01')?.retired).toBe(true)
+    await waitFor(() => expect(screen.getByTestId('schematic-space-A-01')).toHaveClass('schematic-space--retired'))
   })
 })

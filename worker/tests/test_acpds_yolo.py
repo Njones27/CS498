@@ -242,8 +242,27 @@ def test_out_of_frame_space_gets_no_acpds_score_and_is_never_free():
 
 def test_all_out_of_frame_skips_acpds():
     fake = FakeAcpds()
-    out = scorer(acpds=fake).score(png(blank()), [outline(in_frame=False)])
+    hanging = [(0.8, 0.2), (1.2, 0.2), (1.2, 0.6), (0.8, 0.6)]
+    out = scorer(acpds=fake).score(png(blank()), [outline(polygon=hanging, in_frame=False)])
     assert fake.calls == [] and out[0].acpds_score is None
+
+
+def test_cut_off_stall_is_scored_on_the_part_in_view_and_only_ever_occupied():
+    """A stall the photo cuts off is outlined up to the border and not in frame: ACPDS still
+    scores what is in view, so a car seen there marks it OCCUPIED, but an empty-looking part
+    never makes it FREE (a car may stand in the part out of view)."""
+    torch = pytest.importorskip("torch")
+    cut = [(0.8, 0.2), (1.0, 0.2), (1.0, 0.6), (0.8, 0.6)]  # up to the right border
+    cutoffs = Cutoffs()
+    parked = scorer(acpds=FakeAcpds(logits=torch.tensor([[0.0, 5.0]])))
+    seen = parked.score(png(blank()), [outline("CUT", cut, in_frame=False)])[0]
+    assert seen.acpds_score > 0.99 and not seen.in_frame
+    assert decide_state(seen.acpds_score, seen.car_overlap, False, cutoffs) == SpaceState.OCCUPIED
+    empty = scorer(acpds=FakeAcpds(logits=torch.tensor([[5.0, 0.0]])))
+    looks_free = empty.score(png(blank()), [outline("CUT", cut, in_frame=False)])[0]
+    assert looks_free.acpds_score < 0.01
+    lenient = cutoffs.model_copy(update={"require_car_check": False})
+    assert decide_state(looks_free.acpds_score, 0.0, False, lenient) == SpaceState.UNKNOWN
 
 
 def test_zero_area_space_still_gets_acpds_score():

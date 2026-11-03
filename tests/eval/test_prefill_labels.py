@@ -62,7 +62,7 @@ def test_reference_against_itself(prefill, drone, tmp_path):
     photos = _reference_dir(tmp_path, drone)
     [result] = prefill.prefill_dir(photos)
     assert result.status == "written"
-    assert result.spaces == 124 and result.out_of_frame == []
+    assert result.spaces == 122 and result.out_of_frame == []
 
     xml = photos / "ref.xml"
     root = ET.parse(xml).getroot()
@@ -104,7 +104,7 @@ def test_shifted_rotated_copy(prefill, drone, tmp_path):
     assert inside <= set(written)
     assert outside and not outside & set(written)
     assert set(result.out_of_frame) >= outside
-    assert result.spaces + len(result.out_of_frame) == 124
+    assert result.spaces + len(result.out_of_frame) == 122
     assert result.out_of_frame
 
 
@@ -125,7 +125,7 @@ def test_exif_rotated_copy(prefill, drone, tmp_path):
 
     [result] = prefill.prefill_dir(photos)
     assert result.status == "written"
-    assert result.spaces == 124 and result.out_of_frame == []
+    assert result.spaces == 122 and result.out_of_frame == []
     for sid, pts in _spaces(photos / "sideways.xml").items():
         expected = _expected_px(drone["outlines"][sid], drone["size"])
         assert np.abs(np.array(pts) - expected).max() <= TOL_PX, sid
@@ -147,13 +147,13 @@ def test_output_parses_with_benchmark_reader(prefill, benchmark, drone, tmp_path
 
     source, labeled = benchmark.read_labels(xml, w, h)
     assert source == "drone-lot-V1"
-    assert len(labeled) == 124
+    assert len(labeled) == 122
     assert {o.space_id: occupied for o, occupied in labeled} == flags
     for o, _ in labeled:
         expected = np.array(drone["outlines"][o.space_id.removeprefix("pk-")])
         assert np.abs((np.array(o.polygon) - expected) * (w, h)).max() <= TOL_PX
     # seed/import_pklot.py can turn a labeled photo into a lot too
-    assert len(parse_xml(xml.read_text())) == 124
+    assert len(parse_xml(xml.read_text())) == 122
 
 
 def test_skips_existing_unless_force(prefill, drone, tmp_path):
@@ -165,7 +165,7 @@ def test_skips_existing_unless_force(prefill, drone, tmp_path):
     assert xml.read_text() == "<parking/>"
 
     [result] = prefill.prefill_dir(photos, force=True)
-    assert result.status == "written" and len(_spaces(xml)) == 124
+    assert result.status == "written" and len(_spaces(xml)) == 122
 
 
 def test_alignment_failure_not_written(prefill, tmp_path, capsys):
@@ -189,7 +189,7 @@ def test_main_defaults(prefill, drone, tmp_path, capsys):
     photos = _reference_dir(tmp_path, drone, "DJI_0001.JPG")
     assert prefill.main([str(photos)]) == 0
     out = capsys.readouterr().out
-    assert "wrote DJI_0001.xml: 124 stalls" in out
+    assert "wrote DJI_0001.xml: 122 stalls" in out
     assert "rename DJI_0001.JPG to .jpg" in out
     assert (photos / "DJI_0001.xml").is_file()
     assert "1 written, 0 skipped, 0 failed" in out

@@ -260,7 +260,7 @@ def test_build_settings_ignores_app_env(monkeypatch, tmp_path):
 def test_time_jobs_runs_the_real_handler_path(world):
     settings, adapters, lots = world
     assert {lot: info[2:] for lot, info in lots.items()} == {
-        "drone-lot": (1, 124),
+        "drone-lot": (1, 122),
         "pklot-ufpr04": (1, 27),
     }
     aligner = build_aligner(settings, adapters)
@@ -474,7 +474,7 @@ def test_check_setup_runs_without_models(capsys):
     assert wt.main(["--check-setup", "--detector", "stub", "--jobs-per-lot", "5"]) == wt.EXIT_OK
     out = capsys.readouterr().out
     assert out.startswith("NFR-1 setup OK")
-    for line in ("drone-lot: 124/124 spaces", "pklot-ufpr04 @4032: 27/27 spaces, photo 4032x2268"):
+    for line in ("drone-lot: 122/122 spaces", "pklot-ufpr04 @4032: 27/27 spaces, photo 4032x2268"):
         assert line in out
 
 
@@ -545,7 +545,7 @@ def test_check_setup_falls_back_to_the_repo_seed_package(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert f"parking_seed from {ROOT / 'seed' / 'parking_seed'}" in proc.stdout
     assert f"parking_worker from {ROOT / 'worker' / 'parking_worker'}" in proc.stdout
-    assert "drone-lot @4032: 124/124 spaces" in proc.stdout
+    assert "drone-lot @4032: 122/122 spaces" in proc.stdout
 
 
 def test_an_import_failure_exits_2_with_an_error_report(tmp_path):

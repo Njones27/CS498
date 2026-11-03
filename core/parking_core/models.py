@@ -20,8 +20,9 @@ PHOTO_EDGE = 0.001
 
 def touches_photo_edge(polygon: Polygon) -> bool:
     """True for an outline drawn up to the photo's border: a stall the photo cuts off, whose
-    outline covers only the part in view. Such a stall is scored as not wholly in the photo
-    (never Free; Occupied only from a car box), since a car may stand in the part out of view."""
+    outline covers only the part in view. Such a stall is scored as not wholly in the photo:
+    never Free, since a car may stand in the part out of view, but Occupied from a car seen in
+    the part in view (a car box, or ACPDS on that part)."""
     return any(
         x <= PHOTO_EDGE or x >= 1 - PHOTO_EDGE or y <= PHOTO_EDGE or y >= 1 - PHOTO_EDGE
         for x, y in polygon
@@ -87,6 +88,11 @@ class Schematic(CamelModel):
 
     width: FiniteFloat = 1000
     height: FiniteFloat = 600
+    north_deg: FiniteFloat | None = Field(default=None, exclude_if=lambda v: v is None)
+    """Where north is on the map: degrees clockwise from map-up, set by an admin; None if unset."""
+    rotation_deg: FiniteFloat | None = Field(default=None, exclude_if=lambda v: not v)
+    """How the map is shown: turned this many degrees clockwise, like a photo turned in an editor.
+    The layout itself (and its grid) is unchanged; None or 0 shows it as laid out."""
 
 
 class Lot(CamelModel):
@@ -105,6 +111,10 @@ class ParkingSpace(CamelModel):
     space_type: SpaceType = SpaceType.STANDARD
     rect: Rect
     retired: bool = False
+    skew_deg: FiniteFloat | None = Field(default=None, exclude_if=lambda v: not v)
+    """Angled parking: how far the stall's sides lean from square to its row, in degrees
+    (45 for 45-degree stalls; positive leans clockwise). None or 0 is a square stall. The map
+    draws the stall as a parallelogram on `rect`'s row edge; `rect` is still its cell."""
 
 
 class OutlineSource(StrEnum):
@@ -392,6 +402,16 @@ class ProposedStall(CamelModel):
     """For a partial stall, the whole stall in photo fractions, running past the border. Used
     to place it on the map (the part in view alone would put it in the next row); never stored
     as an outline."""
+    from_car: bool | None = Field(default=None, exclude_if=lambda v: not v)
+    paint: list[tuple[float, float, float, float]] | None = Field(
+        default=None, exclude_if=lambda v: not v
+    )
+    """For a stall found from a car: painted line pieces next to it (x1, y1, x2, y2 as photo
+    fractions). The car's own outline leans towards the camera (it has a height); the paint lies
+    on the ground, so the web reads the stalls' angle to their row from it."""
+    """Found from a parked car, not painted lines: a photo taken at an angle, where the paint
+    does not show the lot. Its outline is the car's footprint and `map_rect` is only where it
+    is on the photo; the web straightens such stalls onto the ground (rows, lean, gaps)."""
 
 
 class ProposalStatus(StrEnum):

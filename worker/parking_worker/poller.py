@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from pathlib import Path
 
 from parking_core.interfaces import Aligner, LayoutProposer, SpaceScorer
 from parking_core.models import Cutoffs
@@ -70,11 +71,16 @@ def build_worker(settings: Settings, adapters: Adapters) -> tuple[Aligner, Space
 
 
 def build_layout_proposer(settings: Settings, scorer: SpaceScorer) -> LayoutProposer:
-    """The layout proposer, sharing the scorer's YOLO detector when it has one, so the worker
-    loads one copy of the model. With the stub scorer it uses painted lines only."""
-    from .proposer import build_proposer
+    """The layout proposer. With the vision models it sees cars through YOLO with masks, loaded
+    on the first Find stalls (`SegCars`: a car's mask gives its angle on a photo taken at an
+    angle), or through the scorer's box detector when the mask weights are missing. With the
+    stub scorer it uses painted lines only."""
+    from .proposer import SegCars, build_proposer
 
-    return build_proposer(settings, getattr(scorer, "car_detector", None))
+    cars = getattr(scorer, "car_detector", None)
+    if cars is not None and (Path(settings.models_dir) / settings.yolo_seg_weights).is_file():
+        cars = SegCars(settings)
+    return build_proposer(settings, cars)
 
 
 def main() -> None:
