@@ -121,9 +121,14 @@ def complete_reference_upload(
     width, height = size
 
     # Only the photo fields: a draft save running now writes the outlines, and neither write may
-    # put back the other's old value.
+    # put back the other's old value. Stalls rejected on the old photo don't apply to this one.
     if not repo.update_viewpoint(
-        lot_id, view_id, reference_image_key=key, image_width=width, image_height=height
+        lot_id,
+        view_id,
+        reference_image_key=key,
+        image_width=width,
+        image_height=height,
+        rejected_stalls=[],
     ):
         raise error(404, "not_found", "Viewpoint not found")
 

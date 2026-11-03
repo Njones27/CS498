@@ -840,7 +840,7 @@ def test_restore_replaces_the_draft(repo, store, lot_l):
     repo.put_spaces([sp("A-01", "First", x=0)])
     v1 = repo.get_viewpoint("L", "V1")
     repo.put_viewpoint(v1.model_copy(update={"outlines": {"A-01": sq(0), "A-02": sq(5)}}))
-    repo.put_viewpoint(vp("V2", {"A-01": SQ}))
+    repo.put_viewpoint(vp("V2", {"A-01": SQ}).model_copy(update={"rejected_stalls": [sq(3)]}))
     m = repo.get_draft_meta("L")
     resized = m.model_copy(update={"schematic": Schematic(width=900, height=500)})
     assert repo.put_draft_meta(resized, expected_revision=2)
@@ -857,6 +857,7 @@ def test_restore_replaces_the_draft(repo, store, lot_l):
     assert views["V1"].outlines == {"A-01": sq(0), "A-02": sq(1)}
     # V2 is not in v1, but viewpoints are never removed: it stays, without outlines.
     assert views["V2"].outlines == {} and views["V2"].reference_image_key is not None
+    assert views["V2"].rejected_stalls == []
 
 
 # Restore keeps a space that a later version published as retired, since published spaces are

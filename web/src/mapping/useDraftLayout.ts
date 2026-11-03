@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api, errorMessage } from '../api/client'
+import { forgetRejected } from './proposals'
 import type { DraftLayout, DraftLayoutUpdate, ReferenceImage, UploadedReference } from './types'
 
 export interface DraftLayoutState {
@@ -315,14 +316,18 @@ export function useDraftLayout(lotId: string, options?: UseDraftLayoutOptions): 
   }, [])
 
   /** Apply reference photos to the draft and its history, leaving every other field as it is. */
-  const applyReferenceImages = (refs: Map<string, ReferenceImage | null>) => {
+  const applyReferenceImages = (refs: Map<string, ReferenceImage | null>, newPhotoView?: string) => {
     const local = draftRef.current
     if (!local) return
     refsRef.current += 1
-    replace(withReferenceImages(local, refs))
+    const apply = (d: DraftLayout) => {
+      const withRefs = withReferenceImages(d, refs)
+      return newPhotoView ? forgetRejected(withRefs, newPhotoView) : withRefs
+    }
+    replace(apply(local))
     const nextHistory = {
-      past: historyRef.current.past.map((d) => withReferenceImages(d, refs)),
-      future: historyRef.current.future.map((d) => withReferenceImages(d, refs)),
+      past: historyRef.current.past.map(apply),
+      future: historyRef.current.future.map(apply),
     }
     historyRef.current = nextHistory
     setHistory(nextHistory)
@@ -331,7 +336,9 @@ export function useDraftLayout(lotId: string, options?: UseDraftLayoutOptions): 
   const refreshReferenceImages = useCallback(async (uploaded?: UploadedReference) => {
     const requestedLot = lotRef.current
     if (uploaded && uploaded.lotId === requestedLot && draftRef.current?.lotId === requestedLot) {
-      applyReferenceImages(new Map([[uploaded.viewId, uploaded.referenceImage]]))
+      // The server forgot the stalls rejected on the old photo; forget them here too, so a save
+      // doesn't put them back.
+      applyReferenceImages(new Map([[uploaded.viewId, uploaded.referenceImage]]), uploaded.viewId)
     }
     let fresh: DraftLayout
     try {

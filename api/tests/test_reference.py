@@ -299,6 +299,17 @@ def test_complete_reads_the_size_from_the_file(client, admin_headers, adapters):
     assert (vp.image_width, vp.image_height) == (1600, 900)
 
 
+def test_a_new_photo_forgets_the_stalls_rejected_on_the_old_one(client, admin_headers, adapters):
+    body = as_body(get_draft(client, admin_headers))
+    v1 = next(v for v in body["viewpoints"] if v["viewId"] == "V1")
+    v1["rejectedStalls"] = [[[0.6, 0.1], [0.7, 0.1], [0.7, 0.2], [0.6, 0.2]]]
+    assert put(client, admin_headers, body).status_code == 200
+    assert _complete(client, admin_headers, _stored(adapters, jpeg(1600, 900))).status_code == 200
+    vp = adapters.repository.get_viewpoint("test-lot", "V1")
+    assert vp.rejected_stalls == []
+    assert vp.outlines  # the outlines stay, as before: the admin checks them against the photo
+
+
 def test_complete_applies_the_exif_orientation(client, admin_headers, adapters):
     # A portrait phone photo is stored landscape with orientation 6; browsers show it upright.
     sha = _stored(adapters, jpeg(4032, 3024, orientation=6))

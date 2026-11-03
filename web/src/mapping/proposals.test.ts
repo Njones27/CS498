@@ -322,6 +322,15 @@ describe('review helpers', () => {
     expect(Object.values(merged.draft.viewpoints[0].outlines)).not.toContainEqual(again.polygon)
   })
 
+  it('a rejected wide stall does not hide the stalls inside it, and a collapsed outline hides nothing', () => {
+    const d = reviewed()
+    // The admin rejected a proposal two stalls wide (cols 6 and 7), and one squashed flat.
+    d.viewpoints[0].rejectedStalls = [box(0.4, 0.1, 0.1, 0.1), box(0.6, 0.1, 0.05, 0)]
+    const merged = mergeProposals(d, 'V1', [stall(0, 6), stall(0, 7), stall(0, 10)])
+    expect(merged.rejected).toBe(0)
+    expect(merged.added).toBe(3)
+  })
+
   it('remembers only rejected proposals, the latest MAX_REJECTED of them', () => {
     const d = reviewed()
     const [first, second] = d.spaces.map((s) => s.spaceId)

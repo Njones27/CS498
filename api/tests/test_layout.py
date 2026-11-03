@@ -10,6 +10,7 @@ from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from parking_api.layout_schemas import MAX_REJECTED_STALLS
 from parking_worker.aligners import build_aligner
 from parking_worker.handler import process_message
 from parking_worker.scorers import build_scorer
@@ -175,6 +176,24 @@ def test_rejected_stalls_survive_reload_and_publish(adapters, client, admin_head
     assert layout.viewpoint("V1").rejected_stalls == [[tuple(p) for p in C01_OUTLINE]]
     assert '"rejectedStalls"' not in layout.viewpoint("V2").model_dump_json()
     assert view(get_draft(client, admin_headers), "V1")["rejectedStalls"] == [C01_OUTLINE]
+
+
+def test_a_save_without_rejected_stalls_keeps_them(client, admin_headers):
+    """An editor tab from before the list existed sends viewpoints without it."""
+    body = as_body(get_draft(client, admin_headers))
+    view(body, "V1")["rejectedStalls"] = [C01_OUTLINE]
+    assert put(client, admin_headers, body).status_code == 200
+    old_tab = as_body(get_draft(client, admin_headers))
+    for v in old_tab["viewpoints"]:
+        v.pop("rejectedStalls")
+    assert put(client, admin_headers, old_tab).status_code == 200
+    assert view(get_draft(client, admin_headers), "V1")["rejectedStalls"] == [C01_OUTLINE]
+
+
+def test_too_many_rejected_stalls_is_422(client, admin_headers):
+    body = as_body(get_draft(client, admin_headers))
+    view(body, "V1")["rejectedStalls"] = [C01_OUTLINE] * (MAX_REJECTED_STALLS + 1)
+    assert put(client, admin_headers, body).status_code == 422
 
 
 def test_stale_revision_returns_409(client, admin_headers):

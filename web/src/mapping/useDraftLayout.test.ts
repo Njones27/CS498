@@ -234,6 +234,23 @@ describe('useDraftLayout', () => {
     expect(hook.result.current.draft?.viewpoints[1].referenceImage).toEqual(v2Photo)
   })
 
+  it('a new photo forgets the stalls rejected on the old one, in the draft and its undo history', async () => {
+    const rejected = (d: DraftLayout): DraftLayout => ({
+      ...d,
+      viewpoints: d.viewpoints.map((v) => ({ ...v, rejectedStalls: [[[0.1, 0.1], [0.2, 0.1], [0.2, 0.2], [0.1, 0.2]]] })),
+    })
+    const { hook } = await loaded({ [`GET ${URL}`]: { body: rejected(draftFixture()) } })
+    act(() => hook.result.current.setDraft(renamed(hook.result.current.draft!, 'local')))
+    await act(async () => {
+      await hook.result.current.refreshReferenceImages({ lotId: 'test-lot', viewId: 'V2', referenceImage: v2Photo })
+    })
+    const views = () => hook.result.current.draft!.viewpoints
+    expect(views()[1].rejectedStalls).toEqual([])
+    expect(views()[0].rejectedStalls).toHaveLength(1) // another view's photo didn't change
+    act(() => hook.result.current.undo())
+    expect(views()[1].rejectedStalls).toEqual([])
+  })
+
   it("refreshReferenceImages ignores an upload for another lot", async () => {
     const { hook } = await loaded()
     await act(async () => {

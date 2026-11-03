@@ -682,7 +682,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
       const draft = outlinedDraft()
       draft.viewpoints.find((v) => v.viewId === 'V1')!.rejectedStalls = [STALL.polygon as Outline]
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
-      const { onChange } = renderPanel({ draft, viewId: 'V1' })
+      const { onChange, onSave, rerender } = renderPanel({ draft, viewId: 'V1' })
       await user.click(screen.getByTestId('find-stalls-btn'))
       await pollUntil(() => expect(screen.getByTestId('rejected-skipped')).toHaveTextContent('Left out 1 stall you rejected before.'))
       expect(onChange).not.toHaveBeenCalled()
@@ -693,7 +693,27 @@ describe('ReferencePhotoPanel (US-08)', () => {
       const forgotten: DraftLayout = onChange.mock.calls[0][0]
       expect(forgotten.viewpoints.find((v) => v.viewId === 'V1')!.rejectedStalls).toEqual([])
       expect(screen.queryByTestId('rejected-skipped')).not.toBeInTheDocument()
-      await vi.waitFor(() => expect(posts()).toBe(2)) // and Find stalls runs again
+      // The page hands the edited draft back; Find stalls runs again and now proposes the stall.
+      rerender(
+        <ReferencePhotoPanel
+          lotId="test-lot"
+          draft={forgotten}
+          viewId="V1"
+          onViewChange={vi.fn()}
+          onChange={onChange}
+          onReferenceUploaded={vi.fn()}
+          issues={[]}
+          selectedSpaceId={null}
+          onSelectSpace={vi.fn()}
+          hoveredSpaceId={null}
+          onHoverSpace={vi.fn()}
+          onSave={onSave}
+        />,
+      )
+      await pollUntil(() => expect(onChange).toHaveBeenCalledTimes(2))
+      expect(posts()).toBe(2)
+      const proposed: DraftLayout = onChange.mock.calls[1][0]
+      expect(Object.values(proposed.viewpoints.find((v) => v.viewId === 'V1')!.outlines)).toContainEqual(STALL.polygon)
     } finally {
       vi.useRealTimers()
     }

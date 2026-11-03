@@ -42,14 +42,20 @@ function alreadyOutlined(view: DraftViewpoint, stall: Outline): boolean {
 /** Rejected stalls kept per viewpoint; the oldest go first (the API takes at most this many). */
 export const MAX_REJECTED = 1000
 
-/** A found stall is one the admin rejected when most of it, or of the rejected outline, overlaps. */
-const REJECTED_OVERLAP = 0.5
+/**
+ * A found stall is one the admin rejected when the two overlap this much (intersection over union),
+ * so a stall found a little off counts, but the real stalls inside a rejected wide one (half of it
+ * each) don't.
+ */
+const REJECTED_OVERLAP = 0.6
 
 function wasRejected(view: DraftViewpoint, stall: Outline): boolean {
   const a = area(stall)
   return (view.rejectedStalls ?? []).some((r) => {
+    const b = area(r as Point[])
+    if (b <= 0) return false // squashed flat: it covers nothing
     const shared = area(clipPolygon(stall, r as Point[]))
-    return shared >= REJECTED_OVERLAP * Math.min(a, area(r as Point[]))
+    return shared >= REJECTED_OVERLAP * (a + b - shared)
   })
 }
 
