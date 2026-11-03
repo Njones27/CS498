@@ -768,15 +768,32 @@ export function ReferencePhotoPanel({
   const [wide, setWide] = useState<{ viewId: string; stalls: WideStall[] } | null>(null)
   // Stalls found from parked cars on a lot the admin has already mapped: laying the lot out from them
   // moves and renames every space, so it waits for the admin to ask.
-  const [fromCars, setFromCars] = useState<{ viewId: string; stalls: ProposedStall[]; cars: number } | null>(null)
+  const [fromCars, setFromCars] = useState<{
+    viewId: string
+    stalls: ProposedStall[]
+    cars: number
+    newIds?: ReadonlySet<string>
+  } | null>(null)
   /**
    * A photo taken at an angle: lay the lot out from the parked cars and the spaces it has, all on the
    * ground (rows levelled, their lean, the empty stalls between cars), so the map matches the photo;
    * cars standing off the rows are left out. False when it can't be done.
    */
-  const layOutFromCars = (base: DraftLayout, viewId: string, stalls: ProposedStall[], cars: number): boolean => {
+  const layOutFromCars = (
+    base: DraftLayout,
+    viewId: string,
+    stalls: ProposedStall[],
+    cars: number,
+    newIds?: ReadonlySet<string>,
+  ): boolean => {
     // The paint next to the cars lies on the ground, so it tells how far the stalls lean.
-    const straight = straightenFoundCars(base, viewId, stalls.flatMap((s) => s.paint ?? []), stalls as { polygon: Point[]; fromCar?: boolean | null }[])
+    const straight = straightenFoundCars(
+      base,
+      viewId,
+      stalls.flatMap((s) => s.paint ?? []),
+      stalls as { polygon: Point[]; fromCar?: boolean | null }[],
+      newIds,
+    )
     if (typeof straight === 'string') {
       setStatusNotice(straight)
       return false
@@ -804,9 +821,9 @@ export function ReferencePhotoPanel({
     if (carStalls && merged.added > 0) {
       // A new lot is laid out at once; a mapped one gets the stalls as proposals and a button.
       if (!isMapped(draft)) {
-        if (layOutFromCars(merged.draft, viewId, stalls, merged.added)) return
+        if (layOutFromCars(merged.draft, viewId, stalls, merged.added, merged.createdIds)) return
       } else {
-        setFromCars({ viewId, stalls, cars: merged.added })
+        setFromCars({ viewId, stalls, cars: merged.added, newIds: merged.createdIds })
       }
     }
     const proposed = merged.added + merged.attached
@@ -916,7 +933,7 @@ export function ReferencePhotoPanel({
             type="button"
             className="button button--sm"
             onClick={() => {
-              layOutFromCars(draft, fromCars.viewId, fromCars.stalls, fromCars.cars)
+              layOutFromCars(draft, fromCars.viewId, fromCars.stalls, fromCars.cars, fromCars.newIds)
               setFromCars(null)
             }}
           >
@@ -939,7 +956,7 @@ export function ReferencePhotoPanel({
             className="button button--sm"
             onClick={() => {
               const live = wide.stalls.filter((w) => w.spaceIds.every((id) => draft.spaces.some((sp) => sp.spaceId === id && !sp.retired)))
-              commitOutlines(mergeWideStalls(draft, wide.viewId, live))
+              commitOutlines(mergeWideStalls(draft, wide.viewId, live, publishedSpaceIds))
               setStatusNotice(`Merged ${live.length} wide ${live.length === 1 ? 'stall' : 'stalls'} into one space each; review the outline${live.length === 1 ? '' : 's'}.`)
               setWide(null)
             }}

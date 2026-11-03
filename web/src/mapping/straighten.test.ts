@@ -305,4 +305,33 @@ describe('straightenFromPhoto', () => {
     const r = ok(straightenFromPhoto(named, 'V1'))
     expect(r.draft.spaces[0].label).toBe('Gate')
   })
+
+  it('does not drop leftover pending proposals from prior runs as cars off the rows', () => {
+    const empty: DraftLayout = {
+      lotId: 'empty',
+      revision: 0,
+      basedOnVersion: null,
+      updatedAt: '2026-10-28T00:00:00Z',
+      updatedBy: 'test',
+      schematic: { width: 1000, height: 600 },
+      spaces: [],
+      viewpoints: [{ viewId: 'V1', name: 'Camera', referenceImage: { url: '/p', width: 1280, height: 720 }, outlines: {}, outlineReview: {} }],
+    }
+    const paint = PKLOT_CAR_STALLS.flatMap((s) => s.paint ?? [])
+    const merged1 = mergeProposals(empty, 'V1', PKLOT_CAR_STALLS)
+    const leftoverId = 'sp_leftover_pending'
+    const draftWithLeftover: DraftLayout = {
+      ...merged1.draft,
+      spaces: [...merged1.draft.spaces, { spaceId: leftoverId, label: 'Z-99', type: 'STANDARD', rect: { x: 900, y: 500, w: 40, h: 80 }, retired: false }],
+      viewpoints: merged1.draft.viewpoints.map((v) => ({
+        ...v,
+        outlines: { ...v.outlines, [leftoverId]: [[0.9, 0.9], [0.95, 0.9], [0.95, 0.95], [0.9, 0.95]] },
+        outlineReview: { ...v.outlineReview, [leftoverId]: { source: 'proposed', status: 'pending', newSpace: true } },
+      })),
+    }
+
+    const r = straightenFoundCars(draftWithLeftover, 'V1', paint, PKLOT_CAR_STALLS, merged1.createdIds)
+    if (typeof r === 'string') throw new Error(r)
+    expect(r.draft.spaces.some((sp) => sp.spaceId === leftoverId)).toBe(true)
+  })
 })

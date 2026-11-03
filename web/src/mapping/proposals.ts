@@ -1,6 +1,6 @@
 import type { components } from '../api/types.gen'
 import { MARGIN, MIN_SIDE, yBelowAll } from './schematic/geometry'
-import { addSpacesAt, deleteSpace, fitSchematic, leanLikeRows, type Grown } from './schematic/edits'
+import { addSpacesAt, deleteSpace, fitSchematic, leanLikeRows, removeSpaces, type Grown } from './schematic/edits'
 import { formatLabel, nextRowStart, parseLabel } from './schematic/labels'
 import { type Grid, shiftGrid } from './schematic/grid'
 import { touchesPhotoEdge } from './photo/geom'
@@ -98,6 +98,8 @@ export interface MergeResult extends Grown {
   blocked?: string
   /** Wide stalls the lot has drawn as more than one space (see `findWideStalls`). */
   wide: WideStall[]
+  /** Space IDs created for stalls in this run. */
+  createdIds?: ReadonlySet<string>
 }
 
 /** One stall on the photo, wider than its row's others, that the lot has drawn as several spaces. */
@@ -190,7 +192,38 @@ export function clipPolygon(subject: Point[], clip: Point[]): Point[] {
 }
 
 /**
- * Stalls on the photo wider than the others in their row (WIDE times their typical area) that the lot
+ * Normalized width of a stall polygon (width along the row / depth across the row),
+ * scale-invariant across perspective.
+ */
+export function normalizedStallWidth(poly: Point[], rowDir: Point = [1, 0]): number {
+  if (poly.length < 3) return 0
+  const mag = Math.hypot(rowDir[0], rowDir[1])
+  const u: Point = mag > 0 ? [rowDir[0] / mag, rowDir[1] / mag] : [1, 0]
+
+  if (poly.length === 4) {
+    const d = (p: Point, q: Point) => Math.hypot(p[0] - q[0], p[1] - q[1])
+    const s0 = d(poly[0], poly[1])
+    const s1 = d(poly[1], poly[2])
+    const s2 = d(poly[2], poly[3])
+    const s3 = d(poly[3], poly[0])
+    const e0: Point = [poly[1][0] - poly[0][0], poly[1][1] - poly[0][1]]
+    const e1: Point = [poly[2][0] - poly[1][0], poly[2][1] - poly[1][1]]
+    const dot0 = s0 > 0 ? Math.abs((e0[0] * u[0] + e0[1] * u[1]) / s0) : 0
+    const dot1 = s1 > 0 ? Math.abs((e1[0] * u[0] + e1[1] * u[1]) / s1) : 0
+    const [width, depth] = dot0 >= dot1 ? [(s0 + s2) / 2, (s1 + s3) / 2] : [(s1 + s3) / 2, (s0 + s2) / 2]
+    if (depth > 0) return width / depth
+  }
+
+  const uPerp: Point = [-u[1], u[0]]
+  const projsU = poly.map((p) => p[0] * u[0] + p[1] * u[1])
+  const projsV = poly.map((p) => p[0] * uPerp[0] + p[1] * uPerp[1])
+  const width = Math.max(...projsU) - Math.min(...projsU)
+  const depth = Math.max(...projsV) - Math.min(...projsV)
+  return depth > 0 ? width / depth : 0
+}
+
+/**
+ * Stalls on the photo wider than the others in their row (WIDE times their typical normalized width) that the lot
  * has drawn as two or more spaces in this view: a space belongs to the wide stall holding most of its
  * outline (INSIDE of it at least). Four wide bays drawn as six narrow spaces, for one, give the lot two
  * spaces too many; `mergeWideStalls` puts each back as one space.
@@ -198,12 +231,47 @@ export function clipPolygon(subject: Point[], clip: Point[]): Point[] {
 export function findWideStalls(draft: DraftLayout, viewId: string, stalls: ProposedStall[]): WideStall[] {
   const view = draft.viewpoints.find((v) => v.viewId === viewId)
   if (!view) return []
-  const typical = new Map<number, number>()
-  for (const row of new Set(stalls.map((s) => s.row))) {
-    const areas = stalls.filter((s) => s.row === row && !s.partial).map((s) => area(s.polygon as Point[])).sort((a, b) => a - b)
-    if (areas.length > 0) typical.set(row, areas[Math.floor(areas.length / 2)])
+
+  const rowGroups = new Map<number, ProposedStall[]>()
+  for (const s of stalls) {
+    const list = rowGroups.get(s.row) ?? []
+    list.push(s)
+    rowGroups.set(s.row, list)
   }
-  const wide = stalls.filter((s) => !s.partial && area(s.polygon as Point[]) >= WIDE * (typical.get(s.row) ?? Infinity))
+
+  const wide: ProposedStall[] = []
+  for (const [, rowStalls] of rowGroups) {
+    const sorted = [...rowStalls].sort((a, b) => a.col - b.col)
+    let rowDir: Point = [1, 0]
+    if (sorted.length >= 2) {
+      const c0 = centroid(sorted[0].polygon as Outline)
+      const cLast = centroid(sorted[sorted.length - 1].polygon as Outline)
+      const dx = cLast[0] - c0[0]
+      const dy = cLast[1] - c0[1]
+      if (Math.hypot(dx, dy) > 0) rowDir = [dx, dy]
+    }
+
+    const scores = new Map<ProposedStall, number>()
+    for (const s of sorted) {
+      scores.set(s, normalizedStallWidth(s.polygon as Point[], rowDir))
+    }
+
+    for (const s of sorted) {
+      if (s.partial) continue
+      const neighbors = sorted
+        .filter((other) => other !== s && !other.partial)
+        .sort((a, b) => Math.abs(a.col - s.col) - Math.abs(b.col - s.col))
+        .slice(0, 4)
+      if (neighbors.length === 0) continue
+      const neighborScores = neighbors.map((n) => scores.get(n)!).sort((a, b) => a - b)
+      const typical = neighborScores[Math.floor((neighborScores.length - 1) / 2)]
+      const sScore = scores.get(s)!
+      if (sScore >= WIDE * typical) {
+        wide.push(s)
+      }
+    }
+  }
+
   if (wide.length === 0) return []
   const home = new Map<ProposedStall, string[]>()
   for (const sp of draft.spaces) {
@@ -226,33 +294,40 @@ export function findWideStalls(draft: DraftLayout, viewId: string, stalls: Propo
 
 /**
  * Each wide stall drawn as several spaces becomes one: the first space is kept, spanning all their
- * cells on the map, with the wide stall's outline proposed for review; the others are retired (and lose
- * their outlines and pending proposals), so publishing takes them off the map. Undo takes it back.
+ * cells on the map, with the wide stall's outline proposed for review; the other spaces are deleted
+ * if they were never published, or retired (keeping history) if they were published. Undo takes it back.
  */
-export function mergeWideStalls(draft: DraftLayout, viewId: string, wide: WideStall[]): DraftLayout {
+export function mergeWideStalls(
+  draft: DraftLayout,
+  viewId: string,
+  wide: WideStall[],
+  publishedSpaceIds: ReadonlySet<string> = new Set(),
+): DraftLayout {
   const keep = new Map<string, WideStall>()
-  const retire = new Set<string>()
+  const remove = new Set<string>()
   for (const w of wide) {
     keep.set(w.spaceIds[0], w)
-    w.spaceIds.slice(1).forEach((id) => retire.add(id))
+    w.spaceIds.slice(1).forEach((id) => remove.add(id))
   }
   const rectOf = (id: string) => draft.spaces.find((sp) => sp.spaceId === id)!.rect
-  const spaces = draft.spaces.map((sp) => {
-    const w = keep.get(sp.spaceId)
-    if (w) {
+  let next: DraftLayout = {
+    ...draft,
+    spaces: draft.spaces.map((sp) => {
+      const w = keep.get(sp.spaceId)
+      if (!w) return sp
       const rects = w.spaceIds.map(rectOf)
       const x0 = Math.min(...rects.map((r) => r.x))
       const y0 = Math.min(...rects.map((r) => r.y))
       const x1 = Math.max(...rects.map((r) => r.x + r.w))
       const y1 = Math.max(...rects.map((r) => r.y + r.h))
       return { ...sp, rect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } }
-    }
-    return retire.has(sp.spaceId) ? { ...sp, retired: true } : sp
-  })
-  const viewpoints = draft.viewpoints.map((v) => {
+    }),
+  }
+  next = removeSpaces(next, remove, publishedSpaceIds)
+  const viewpoints = next.viewpoints.map((v) => {
     const outlines = { ...v.outlines }
     const outlineReview = { ...v.outlineReview }
-    for (const id of retire) {
+    for (const id of remove) {
       delete outlines[id]
       delete outlineReview[id]
     }
@@ -264,7 +339,7 @@ export function mergeWideStalls(draft: DraftLayout, viewId: string, wide: WideSt
     }
     return { ...v, outlines, outlineReview }
   })
-  return { ...draft, spaces, viewpoints }
+  return { ...next, viewpoints }
 }
 
 /** Where a stall is, for placing it on the map: the whole stall, even past the photo's border. */
@@ -365,7 +440,7 @@ export function mergeProposals(
   // laid out as wide as the photo shows them.
   next = leanLikeRows(next, created)
   next = alignRowsToPhoto(next, viewId)
-  return { draft: next, dx, dy, added: created.size, attached: found.size - created.size, skipped, wide }
+  return { draft: next, dx, dy, added: created.size, attached: found.size - created.size, skipped, wide, createdIds: created }
 }
 
 /** The view's outlines still waiting for review, weakest evidence first (those without a score last). */

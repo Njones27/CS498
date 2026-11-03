@@ -758,4 +758,64 @@ describe('orienting the map', () => {
     expect(after[0] - before[0]).toBe(0)
     expect(after[1] - before[1]).toBe(-50)
   })
+
+  it('shows viewpoint coverage indicators when a reference photo view is active', () => {
+    const draft = davidFixture()
+    // V1 outlines A-01, V2 outlines A-02, A-03 has no outlines
+    draft.viewpoints = [
+      {
+        viewId: 'V1',
+        name: 'View 1',
+        referenceImage: null,
+        outlines: { 'A-01': [[0.1, 0.1], [0.2, 0.1], [0.2, 0.2], [0.1, 0.2]] },
+        outlineReview: {},
+      },
+      {
+        viewId: 'V2',
+        name: 'View 2',
+        referenceImage: null,
+        outlines: { 'A-02': [[0.3, 0.3], [0.4, 0.3], [0.4, 0.4], [0.3, 0.4]] },
+        outlineReview: {},
+      },
+    ]
+
+    setup({ draft, photoViewId: 'V1' })
+
+    const dot1 = screen.getByTestId('coverage-A-01')
+    expect(dot1).toHaveClass('schematic-space__coverage--in-view')
+
+    const dot2 = screen.getByTestId('coverage-A-02')
+    expect(dot2).toHaveClass('schematic-space__coverage--other-view')
+
+    const dot3 = screen.getByTestId('coverage-A-03')
+    expect(dot3).toHaveClass('schematic-space__coverage--unmapped')
+  })
+
+  it('distinguishes pending proposals from accepted outlines in viewpoint coverage indicators', () => {
+    const draft = davidFixture()
+    draft.viewpoints = [
+      {
+        viewId: 'V1',
+        name: 'View 1',
+        referenceImage: null,
+        outlines: {
+          'A-01': [[0.1, 0.1], [0.2, 0.1], [0.2, 0.2], [0.1, 0.2]],
+          'A-02': [[0.2, 0.1], [0.3, 0.1], [0.3, 0.2], [0.2, 0.2]],
+        },
+        outlineReview: {
+          'A-02': { source: 'proposed', status: 'pending' },
+        },
+      },
+    ]
+
+    setup({ draft, photoViewId: 'V1' })
+
+    const dot1 = screen.getByTestId('coverage-A-01')
+    expect(dot1).toHaveClass('schematic-space__coverage--in-view')
+
+    const dot2 = screen.getByTestId('coverage-A-02')
+    expect(dot2).toHaveClass('schematic-space__coverage--pending')
+    expect(dot2).not.toHaveClass('schematic-space__coverage--in-view')
+    expect(screen.getByLabelText(/A-02.*Proposed outline pending review/i)).toBeInTheDocument()
+  })
 })

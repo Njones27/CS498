@@ -703,6 +703,20 @@ export function SchematicEditor({
           const messages = issues.filter((i) => i.spaceIds.includes(id)).map((i) => i.message)
           const fs = Math.max(8, Math.min(w, h) * 0.2)
           const small = Math.max(6, Math.min(fs * 0.6, (w - 6) / 10))
+          const activeView = photoViewId ? draft.viewpoints.find((v) => v.viewId === photoViewId) : null
+          const isPending = Boolean(activeView?.outlines[id]) && activeView?.outlineReview?.[id]?.status === 'pending'
+          const hasCurrentOutline = Boolean(activeView?.outlines[id]) && !isPending
+          const outlineCount = photoViewId ? draft.viewpoints.filter((v) => Boolean(v.outlines[id])).length : 0
+          const coverageText = photoViewId
+            ? isPending
+              ? 'Proposed outline pending review in this photo view'
+              : hasCurrentOutline
+                ? 'Outlined in this photo view'
+                : outlineCount > 0
+                  ? `Outlined in ${outlineCount} other photo view${outlineCount === 1 ? '' : 's'}`
+                  : 'Not outlined in any photo'
+            : null
+          const title = [text, coverageText, ...messages].filter(Boolean).join('. ')
           const cls = [
             'schematic-space',
             (selectedSpaceId === id || selectedSpaceIds?.has(id)) && 'schematic-space--selected',
@@ -719,7 +733,7 @@ export function SchematicEditor({
               data-testid={`schematic-space-${id}`}
               role="button"
               tabIndex={0}
-              aria-label={text}
+              aria-label={coverageText ? `${text}, ${coverageText}` : text}
               aria-pressed={selectedSpaceId === id}
               onPointerDown={(e) => startDrag(e, space, 'move')}
               onMouseEnter={() => onHoverSpace(id)}
@@ -731,7 +745,7 @@ export function SchematicEditor({
                 }
               }}
             >
-              <title>{[text, ...messages].join('. ')}</title>
+              <title>{title}</title>
               {stallPoints({ x, y, w, h }, space.skewDeg, ends.get(id)) ? (
                 <polygon points={stallPoints({ x, y, w, h }, space.skewDeg, ends.get(id))!} className="schematic-space__rect" />
               ) : (
@@ -739,6 +753,17 @@ export function SchematicEditor({
               )}
               {/* Turned back about the space's middle, so its label reads upright on a turned map. */}
               <g transform={turnBy ? `rotate(${-turnBy} ${x + w / 2} ${y + h / 2})` : undefined}>
+              {photoViewId && !space.retired && (
+                <circle
+                  cx={x + 4 + fs * 0.25}
+                  cy={y + 4 + fs * 0.25}
+                  r={Math.max(2, fs * 0.25)}
+                  className={`schematic-space__coverage ${isPending ? 'schematic-space__coverage--pending' : hasCurrentOutline ? 'schematic-space__coverage--in-view' : outlineCount > 0 ? 'schematic-space__coverage--other-view' : 'schematic-space__coverage--unmapped'}`}
+                  data-testid={`coverage-${id}`}
+                >
+                  <title>{coverageText!}</title>
+                </circle>
+              )}
               <text
                 x={x + w / 2}
                 y={y + h / 2}

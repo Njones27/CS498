@@ -11,6 +11,7 @@
   --filling: #a86200;
   --nearly-full: #b42318;
   --no-data: #9aa3ae;
+  --warning: #e69138;
 
   --free-bg: #ffffff;
   --free-stroke: #1d7a3e;
@@ -592,6 +593,7 @@ a { color: var(--accent); }
   --filling: #f0a43a;
   --nearly-full: #ff8a80;
   --no-data: #6b7480;
+  --warning: #f5a742;
   --free-bg: #1a212b;
   --free-stroke: #4cc27a;
   --occupied-bg: #3a4452;
@@ -628,6 +630,7 @@ a { color: var(--accent); }
     --filling: #f0a43a;
     --nearly-full: #ff8a80;
     --no-data: #6b7480;
+    --warning: #f5a742;
     --free-bg: #1a212b;
     --free-stroke: #4cc27a;
     --occupied-bg: #3a4452;
@@ -695,6 +698,11 @@ a { color: var(--accent); }
 .schematic-space--error .schematic-space__rect { stroke: var(--nearly-full); stroke-width: 4; stroke-dasharray: 10 4; }
 .schematic-space__note { fill: var(--nearly-full); font-weight: 700; pointer-events: none; }
 .schematic-space__marker { fill: var(--muted); font-weight: 700; pointer-events: none; }
+.schematic-space__coverage { pointer-events: none; }
+.schematic-space__coverage--in-view { fill: var(--plenty); stroke: var(--surface); stroke-width: 0.5; }
+.schematic-space__coverage--pending { fill: var(--warning); stroke: var(--surface); stroke-width: 0.5; }
+.schematic-space__coverage--other-view { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.schematic-space__coverage--unmapped { fill: none; stroke: var(--warning); stroke-width: 1.5; stroke-dasharray: 2 1; }
 .schematic-badge { pointer-events: none; }
 .schematic-badge rect { fill: var(--accent); }
 .schematic-badge text { fill: var(--accent-text); font-weight: 700; }
