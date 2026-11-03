@@ -202,13 +202,15 @@ export function useSchematicGrid(lotId: string, draft: DraftLayout | null): Grid
     },
     shiftBy: (next, dx, dy) => {
       const shifted = shiftGrid(state.grid, dx, dy)
-      const history = recordGrid(state.history, layoutSignature(next), shifted)
+      const saved = recordGrid(state.history, layoutSignature(state.seen), state.grid)
+      const history = recordGrid(saved, layoutSignature(next), shifted)
       setState({ ...state, seen: next, grid: shifted, history })
     },
     refit: (next) => {
       update({ ...current, sizes: {} })
       const newGrid = fitGrid(next.spaces)
-      const history = recordGrid(state.history, layoutSignature(next), newGrid)
+      const saved = recordGrid(state.history, layoutSignature(state.seen), state.grid)
+      const history = recordGrid(saved, layoutSignature(next), newGrid)
       setState({ ...state, seen: next, grid: newGrid, history })
     },
   }

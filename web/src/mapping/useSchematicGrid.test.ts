@@ -95,4 +95,29 @@ describe('useSchematicGrid', () => {
     rerender({ d: a }) // undo the move
     expect(gridSizes(result.current!.grid).boxW).toBe(before.boxW + 20)
   })
+
+  it('undo of Straighten after an earlier move restores the pre-Straighten grid', () => {
+    localStorage.clear()
+    const a = davidFixture()
+    const { result, rerender } = renderHook(({ d }) => useSchematicGrid('lot-x', d), { initialProps: { d: a } })
+    const moved = { ...a, spaces: a.spaces.map((s, i) => (i === 0 ? { ...s, rect: { ...s.rect, x: s.rect.x + 7 } } : s)) }
+    rerender({ d: moved }) // move a space first
+    const beforeStraighten = result.current!.grid
+    const straightened = davidFixture({
+      spaces: [
+        space('A-01', 50, 50, { label: 'B-01', rect: { x: 50, y: 50, w: 30, h: 60 } }),
+        space('A-02', 90, 50, { label: 'B-02', rect: { x: 90, y: 50, w: 30, h: 60 } }),
+      ],
+    })
+    act(() => result.current!.refit(straightened)) // Straighten
+    rerender({ d: straightened })
+    const afterStraighten = result.current!.grid
+    expect(afterStraighten).not.toEqual(beforeStraighten)
+
+    rerender({ d: moved }) // undo
+    expect(result.current!.grid).toEqual(beforeStraighten)
+
+    rerender({ d: straightened }) // redo
+    expect(result.current!.grid).toEqual(afterStraighten)
+  })
 })
