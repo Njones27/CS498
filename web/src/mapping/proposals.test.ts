@@ -16,7 +16,7 @@ import {
   type ProposedStall,
 } from './proposals'
 import { cellRect, fitGrid } from './schematic/grid'
-import { addSpaceOnSchematic, afterRectChange, photoToSchematic } from './sync'
+import { afterRectChange, photoToSchematic, proposeOutlines } from './sync'
 import type { DraftLayout, DraftSpace, Outline, Point } from './types'
 
 const box = (x: number, y: number, w: number, h: number): Outline => [
@@ -216,12 +216,14 @@ describe('mergeProposals', () => {
     expect(midX(v.outlines[last.spaceId])).toBeCloseTo(midX(draft.viewpoints[0].outlines[last.spaceId]) + 0.05, 3)
   })
 
-  it('right after Find stalls, a space added on the schematic gets a proposed outline on the photo', () => {
+  it('right after Find stalls, a space with a name of its own gets a proposed outline on the photo', () => {
     const { draft } = mergeProposals(emptyDraft(), 'V1', [stall(0, 0), stall(0, 1), stall(1, 0), stall(1, 1)])
-    const a2 = draft.spaces.find((s) => s.label === 'A-02')!
-    const { draft: next, space: added } = addSpaceOnSchematic(draft, { ...a2.rect, x: a2.rect.x + a2.rect.w })
-    expect(next.viewpoints[0].outlines[added.spaceId]).toBeDefined()
-    expect(next.viewpoints[0].outlineReview[added.spaceId]).toEqual({ source: 'proposed', status: 'pending' })
+    // "Gate" names no row or number, so only the photo fit can place it.
+    const b2 = draft.spaces.find((s) => s.label === 'B-02')!
+    const gate = { ...space('gate', 'Gate', 0, 0), rect: { ...b2.rect, x: b2.rect.x + b2.rect.w } }
+    const next = proposeOutlines({ ...draft, spaces: [...draft.spaces, gate] }, ['gate'])
+    expect(next.viewpoints[0].outlines.gate).toBeDefined()
+    expect(next.viewpoints[0].outlineReview.gate).toEqual({ source: 'proposed', status: 'pending' })
   })
 
   it('does nothing for an unknown view or no stalls', () => {
