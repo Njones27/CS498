@@ -195,9 +195,10 @@ def _run(
     if viewpoint is None:
         raise PermanentJobError("Unknown viewpoint")
 
-    if not adapters.object_store.exists(snapshot.s3_key):
-        raise PermanentJobError("Photo missing from storage")
-    image = adapters.object_store.get(snapshot.s3_key)
+    try:
+        image = adapters.object_store.get(snapshot.s3_key)
+    except KeyError as exc:
+        raise PermanentJobError("Photo missing from storage") from exc
 
     outlines = aligner.align(image, viewpoint)  # AlignmentError is a PermanentJobError
     # A stall the reference photo cuts off is outlined only up to the border: never wholly in

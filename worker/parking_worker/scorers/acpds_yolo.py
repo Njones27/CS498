@@ -260,7 +260,19 @@ def car_overlaps(
         if area == 0 or not cars:
             out.append(0.0)
             continue
-        best = max(car_pixels(poly, px0, py0, d, mode) for d in cars)
+        px1 = px0 + poly.shape[1]
+        py1 = py0 + poly.shape[0]
+        overlapping = [
+            d
+            for d in cars
+            if not (
+                d.box_xyxy[2] <= px0
+                or d.box_xyxy[0] >= px1
+                or d.box_xyxy[3] <= py0
+                or d.box_xyxy[1] >= py1
+            )
+        ]
+        best = max(car_pixels(poly, px0, py0, d, mode) for d in overlapping) if overlapping else 0
         out.append(min(1.0, best / area))
     return out
 
