@@ -391,7 +391,8 @@ The clock times below are examples; use times earlier than now, in the same orde
 - [ ] **#1 Clean clone starts** `[compose]`. `cp .env.example .env && docker compose up --build`.
   Six services: web (5173), api (8000), worker, rustfs (9000, the S3 stand-in instead of MinIO),
   elasticmq (9324), dynamodb-local (8001). `curl localhost:8000/health` returns
-  `{"status":"ok"}`.
+  `{"status":"ok"}`. The ports listen on `127.0.0.1` only, so open the app from the same
+  machine.
 - [ ] **#2 Seed loads the test lot** `[compose]`. `(set -a; . ./.env.ci-host; uv run python seed/seed.py --lot test-lot)`
   prints "Created table, bucket and queue" and "Loaded Test Lot with 14 spaces and 2
   viewpoints"; Test Lot is on http://localhost:5173/. (The seed runs on the host, so it loads `.env.ci-host`, as CI does.)

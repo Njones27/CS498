@@ -1,4 +1,7 @@
 # Phase 1 local stack (HDD §7.1). Every service maps one to one to an AWS service in Phase 2.
+# Host ports bind to 127.0.0.1 only: the emulators accept the dev credentials in .env.example
+# (DynamoDB Local accepts any), so on 0.0.0.0 anyone on the same network could read and write
+# the data directly, past the API's admin checks.
 #   cp .env.example .env && docker compose up --build
 #   uv run python seed/seed.py            # creates table, bucket, queue and loads the test lot
 
@@ -14,7 +17,7 @@ services:
       - ./contract:/contract:ro
       - web_node_modules:/app/node_modules
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     depends_on:
       api:
         condition: service_healthy
@@ -25,7 +28,7 @@ services:
       dockerfile: api/Dockerfile
     env_file: .env
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status == 200 else 1)"]
       interval: 5s
@@ -78,8 +81,8 @@ services:
       RUSTFS_ACCESS_KEY: ${AWS_ACCESS_KEY_ID:-rustfsadmin}
       RUSTFS_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY:-rustfsadmin}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - rustfs_data:/data
     healthcheck:
@@ -94,14 +97,14 @@ services:
     volumes:
       - ./infra/local/elasticmq.conf:/opt/elasticmq.conf:ro
     ports:
-      - "9324:9324"
-      - "9325:9325"
+      - "127.0.0.1:9324:9324"
+      - "127.0.0.1:9325:9325"
 
   dynamodb-local:
     image: amazon/dynamodb-local:2.6.1
     command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
 
 volumes:
   rustfs_data:

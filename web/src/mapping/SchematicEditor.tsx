@@ -867,6 +867,7 @@ export function SchematicEditor({
                 Label
                 <input
                   value={selected.label}
+                  maxLength={40}
                   onChange={(e) => onChange(updateSpace(draft, selected.spaceId, { label: e.target.value }))}
                   aria-invalid={duplicates.has(selected.spaceId) || undefined}
                   aria-describedby={duplicates.has(selected.spaceId) ? noteId : undefined}
@@ -999,7 +1000,7 @@ function RowDialog({ initialStart, maxCount, onAdd, onCancel }: RowDialogProps) 
     >
       <label>
         Start label
-        <input value={start} onChange={(e) => setStart(e.target.value)} placeholder="B-01" autoFocus />
+        <input value={start} onChange={(e) => setStart(e.target.value)} placeholder="B-01" maxLength={40} autoFocus />
       </label>
       <label>
         Number of spaces

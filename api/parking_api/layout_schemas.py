@@ -6,6 +6,7 @@ have no defaults, so OpenAPI emits one schema each instead of -Input/-Output pai
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Annotated
 
@@ -26,6 +27,15 @@ Outline = Annotated[
 ]
 MAX_REJECTED_STALLS = 1000
 """Per viewpoint; the editor keeps the latest this many (web/src/mapping/proposals.ts)."""
+
+ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+"""Space and viewpoint ids. They become parts of DynamoDB keys, where `#` separates fields, and
+viewpoint ids become parts of S3 keys, so only letters, digits, `-` and `_` are allowed."""
+_ID_RE = re.compile(ID_PATTERN)
+MAX_LABEL_LENGTH = 40
+"""A space's display label (the editor's Label input has the same maxLength)."""
+MAX_NAME_LENGTH = 120
+"""A viewpoint's name, as long as a lot's name may be."""
 
 
 class DraftSchematic(CamelModel):
@@ -128,20 +138,39 @@ class DraftLayout(CamelModel):
 class DraftViewpointIn(CamelModel):
     """A viewpoint in a draft save. The reference photo is set only by its own endpoints."""
 
-    view_id: str = Field(min_length=1)
-    name: str
+    view_id: str = Field(
+        pattern=ID_PATTERN, description="Letters, digits, '-' and '_' only, at most 64"
+    )
+    name: str = Field(max_length=MAX_NAME_LENGTH)
     outlines: dict[str, Outline] = Field(default_factory=dict)
     outline_review: dict[str, OutlineReviewOut] = Field(default_factory=dict)
     rejected_stalls: list[Outline] = Field(default_factory=list, max_length=MAX_REJECTED_STALLS)
 
 
 class DraftLayoutUpdate(CamelModel):
-    """PUT body: the DraftLayout shape without updatedAt, updatedBy and referenceImage."""
+    """PUT body: the DraftLayout shape without updatedAt, updatedBy and referenceImage.
+
+    Each space's spaceId must be 1 to 64 letters, digits, '-' or '_', and its label at most 40
+    characters. Those are checked here, not on DraftSpace, because DraftSpace is also the
+    response shape and a draft stored before the rules must still load."""
 
     revision: int = Field(description="Must equal the stored revision, else 409 stale_revision")
     schematic: DraftSchematic
     spaces: list[DraftSpace]
     viewpoints: list[DraftViewpointIn]
+
+    @model_validator(mode="after")
+    def _space_fields(self) -> DraftLayoutUpdate:
+        for s in self.spaces:
+            if not _ID_RE.match(s.space_id):
+                raise ValueError(
+                    f"spaceId must be 1 to 64 letters, digits, '-' or '_': {s.space_id[:64]!r}"
+                )
+            if len(s.label) > MAX_LABEL_LENGTH:
+                raise ValueError(
+                    f"Label of {s.space_id} is longer than {MAX_LABEL_LENGTH} characters"
+                )
+        return self
 
     @model_validator(mode="after")
     def _unique_ids(self) -> DraftLayoutUpdate:

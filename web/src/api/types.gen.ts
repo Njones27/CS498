@@ -634,6 +634,10 @@ export interface components {
         /**
          * DraftLayoutUpdate
          * @description PUT body: the DraftLayout shape without updatedAt, updatedBy and referenceImage.
+         *
+         *     Each space's spaceId must be 1 to 64 letters, digits, '-' or '_', and its label at most 40
+         *     characters. Those are checked here, not on DraftSpace, because DraftSpace is also the
+         *     response shape and a draft stored before the rules must still load.
          */
         DraftLayoutUpdate: {
             /**
@@ -754,7 +758,10 @@ export interface components {
                 number,
                 number
             ][][];
-            /** Viewid */
+            /**
+             * Viewid
+             * @description Letters, digits, '-' and '_' only, at most 64
+             */
             viewId: string;
         };
         /** ErrorResponse */
