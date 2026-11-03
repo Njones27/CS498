@@ -55,7 +55,37 @@ export function fitSchematic(draft: DraftLayout): Grown {
 }
 
 /** Append `spaces`, growing the map area to hold them (fitSchematic); they come back with their final rects. */
+/**
+ * A new space in a row of angled stalls leans like them: the lean most of the active spaces at its
+ * height and depth have (two at least), so a stall found or drawn among 45-degree stalls is one too.
+ */
+export function withRowLean(spaces: DraftSpace[], space: DraftSpace): DraftSpace {
+  if (space.skewDeg) return space
+  const key = (r: DraftRect) => `${Math.round(r.y)}:${Math.round(r.h)}`
+  const mates = spaces.filter((s) => !s.retired && s.spaceId !== space.spaceId && key(s.rect) === key(space.rect))
+  if (mates.length < 2) return space
+  const counts = new Map<number, number>()
+  for (const s of mates) counts.set(s.skewDeg ?? 0, (counts.get(s.skewDeg ?? 0) ?? 0) + 1)
+  const [lean, n] = [...counts].reduce((a, b) => (b[1] > a[1] ? b : a))
+  return lean && n * 2 > mates.length ? { ...space, skewDeg: lean } : space
+}
+
+/** `draft` with the spaces `ids` leaning like their row (withRowLean), once they are in place. */
+export function leanLikeRows(draft: DraftLayout, ids: Iterable<string>): DraftLayout {
+  const want = new Set(ids)
+  if (want.size === 0) return draft
+  let changed = false
+  const spaces = draft.spaces.map((s) => {
+    if (!want.has(s.spaceId)) return s
+    const leaned = withRowLean(draft.spaces, s)
+    changed ||= leaned !== s
+    return leaned
+  })
+  return changed ? { ...draft, spaces } : draft
+}
+
 function appendSpaces(draft: DraftLayout, added: DraftSpace[]): Grown & { spaces: DraftSpace[] } {
+  added = added.map((s) => withRowLean(draft.spaces, s))
   const { draft: next, dx, dy } = fitSchematic({ ...draft, spaces: [...draft.spaces, ...added] })
   return { draft: next, spaces: next.spaces.slice(draft.spaces.length), dx, dy }
 }
@@ -146,4 +176,33 @@ export function deleteSpace(draft: DraftLayout, spaceId: string): DraftLayout {
  */
 export function canDeleteSpace(spaceId: string, basedOnVersion: number | null, publishedIds: ReadonlySet<string>): boolean {
   return basedOnVersion === null || !publishedIds.has(spaceId)
+}
+
+/**
+ * Remove spaces, from the schematic or the photo alike (both views show the result): a space never
+ * published is deleted with its outlines; a published one is retired, keeping its id and history, and
+ * any proposal still waiting on it is dropped.
+ */
+export function removeSpaces(draft: DraftLayout, spaceIds: Iterable<string>, publishedIds: ReadonlySet<string>): DraftLayout {
+  let next = draft
+  for (const id of spaceIds) {
+    if (!next.spaces.some((s) => s.spaceId === id)) continue
+    if (canDeleteSpace(id, next.basedOnVersion, publishedIds)) {
+      next = deleteSpace(next, id)
+      continue
+    }
+    next = updateSpace(next, id, { retired: true })
+    next = {
+      ...next,
+      viewpoints: next.viewpoints.map((v) => {
+        if (v.outlineReview?.[id]?.status !== 'pending') return v
+        const outlines = { ...v.outlines }
+        const outlineReview = { ...v.outlineReview }
+        delete outlines[id]
+        delete outlineReview[id]
+        return { ...v, outlines, outlineReview }
+      }),
+    }
+  }
+  return next
 }

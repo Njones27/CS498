@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   acceptProposals,
+  alignRowsToPhoto,
+  findWideStalls,
+  mergeWideStalls,
   insidePolygon,
   mergeProposals,
   NEEDS_ANCHORS,
@@ -9,7 +12,7 @@ import {
   rejectProposals,
   type ProposedStall,
 } from './proposals'
-import { fitGrid } from './schematic/grid'
+import { cellRect, fitGrid } from './schematic/grid'
 import { photoToSchematic } from './sync'
 import type { DraftLayout, DraftSpace, Outline, Point } from './types'
 
@@ -84,6 +87,28 @@ describe('mergeProposals', () => {
     expect(draft.spaces[3].rect.y).toBeGreaterThan(a1.rect.y + a1.rect.h - 1)
     // Other views are left alone.
     expect(draft.viewpoints[1]).toEqual(emptyDraft().viewpoints[1])
+  })
+
+  it('lays a new lot out on a clean grid: every stall in its label\'s cell, rows back to back, aisles kept', () => {
+    // Rows 0+1 back to back, a drive, then row 2 starting one stall in; one wide stall in row 0.
+    const at = (row: number, col: number, x: number, y: number, w = 0.05): ProposedStall => ({
+      ...stall(row, col),
+      mapRect: { x, y, w, h: 0.1 },
+    })
+    const stalls = [
+      at(0, 0, 0, 0), at(0, 1, 0.05, 0, 0.08), at(0, 2, 0.13, 0),
+      at(1, 0, 0, 0.1), at(1, 1, 0.05, 0.1),
+      at(2, 0, 0.05, 0.35), at(2, 1, 0.1, 0.35),
+    ]
+    const { draft } = mergeProposals(emptyDraft(), 'V1', stalls)
+    expect(draft.spaces.map((s) => s.label)).toEqual(['A-01', 'A-02', 'A-03', 'B-01', 'B-02', 'C-02', 'C-03'])
+    const g = fitGrid(draft.spaces)
+    expect(g.aisles).toHaveLength(1)
+    expect(g.aisles![0].row).toBe(2)
+    for (const s of draft.spaces) {
+      const [row, num] = [s.label.charCodeAt(0) - 65, Number(s.label.slice(2))]
+      expect(cellRect(g, { row, col: num - 1 })).toEqual(s.rect)
+    }
   })
 
   it('caps the stall size on the map for a lot with few stalls', () => {
@@ -342,5 +367,87 @@ describe('cut-off rows on a mapped lot', () => {
     const v1 = draft.viewpoints[0]
     expect(v1.outlines[newRow[0].spaceId].every(([, y]) => y <= 1)).toBe(true)
     expect(touchesPhotoEdge(v1.outlines[newRow[0].spaceId] as Point[])).toBe(true)
+  })
+})
+
+
+describe('wide stalls drawn as several spaces', () => {
+  /** A row on the photo: stalls 0.05 wide, but the third is a wide bay 0.075 across (1.5 stalls). */
+  function photoRow(): ProposedStall[] {
+    const xs = [0.1, 0.15, 0.2, 0.275, 0.325]
+    return xs.map((x, col) => ({
+      polygon: box(x, 0.1, (xs[col + 1] ?? x + 0.05) - x, 0.1),
+      evidence: 0.8,
+      row: 0,
+      col,
+      mapRect: { x: x - 0.1, y: 0, w: (xs[col + 1] ?? x + 0.05) - x, h: 0.1 },
+      partial: false,
+    }))
+  }
+  /** The lot drew that row as six even spaces: the wide bay holds most of two of them (C-04, C-05). */
+  function drawnEvenly(): DraftLayout {
+    const d = emptyDraft()
+    d.spaces = [0, 1, 2, 3, 4, 5].map((k) => space(`s${k}`, `C-0${k + 1}`, 20 + 50 * k, 20))
+    d.viewpoints[0].outlines = Object.fromEntries(d.spaces.map((sp, k) => [sp.spaceId, box(0.1 + 0.0375 * k, 0.1, 0.0375, 0.1)]))
+    return d
+  }
+
+  it('finds a wide stall the lot drew as two spaces, and not a stall a space only reaches into', () => {
+    const d = drawnEvenly()
+    const wide = findWideStalls(d, 'V1', photoRow())
+    expect(wide).toHaveLength(1)
+    expect(wide[0].stall.col).toBe(2)
+    expect(wide[0].spaceIds).toEqual(['s3', 's4']) // left to right; C-03 only reaches a third in
+    // The same row drawn right, one space in the wide bay: nothing to say.
+    const right = emptyDraft()
+    right.spaces = photoRow().map((_, k) => space(`r${k}`, `C-0${k + 1}`, 20 + 50 * k, 20))
+    right.viewpoints[0].outlines = Object.fromEntries(right.spaces.map((sp, k) => [sp.spaceId, photoRow()[k].polygon as Outline]))
+    expect(findWideStalls(right, 'V1', photoRow())).toEqual([])
+  })
+
+  it('Find stalls reports them with what it merges', () => {
+    const d = drawnEvenly()
+    expect(mergeProposals(d, 'V1', photoRow()).wide.map((w) => w.spaceIds)).toEqual([['s3', 's4']])
+  })
+
+  it('merging keeps the first space over both cells with the wide outline to review, and retires the other', () => {
+    const d = drawnEvenly()
+    const wide = findWideStalls(d, 'V1', photoRow())
+    const next = mergeWideStalls(d, 'V1', wide)
+    const kept = next.spaces.find((sp) => sp.spaceId === 's3')!
+    expect(kept.rect).toEqual({ x: 170, y: 20, w: 100, h: 100 }) // C-04's and C-05's cells
+    expect(next.spaces.find((sp) => sp.spaceId === 's4')!.retired).toBe(true)
+    const v1 = next.viewpoints[0]
+    expect(v1.outlines.s3).toEqual(photoRow()[2].polygon)
+    expect(v1.outlineReview.s3).toEqual({ source: 'proposed', status: 'pending', evidence: 0.8 })
+    expect(v1.outlines.s4).toBeUndefined()
+    expect(next.spaces.filter((sp) => !sp.retired)).toHaveLength(5)
+  })
+})
+
+
+describe('rows laid out as wide as the photo shows them', () => {
+  it('a row with a wide bay is laid out side by side, the bay a cell and a half, labels kept', () => {
+    // The photo's row: stalls 0.05 wide, the third 0.075; on the map all five sit in one cell each with
+    // a hole after the bay (where Find stalls put them).
+    const xs = [0.1, 0.15, 0.2, 0.275, 0.325]
+    const d = emptyDraft()
+    d.spaces = xs.map((_, k) => space(`s${k}`, `C-0${k + 1}`, 20 + 50 * (k > 2 ? k + 1 : k), 20))
+    d.viewpoints[0].outlines = Object.fromEntries(d.spaces.map((sp, k) => [sp.spaceId, box(xs[k], 0.1, (xs[k + 1] ?? xs[k] + 0.05) - xs[k], 0.1)]))
+    const next = alignRowsToPhoto(d, 'V1')
+    expect(next.spaces.map((sp) => [sp.label, sp.rect.x, sp.rect.w])).toEqual([
+      ['C-01', 20, 50],
+      ['C-02', 70, 50],
+      ['C-03', 120, 75],
+      ['C-04', 195, 50],
+      ['C-05', 245, 50],
+    ])
+  })
+
+  it('leaves rows of even stalls alone', () => {
+    const d = emptyDraft()
+    d.spaces = [0, 1, 2].map((k) => space(`s${k}`, `C-0${k + 1}`, 20 + 60 * k, 20))
+    d.viewpoints[0].outlines = Object.fromEntries(d.spaces.map((sp, k) => [sp.spaceId, box(0.1 + 0.05 * k, 0.1, 0.05, 0.1)]))
+    expect(alignRowsToPhoto(d, 'V1')).toBe(d)
   })
 })

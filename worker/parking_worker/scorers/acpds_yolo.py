@@ -143,6 +143,17 @@ def quad(polygon: Sequence[Point]) -> np.ndarray:
     return cv2.boxPoints(cv2.minAreaRect(pts)).astype(np.float32)
 
 
+ON_PHOTO_EPS = 1e-6
+
+
+def on_photo(polygon: Sequence[Point]) -> bool:
+    """Whether every corner of an outline lies on the photo (borders included)."""
+    return all(
+        -ON_PHOTO_EPS <= x <= 1 + ON_PHOTO_EPS and -ON_PHOTO_EPS <= y <= 1 + ON_PHOTO_EPS
+        for x, y in polygon
+    )
+
+
 def acpds_rois(outlines: Sequence[AlignedOutline], width: int, height: int) -> np.ndarray:
     """``[N, 4, 2]`` float32 corners in ACPDS' convention: pixel x / (width - 1).
 
@@ -467,12 +478,16 @@ class AcpdsYoloScorer:
         if not outlines:
             return []
         height, width = bgr.shape[:2]
-        # ACPDS only sees spaces wholly in the photo: a crop of a half-visible stall would give
-        # a confident but meaningless score. Out-of-frame spaces keep their car overlap, so a
-        # visible car can still mark them OCCUPIED; without an ACPDS score they are never FREE.
-        visible = [o for o in outlines if o.in_frame]
+        # A space not wholly in view (in_frame False) is never FREE (decide_state): a crop of a
+        # half-visible stall can look empty while a car stands in the part out of view. ACPDS
+        # still scores one whose outline lies on the photo (a stall the photo cuts off, outlined
+        # up to the border), since a car it sees there marks it OCCUPIED; drone photos get no
+        # car boxes from YOLO, so without this such stalls could only ever be UNKNOWN. An
+        # outline running off the photo gets no ACPDS score, only its car overlap.
+        scored = [o.in_frame or on_photo(o.polygon) for o in outlines]
+        visible = [o for o, yes in zip(outlines, scored, strict=True) if yes]
         scores = iter(self.acpds_scores(bgr, visible)) if visible else iter(())
-        acpds = [float(next(scores)) if o.in_frame else None for o in outlines]
+        acpds = [float(next(scores)) if yes else None for yes in scored]
         found = [d for d in self.car_detector(bgr) if d.conf >= self.yolo_conf]
         overlaps = car_overlaps(outlines, found, width, height, self.overlap_mode, self.yolo_conf)
         self.last_detections = [detection_box(d, width, height) for d in found]

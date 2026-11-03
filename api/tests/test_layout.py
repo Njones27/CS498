@@ -835,3 +835,33 @@ def test_zero_size_rect_blocks_publishing(client, admin_headers):
     assert report["errors"][0]["spaceIds"] == ["A-01"]
     r = publish(client, admin_headers)
     assert r.status_code == 409 and r.json()["error"] == "validation_failed"
+
+
+def test_north_rotation_and_angled_stalls_are_saved_and_published(client, admin_headers):
+    """A straightened lot keeps which way north is and how far angled stalls lean, in the draft,
+    the validation diff, and the driver's layout."""
+    first = get_draft(client, admin_headers)["spaces"][0]["spaceId"]
+    assert "northDeg" not in get_draft(client, admin_headers)["schematic"]
+
+    def straighten(body):
+        body["schematic"]["northDeg"] = 135.0
+        body["schematic"]["rotationDeg"] = 90.0
+        space(body, first)["skewDeg"] = 45.0
+
+    draft = edit(client, admin_headers, straighten)
+    assert draft["schematic"]["northDeg"] == 135.0
+    assert draft["schematic"]["rotationDeg"] == 90.0
+    assert space(draft, first)["skewDeg"] == 45.0
+    assert all("skewDeg" not in s for s in draft["spaces"] if s["spaceId"] != first)
+    report = client.post("/admin/lots/test-lot/layout/draft/validate", headers=admin_headers).json()
+    assert first in report["diff"]["changed"]
+
+    publish_ok(client, admin_headers)
+    layout = client.get("/lots/test-lot").json()["layout"]
+    assert layout["schematic"]["northDeg"] == 135.0
+    assert layout["schematic"]["rotationDeg"] == 90.0
+    assert next(s for s in layout["spaces"] if s["spaceId"] == first)["skewDeg"] == 45.0
+
+    body = as_body(get_draft(client, admin_headers))
+    body["schematic"]["northDeg"] = 360
+    assert put(client, admin_headers, body).status_code == 422

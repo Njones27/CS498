@@ -91,11 +91,26 @@ class SchematicSpace(CamelModel):
     label: str
     type: SpaceType = Field(description="ParkingSpace.spaceType in the published layout JSON")
     rect: RectOut
+    skew_deg: float | None = Field(
+        default=None,
+        exclude_if=lambda v: not v,
+        description="Angled parking: degrees the stall's sides lean from square (absent if square)",
+    )
 
 
 class SchematicOut(CamelModel):
     width: float
     height: float
+    north_deg: float | None = Field(
+        default=None,
+        exclude_if=lambda v: v is None,
+        description="Which way north is on the map: degrees clockwise from map-up; absent if unset",
+    )
+    rotation_deg: float | None = Field(
+        default=None,
+        exclude_if=lambda v: not v,
+        description="Map shown turned this many degrees clockwise; absent when shown as laid out",
+    )
 
 
 class LayoutOut(CamelModel):

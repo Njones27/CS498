@@ -34,6 +34,7 @@ import {
   gridInView,
   gridSizes,
   relabelMoved,
+  rowTop,
   rowLetter,
   snapMove,
   snapResize,
@@ -42,7 +43,11 @@ import {
   type GridSizes,
 } from './schematic/grid'
 import { duplicateLabelIds, nextRowStart, parseLabel, type ParsedLabel } from './schematic/labels'
-import { addSpaceOnSchematic, addSpacesInCells, afterRectChange, dropPendingProposals, photoToSchematic, proposeOutlines } from './sync'
+import { straightenFromPhoto } from './straighten'
+import { Compass } from '../components/Compass'
+import { normalDeg, turnedBox, turn, unturn } from '../lib/mapView'
+import { rowEnds, stallPoints } from '../lib/stall'
+import { addSpaceOnSchematic, addSpacesInCells, afterRectChange, copySpace, dropPendingProposals, photoToSchematic, proposeOutlines } from './sync'
 import type { GridControls } from './useSchematicGrid'
 import type { DraftLayout, DraftRect, DraftSpace, Issue, MapShift, MappingSelection, Point, SpaceType } from './types'
 
@@ -59,6 +64,8 @@ export interface SchematicEditorProps extends MappingSelection {
   grid?: GridControls | null
   /** The last edit made elsewhere (the photo) that moved every space; `n` counts them. A pinned view follows. */
   externalShift?: MapShift & { n: number }
+  /** The photo shown beside the map: Straighten from photo lays the lot out from its outlines. */
+  photoViewId?: string | null
 }
 
 const TYPES: { value: SpaceType; label: string; spoken: string }[] = [
@@ -96,10 +103,12 @@ const ZOOM_STEP = 1.25
 const MIN_ZOOM = 0.25
 const MAX_ZOOM = 20
 
-/** The whole map area plus a margin around it, so a space can be dragged past the edge to grow the map. */
-function fitCamera(width: number, height: number): Camera {
+/** The whole map area (turned as shown) plus a margin around it, so a space can be dragged past the edge
+ * to grow the map. */
+function fitCamera(width: number, height: number, turnBy = 0): Camera {
+  const box = turnedBox(width, height, turnBy)
   const pad = Math.max(2 * MARGIN, 0.06 * Math.max(width, height))
-  return { x: -pad, y: -pad, w: width + 2 * pad, h: height + 2 * pad }
+  return { x: box.x - pad, y: box.y - pad, w: box.w + 2 * pad, h: box.h + 2 * pad }
 }
 
 const cameraBounds = (c: Camera): Bounds => ({ x: c.x, y: c.y, width: c.w, height: c.h })
@@ -128,20 +137,29 @@ export function SchematicEditor({
   publishedSpaceIds,
   grid,
   externalShift,
+  photoViewId = null,
   selectedSpaceId,
   onSelectSpace,
+  selectedSpaceIds,
   hoveredSpaceId,
   onHoverSpace,
 }: SchematicEditorProps) {
-  const { width, height } = draft.schematic
+  const { width, height, northDeg, rotationDeg } = draft.schematic
+  // The map is shown turned (rotationDeg, clockwise about its middle); while the admin drags the turn
+  // slider, the view follows before the draft does.
+  const [turning, setTurning] = useState<number | null>(null)
+  const turnBy = turning ?? rotationDeg ?? 0
+  const [mx, my] = [width / 2, height / 2]
   const svgRef = useRef<SVGSVGElement>(null)
   const [preview, setPreview] = useState<{ spaceId: string; rect: DraftRect } | null>(null)
   // null follows the map area as it grows; zooming or panning pins the view.
   const [camera, setCamera] = useState<Camera | null>(null)
-  const fit = fitCamera(width, height)
+  const fit = fitCamera(width, height, turnBy)
   const view = camera ?? fit
   const [tool, setTool] = useState<Tool>('pan')
   const [drawBox, setDrawBox] = useState<DraftRect | null>(null)
+  // The space Ctrl/Cmd+C copied, for Ctrl/Cmd+V.
+  const copied = useRef<string | null>(null)
   // With snapping on, a box drawn on the map previews the cells it will fill.
   const [drawCells, setDrawCells] = useState<Cell[] | null>(null)
   const snapGrid = grid?.snap ? grid.grid : null
@@ -164,6 +182,8 @@ export function SchematicEditor({
   const publishedIds = publishedSpaceIds ?? baseline.ids
 
   const duplicates = useMemo(() => duplicateLabelIds(draft.spaces), [draft.spaces])
+  // Each row's two ends, so a row of angled stalls is cut square there (as painted).
+  const ends = useMemo(() => rowEnds(draft.spaces.filter((sp) => !sp.retired)), [draft.spaces])
   const issueIds = useMemo(() => new Set(issues.flatMap((i) => i.spaceIds)), [issues])
   const selected = draft.spaces.find((s) => s.spaceId === selectedSpaceId) ?? null
   const retiredCount = draft.spaces.filter((s) => s.retired).length
@@ -176,8 +196,9 @@ export function SchematicEditor({
     return box && box.width > 0 && box.height > 0 ? Math.max(view.w / box.width, view.h / box.height) : 1
   }
 
-  /** A screen point in schematic units, allowing for the letterboxing of preserveAspectRatio="xMidYMid meet". */
-  function toUnits(clientX: number, clientY: number): Point {
+  /** A screen point in view units (the turned map as shown), allowing for the letterboxing of
+   * preserveAspectRatio="xMidYMid meet". */
+  function toView(clientX: number, clientY: number): Point {
     const box = svgRef.current?.getBoundingClientRect()
     if (!box || box.width <= 0 || box.height <= 0) return [view.x + clientX, view.y + clientY]
     const scale = unitsPerPixel()
@@ -186,8 +207,25 @@ export function SchematicEditor({
     return [view.x + (clientX - left) * scale, view.y + (clientY - top) * scale]
   }
 
+  /** A screen point in schematic units: the view point, turned back to the map as laid out. */
+  const toUnits = (clientX: number, clientY: number): Point => unturn(toView(clientX, clientY), turnBy, mx, my)
+
+  /** The part of the map on screen, as laid out (the view turned back; its bounding box). */
+  function mapInView(): Camera {
+    if (!turnBy) return view
+    const pts = [
+      [view.x, view.y],
+      [view.x + view.w, view.y],
+      [view.x + view.w, view.y + view.h],
+      [view.x, view.y + view.h],
+    ].map((p) => unturn(p as Point, turnBy, mx, my))
+    const xs = pts.map((p) => p[0])
+    const ys = pts.map((p) => p[1])
+    return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }
+  }
+
   /** Where a dragged space may go: anywhere on the map or on screen. Past the map edge, the map grows. */
-  const dragBounds = () => unionBounds(draft.schematic, cameraBounds(view))
+  const dragBounds = () => unionBounds(draft.schematic, cameraBounds(mapInView()))
 
   /** Send an edit that may have grown the map; a pinned view shifts with the spaces so nothing jumps. */
   function emitGrown({ draft: next, dx, dy }: Grown, emit: SchematicEditorProps['onChange'] = onChange) {
@@ -215,9 +253,9 @@ export function SchematicEditor({
 
   // Ctrl/Cmd + wheel (and trackpad pinch, which arrives as Ctrl + wheel) zooms at the pointer. A plain
   // wheel still scrolls the page. React's onWheel is passive, so preventDefault needs a native listener.
-  const zoomRef = useRef({ zoomAt, toUnits })
+  const zoomRef = useRef({ zoomAt, toView })
   useEffect(() => {
-    zoomRef.current = { zoomAt, toUnits }
+    zoomRef.current = { zoomAt, toView }
   })
   useEffect(() => {
     const svg = svgRef.current
@@ -225,8 +263,8 @@ export function SchematicEditor({
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return
       e.preventDefault()
-      const { zoomAt: zoom, toUnits: units } = zoomRef.current
-      zoom(Math.exp(-e.deltaY * 0.01), units(e.clientX, e.clientY))
+      const { zoomAt: zoom, toView: at } = zoomRef.current
+      zoom(Math.exp(-e.deltaY * 0.01), at(e.clientX, e.clientY))
     }
     svg.addEventListener('wheel', onWheel, { passive: false })
     return () => svg.removeEventListener('wheel', onWheel)
@@ -365,11 +403,13 @@ export function SchematicEditor({
     const { clientX: x0, clientY: y0 } = e
     const origin = space.rect
     const bounds = dragBounds()
+    // Alt/Option-drag leaves the space where it is and drops a copy where it is let go.
+    const copying = mode === 'move' && e.altKey
     let moved = false
     // With snapping on, a move lands in the cell under the space's middle and a resize on box edges.
     const placeAt = (ev: PointerEvent): { rect: DraftRect; cell: Cell | null } => {
-      const dx = (ev.clientX - x0) * scale
-      const dy = (ev.clientY - y0) * scale
+      // The pointer moves across the turned map: turn its travel back to the map's own axes.
+      const [dx, dy] = turn([(ev.clientX - x0) * scale, (ev.clientY - y0) * scale], -turnBy, 0, 0)
       if (mode === 'move') {
         const free = moveRect(origin, dx, dy, bounds)
         return snapGrid ? snapMove(snapGrid, free) : { rect: free, cell: null }
@@ -380,13 +420,15 @@ export function SchematicEditor({
     const onMove = (ev: PointerEvent) => {
       if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < DRAG_THRESHOLD_PX) return
       moved = true
-      setPreview({ spaceId: space.spaceId, rect: placeAt(ev).rect })
+      if (copying) setDrawBox(placeAt(ev).rect)
+      else setPreview({ spaceId: space.spaceId, rect: placeAt(ev).rect })
     }
     const onUp = (ev: PointerEvent) => {
       stop()
       if (!moved) return
       const { rect, cell } = placeAt(ev)
       const { draft: current, onChange: emit } = latest.current
+      if (copying) return pasteCopy(space.spaceId, cell ? { cell } : { rect }, current, emit)
       const now = current.spaces.find((s) => s.spaceId === space.spaceId)
       if (now && (!sameRect(rect, now.rect) || cell)) commitRect(current, emit, space.spaceId, rect, cell, mode === 'move')
     }
@@ -396,6 +438,7 @@ export function SchematicEditor({
       window.removeEventListener('pointercancel', stop)
       stopDrag.current = null
       setPreview(null)
+      setDrawBox(null)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -439,10 +482,86 @@ export function SchematicEditor({
     setNote(parts.join('; '))
   }
 
-  /** Esc clears the selection, except while typing in a field. */
+  /**
+   * Straighten from photo: the spaces outlined on the photo beside the map are laid out top-down, rows
+   * level, on the grid (straightenFromPhoto); the grid is fitted to them afresh. Undo takes it back.
+   */
+  function onStraighten() {
+    if (!photoViewId) return
+    const result = straightenFromPhoto(draft, photoViewId)
+    if (typeof result === 'string') return setNote(result)
+    grid?.refit(result.draft)
+    onChange(result.draft)
+    setCamera(null)
+    const parts = [`Straightened ${plural(result.placed, 'space')} into ${plural(result.rows, 'row')}`]
+    if (result.renamed) parts.push(`renamed ${result.renamed}`)
+    if (result.found) parts.push(`found ${plural(result.found, 'missing stall')} in the rows' gaps: review their outlines on the photo`)
+    if (northDeg != null && result.turned) parts.push(`north turned ${result.turned}° with the map`)
+    const leaning = Object.entries(result.leans).filter(([, deg]) => deg)
+    if (leaning.length) parts.push(`angled rows ${leaning.map(([row, deg]) => `${row} ${deg}°`).join(', ')}`)
+    setNote(parts.join('; '))
+  }
+
+  /** Show the map turned `deg` clockwise (like a photo turned in an editor); the layout is unchanged. */
+  function onTurn(deg: number) {
+    setTurning(null)
+    const schematic = { ...draft.schematic }
+    const next = normalDeg(deg)
+    if (next === normalDeg(rotationDeg ?? 0)) return
+    if (next) schematic.rotationDeg = next
+    else delete schematic.rotationDeg
+    onChange({ ...draft, schematic })
+    setCamera(null)
+  }
+
+  /** North: degrees clockwise from map-up, or null to clear it. */
+  function onNorth(deg: number | null) {
+    const schematic = { ...draft.schematic }
+    if (deg == null) delete schematic.northDeg
+    else schematic.northDeg = ((Math.round(deg) % 360) + 360) % 360
+    onChange({ ...draft, schematic })
+  }
+
+  /**
+   * A copy of `sourceId` (copySpace): in the cell or at the spot given, else the next free cell right of
+   * it, named for its cell. The copy is selected, so it can be dragged on to where it belongs.
+   */
+  function pasteCopy(
+    sourceId: string,
+    at?: { cell?: Cell; rect?: DraftRect },
+    current = draft,
+    emit: SchematicEditorProps['onChange'] = onChange,
+  ) {
+    const source = current.spaces.find((s) => s.spaceId === sourceId)
+    if (!source) return setNote('The copied space is gone; copy another one')
+    const added = copySpace(current, latest.current.snapGrid, sourceId, at)
+    if (!added) return setNote('That cell already has a space; nothing pasted')
+    emitGrown(added, emit)
+    onSelectSpace(added.space.spaceId)
+    const name = source.label.trim() || 'the space'
+    setNote(at ? `Dropped a copy of ${name} as ${added.space.label}` : `Pasted a copy of ${name} as ${added.space.label}; drag it where it belongs`)
+  }
+
+  /**
+   * Esc clears the selection; Ctrl/Cmd+C copies the selected space, Ctrl/Cmd+V pastes it, Ctrl/Cmd+D
+   * duplicates it. Not while typing in a field.
+   */
   function onEditorKeyDown(e: ReactKeyboardEvent<HTMLElement>) {
     const tag = (e.target as HTMLElement).tagName
-    if (e.key === 'Escape' && tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') onSelectSpace(null)
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+    if (e.key === 'Escape') return onSelectSpace(null)
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return
+    const key = e.key.toLowerCase()
+    if (key === 'c' && selected && !selected.retired) {
+      copied.current = selected.spaceId
+      setNote(`Copied ${selected.label.trim() || 'the space'}: Ctrl/Cmd+V pastes it in the next free cell`)
+    } else if (key === 'v' && copied.current) {
+      e.preventDefault()
+      pasteCopy(copied.current)
+    } else if (key === 'd' && selected && !selected.retired) {
+      e.preventDefault()
+      pasteCopy(selected.spaceId)
+    }
   }
 
   /**
@@ -527,8 +646,22 @@ export function SchematicEditor({
           </button>
         </span>
         <span className="hint">{summary}</span>
+        <OrientControl
+          northDeg={northDeg ?? null}
+          turnBy={turnBy}
+          onNorth={onNorth}
+          onTurning={setTurning}
+          onTurn={onTurn}
+        />
       </div>
-      {grid && <GridBar controls={grid} selected={selected && !selected.retired ? selected : null} onAlignAll={onAlignAll} />}
+      {grid && (
+        <GridBar
+          controls={grid}
+          selected={selected && !selected.retired ? selected : null}
+          onAlignAll={onAlignAll}
+          onStraighten={photoViewId ? onStraighten : null}
+        />
+      )}
       {rowOpen && (
         <RowDialog
           initialStart={nextRowStart(draft.spaces)}
@@ -539,6 +672,7 @@ export function SchematicEditor({
       )}
       {draft.spaces.length === 0 && <p className="hint">No spaces yet. Press + Space or + Row to start.</p>}
 
+      <div className="map-frame">
       <svg
         ref={svgRef}
         className={`schematic schematic--${tool}`}
@@ -549,6 +683,7 @@ export function SchematicEditor({
         onKeyDown={onSvgKeyDown}
       >
         <rect className="schematic__outside" x={view.x} y={view.y} width={view.w} height={view.h} onPointerDown={startBackground} />
+        <g transform={turnBy ? `rotate(${turnBy} ${mx} ${my})` : undefined} data-testid="schematic-turn">
         <rect
           className="schematic__bg"
           data-testid="schematic-area"
@@ -558,7 +693,7 @@ export function SchematicEditor({
           height={height}
           onPointerDown={startBackground}
         />
-        {grid?.show && <GridLines grid={grid.grid} view={view} />}
+        {grid?.show && <GridLines grid={grid.grid} view={mapInView()} />}
         {draft.spaces.map((space) => {
           const id = space.spaceId
           const { x, y, w, h } = preview?.spaceId === id ? preview.rect : space.rect
@@ -570,7 +705,7 @@ export function SchematicEditor({
           const small = Math.max(6, Math.min(fs * 0.6, (w - 6) / 10))
           const cls = [
             'schematic-space',
-            selectedSpaceId === id && 'schematic-space--selected',
+            (selectedSpaceId === id || selectedSpaceIds?.has(id)) && 'schematic-space--selected',
             hoveredSpaceId === id && 'schematic-space--hovered',
             space.retired && 'schematic-space--retired',
             flagged && 'schematic-space--error',
@@ -597,7 +732,13 @@ export function SchematicEditor({
               }}
             >
               <title>{[text, ...messages].join('. ')}</title>
-              <rect x={x} y={y} width={w} height={h} rx={Math.min(w, h) * 0.06} className="schematic-space__rect" />
+              {stallPoints({ x, y, w, h }, space.skewDeg, ends.get(id)) ? (
+                <polygon points={stallPoints({ x, y, w, h }, space.skewDeg, ends.get(id))!} className="schematic-space__rect" />
+              ) : (
+                <rect x={x} y={y} width={w} height={h} rx={Math.min(w, h) * 0.06} className="schematic-space__rect" />
+              )}
+              {/* Turned back about the space's middle, so its label reads upright on a turned map. */}
+              <g transform={turnBy ? `rotate(${-turnBy} ${x + w / 2} ${y + h / 2})` : undefined}>
               <text
                 x={x + w / 2}
                 y={y + h / 2}
@@ -624,6 +765,7 @@ export function SchematicEditor({
                   !
                 </text>
               )}
+              </g>
             </g>
           )
         })}
@@ -669,7 +811,10 @@ export function SchematicEditor({
             height={drawBox.h}
           />
         )}
+        </g>
       </svg>
+      {northDeg != null && <Compass northDeg={northDeg + turnBy} className="map-compass" />}
+      </div>
       <p className="hint schematic-legend">
         Red dashed outline: needs fixing. Grey dashed: retired. ADA and EV spaces carry a badge.
       </p>
@@ -707,6 +852,19 @@ export function SchematicEditor({
                   {DUPLICATE_NOTE}
                 </p>
               )}
+              <SizeField
+                label="Lean (°, angled parking)"
+                value={selected.skewDeg ?? 0}
+                min={-75}
+                max={75}
+                onCommit={(v) =>
+                  onChange(
+                    v
+                      ? updateSpace(draft, selected.spaceId, { skewDeg: v })
+                      : { ...draft, spaces: draft.spaces.map((s) => (s.spaceId === selected.spaceId ? withoutSkew(s) : s)) },
+                  )
+                }
+              />
               <label>
                 Type
                 <select
@@ -732,6 +890,11 @@ export function SchematicEditor({
               </button>
             </>
           )}
+          {!selected.retired && (
+            <button type="button" className="button" onClick={() => pasteCopy(selected.spaceId)} title="Ctrl/Cmd+D">
+              Duplicate space
+            </button>
+          )}
           {canDeleteSpace(selected.spaceId, draft.basedOnVersion, publishedIds) && (
             <button type="button" className="button schematic-side__delete" onClick={() => onDelete(selected)}>
               Delete space
@@ -748,7 +911,8 @@ export function SchematicEditor({
       ) : (
         <p className="hint">
           Select a space to edit its label and type. Drag to move it, drag a corner to resize it, or use the arrow
-          keys (Shift for 10 units). Esc clears the selection. Drag past the map edge to make room: the map grows.
+          keys (Shift for 10 units). Esc clears the selection. Ctrl/Cmd+C and Ctrl/Cmd+V copy and paste a space
+          (Ctrl/Cmd+D duplicates it); Alt/Option-drag drops a copy where you let go, snapped and named for its cell. Drag past the map edge to make room: the map grows.
           With Draw space on, drag a box on empty map to add a space; it gets a proposed outline on the photo.
           Ctrl/Cmd + scroll zooms; drag empty map (or use the middle button) to pan.
         </p>
@@ -849,7 +1013,7 @@ function GridLines({ grid, view }: { grid: Grid; view: { x: number; y: number; w
         const letter = rowLetter(row)
         return (
           letter && (
-            <text key={`r${row}`} x={view.x + fs * 0.4} y={grid.y0 + (row + 0.5) * grid.cellH} fontSize={fs} dominantBaseline="central">
+            <text key={`r${row}`} x={view.x + fs * 0.4} y={rowTop(grid, row) + grid.cellH / 2} fontSize={fs} dominantBaseline="central">
               {letter}
             </text>
           )
@@ -873,8 +1037,143 @@ const SIZE_FIELDS: { key: keyof GridSizes; label: string }[] = [
   { key: 'gapY', label: 'Gap down' },
 ]
 
-/** Snap and grid toggles, the grid's sizes (schematic units), Fit grid, and Align all. */
-function GridBar({ controls, selected, onAlignAll }: { controls: GridControls; selected: DraftSpace | null; onAlignAll: () => void }) {
+/** A space without a lean (a square stall): the field is left out, as the server sends it. */
+function withoutSkew(s: DraftSpace): DraftSpace {
+  const rest = { ...s }
+  delete rest.skewDeg
+  return rest
+}
+
+/** Where north is (degrees clockwise from map-up), with a compass showing it; empty clears it. */
+function NorthField({ northDeg, onCommit }: { northDeg: number | null; onCommit: (deg: number | null) => void }) {
+  const [text, setText] = useState<string | null>(null)
+  const commit = () => {
+    if (text !== null) {
+      const v = Number(text)
+      if (text.trim() === '') onCommit(null)
+      else if (Number.isFinite(v)) onCommit(v)
+    }
+    setText(null)
+  }
+  return (
+    <label className="schematic-north" title="Which way north is on the map as laid out, in degrees clockwise from up (0 = up). Drivers see the compass.">
+      North °
+      <input
+        type="number"
+        min={0}
+        max={359}
+        step={5}
+        placeholder="not set"
+        value={text ?? (northDeg == null ? '' : String(northDeg))}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit()
+        }}
+      />
+    </label>
+  )
+}
+
+/**
+ * Orient the map, like turning a photo in an editor: the compass button opens it. Turn the map a quarter
+ * either way or to any angle (the slider shows it as you drag; it is kept when you let go), say where
+ * north is, or turn the map so north points up.
+ */
+function OrientControl({
+  northDeg,
+  turnBy,
+  onNorth,
+  onTurning,
+  onTurn,
+}: {
+  northDeg: number | null
+  turnBy: number
+  onNorth: (deg: number | null) => void
+  onTurning: (deg: number | null) => void
+  onTurn: (deg: number) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [slide, setSlide] = useState<number | null>(null)
+  const shown = slide ?? turnBy
+  const release = () => {
+    if (slide === null) return
+    onTurn(slide)
+    setSlide(null)
+  }
+  return (
+    <span className="schematic-orient">
+      <button
+        type="button"
+        className="button button--sm schematic-orient__button"
+        aria-expanded={open}
+        aria-label="Orient map"
+        title="Orient the map: turn it, and say which way north is"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Compass northDeg={(northDeg ?? 0) + turnBy} size={22} />
+        Orient
+      </button>
+      {open && (
+        <span className="schematic-orient__panel" role="group" aria-label="Orient map">
+          <span className="schematic-orient__row">
+            <button type="button" className="button button--sm" aria-label="Turn left a quarter" title="Turn left 90°" onClick={() => onTurn(turnBy - 90)}>
+              ↺ 90°
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={359}
+              step={1}
+              value={shown}
+              aria-label="Turn map (degrees)"
+              onChange={(e) => {
+                const v = Number(e.target.value)
+                setSlide(v)
+                onTurning(v)
+              }}
+              onPointerUp={release}
+              onKeyUp={release}
+              onBlur={release}
+            />
+            <button type="button" className="button button--sm" aria-label="Turn right a quarter" title="Turn right 90°" onClick={() => onTurn(turnBy + 90)}>
+              ↻ 90°
+            </button>
+            <span className="hint">{shown}°</span>
+            <button type="button" className="button button--sm" onClick={() => onTurn(0)} disabled={turnBy === 0}>
+              Reset
+            </button>
+          </span>
+          <span className="schematic-orient__row">
+            <NorthField northDeg={northDeg} onCommit={onNorth} />
+            <button
+              type="button"
+              className="button button--sm"
+              disabled={northDeg == null}
+              title="Turn the map so north points up"
+              onClick={() => northDeg != null && onTurn(-northDeg)}
+            >
+              North up
+            </button>
+          </span>
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** Snap and grid toggles, the grid's sizes (schematic units), Fit grid, Align all, and Straighten from photo. */
+function GridBar({
+  controls,
+  selected,
+  onAlignAll,
+  onStraighten,
+}: {
+  controls: GridControls
+  selected: DraftSpace | null
+  onAlignAll: () => void
+  onStraighten: (() => void) | null
+}) {
   const sizes = gridSizes(controls.grid)
   return (
     <div className="schematic-gridbar" role="group" aria-label="Grid">
@@ -909,16 +1208,38 @@ function GridBar({ controls, selected, onAlignAll }: { controls: GridControls; s
       >
         Align all to grid
       </button>
+      {onStraighten && (
+        <button
+          type="button"
+          className="button button--sm"
+          onClick={onStraighten}
+          title="For a camera at an angle: lay the spaces outlined on the photo out top-down, rows level, on the grid, renamed by row (Undo takes it back)"
+        >
+          Straighten from photo
+        </button>
+      )}
     </div>
   )
 }
 
 /** A number field that applies its value on Enter or when it loses focus, so typing "45" doesn't apply "4" first. */
-function SizeField({ label, value, min, onCommit }: { label: string; value: number; min: number; onCommit: (v: number) => void }) {
+function SizeField({
+  label,
+  value,
+  min,
+  max = Infinity,
+  onCommit,
+}: {
+  label: string
+  value: number
+  min: number
+  max?: number
+  onCommit: (v: number) => void
+}) {
   const [text, setText] = useState<string | null>(null)
   const commit = () => {
     const v = Number(text)
-    if (text !== null && Number.isFinite(v) && v >= min) onCommit(v)
+    if (text !== null && Number.isFinite(v) && v >= min && v <= max) onCommit(v)
     setText(null)
   }
   return (
@@ -927,6 +1248,7 @@ function SizeField({ label, value, min, onCommit }: { label: string; value: numb
       <input
         type="number"
         min={min}
+        max={Number.isFinite(max) ? max : undefined}
         step="any"
         value={text ?? String(value)}
         onChange={(e) => setText(e.target.value)}

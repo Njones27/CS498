@@ -4,15 +4,24 @@ import { formatLabel, normalizeLabel, parseLabel } from './labels'
 
 // The schematic grid: rows are lettered (row 0 is A, then B ... Z, AA ...) and columns numbered from 1,
 // so the cell a space sits in is its label: row C, column 7 is C-07. Each cell holds one space-sized box
-// with half the gap on each side. Pure; the mapping page keeps the grid it uses (useSchematicGrid).
+// with half the gap on each side. Lots come as rows back to back with a drive aisle between pairs, so a
+// row may sit further down than the pitch says: an aisle before it adds that space, and every row after
+// it moves down with it. Pure; the mapping page keeps the grid it uses (useSchematicGrid).
 
 export interface Grid {
   x0: number // left edge of column 0's cells
-  y0: number // top edge of row 0's (row A's) cells
+  y0: number // top edge of row 0's (row A's) cells, aisles aside
   cellW: number // column pitch: box width plus the gap across
   cellH: number // row pitch: box height plus the gap down
   boxW: number
   boxH: number
+  /** Extra space above `row` (a drive aisle), by row; left out when there is none. */
+  aisles?: Aisle[]
+}
+
+export interface Aisle {
+  row: number
+  gap: number
 }
 
 /** A grid cell: row 0 is row A, column 0 is number 1. Either may be negative (above A, left of 1). */
@@ -57,6 +66,40 @@ export function rowIndex(letters: string): number {
   return n - 1
 }
 
+/** All aisles above `row` (and the one right before it). */
+function aisleSpace(g: Grid, row: number): number {
+  return (g.aisles ?? []).reduce((sum, a) => (a.row <= row ? sum + a.gap : sum), 0)
+}
+
+/** Top edge of a row's cells. */
+export const rowTop = (g: Grid, row: number): number => g.y0 + row * g.cellH + aisleSpace(g, row)
+
+/** The row at height `y`: in an aisle, the nearer of the rows on either side. */
+export function rowAt(g: Grid, y: number): number {
+  let t = y - g.y0
+  for (const a of g.aisles ?? []) {
+    const start = a.row * g.cellH // where row a.row would start without this aisle (earlier ones taken off)
+    if (t < start) break
+    if (t < start + a.gap) return t - start < a.gap / 2 ? a.row - 1 : a.row
+    t -= a.gap
+  }
+  return Math.floor(t / g.cellH)
+}
+
+/**
+ * The aisles between labeled rows whose tops (`rowY`) are further apart than `cellH` per row: anything
+ * over a quarter row more is an aisle before the lower row. Smaller differences are the rows' own noise.
+ */
+function fitAisles(rowY: Map<number, number>, cellH: number): Aisle[] {
+  const rows = [...rowY.keys()].sort((a, b) => a - b)
+  return rows.slice(1).flatMap((r, i) => {
+    const extra = rowY.get(r)! - rowY.get(rows[i])! - (r - rows[i]) * cellH
+    return extra > 0.25 * cellH ? [{ row: r, gap: r2(extra) }] : []
+  })
+}
+
+const withAisles = (g: Grid, aisles: Aisle[]): Grid => (aisles.length > 0 ? { ...g, aisles } : g)
+
 export const gridSizes = (g: Grid): GridSizes => ({
   boxW: g.boxW,
   boxH: g.boxH,
@@ -65,9 +108,10 @@ export const gridSizes = (g: Grid): GridSizes => ({
 })
 
 /**
- * The grid the spaces' labels describe: a space labeled C-07 sits in row C, column 7. Pitches and the
- * origin are medians (column pitch from neighbouring numbers within a row, row pitch from neighbouring
- * rows), so a few misplaced spaces don't skew it. `sizes` replaces any of the fitted sizes.
+ * The grid the spaces' labels describe: a space labeled C-07 sits in row C, column 7. The column pitch
+ * and the origin are medians (from neighbouring numbers within a row), so a few misplaced spaces don't
+ * skew it. The row pitch is the closest any two neighbouring rows sit (rows back to back); rows further
+ * apart than that have an aisle between them. `sizes` replaces any of the fitted sizes.
  */
 export function fitGrid(spaces: DraftSpace[], sizes: Partial<GridSizes> = {}): Grid {
   const labeled = spaces.flatMap((s) => {
@@ -94,28 +138,31 @@ export function fitGrid(spaces: DraftSpace[], sizes: Partial<GridSizes> = {}): G
 
   // A pitch smaller than a box (numbers running right to left, or stacked spaces) can't be a grid.
   const pitchW = median(colSteps)
-  const pitchH = median(rowSteps)
+  // Back to back, rows step by a box height and the gap: the closest pair (a hair under a box allowed).
+  const pitchH = rowSteps.filter((d) => d >= 0.9 * size.h).reduce<number | null>((a, d) => (a == null ? d : Math.min(a, d)), null)
   const boxW = r2(sizes.boxW ?? size.w)
   const boxH = r2(sizes.boxH ?? size.h)
   const gapX = r2(sizes.gapX ?? (pitchW != null && pitchW >= size.w ? pitchW - size.w : GAP))
-  const gapY = r2(sizes.gapY ?? (pitchH != null && pitchH >= size.h ? pitchH - size.h : GAP))
+  const gapY = r2(sizes.gapY ?? (pitchH != null ? Math.max(0, pitchH - size.h) : GAP))
   const cellW = Math.max(MIN_SIDE, boxW + gapX)
   const cellH = Math.max(MIN_SIDE, boxH + gapY)
 
+  const aisles = fitAisles(rowY, cellH)
+  const flat: Grid = { x0: 0, y0: 0, cellW, cellH, boxW, boxH, aisles }
   const left = median(labeled.map((l) => l.rect.x - l.col * cellW)) ?? MARGIN
-  const top = median(labeled.map((l) => l.rect.y - l.row * cellH)) ?? MARGIN
-  return { x0: r2(left - gapX / 2), y0: r2(top - gapY / 2), cellW, cellH, boxW, boxH }
+  const top = median(labeled.map((l) => l.rect.y - rowTop(flat, l.row))) ?? MARGIN
+  return withAisles({ x0: r2(left - gapX / 2), y0: r2(top - gapY / 2), cellW, cellH, boxW, boxH }, aisles)
 }
 
 export function cellAt(g: Grid, [x, y]: Point): Cell {
-  return { row: Math.floor((y - g.y0) / g.cellH), col: Math.floor((x - g.x0) / g.cellW) }
+  return { row: rowAt(g, y), col: Math.floor((x - g.x0) / g.cellW) }
 }
 
 /** The box a space fills in `cell`. */
 export function cellRect(g: Grid, { row, col }: Cell): DraftRect {
   return {
     x: r2(g.x0 + col * g.cellW + (g.cellW - g.boxW) / 2),
-    y: r2(g.y0 + row * g.cellH + (g.cellH - g.boxH) / 2),
+    y: r2(rowTop(g, row) + (g.cellH - g.boxH) / 2),
     w: g.boxW,
     h: g.boxH,
   }
@@ -149,18 +196,24 @@ export function snapMove(g: Grid, rect: DraftRect): { rect: DraftRect; cell: Cel
 /** Nearest value to `v` on the lattice offset + k * step. */
 const onLattice = (v: number, offset: number, step: number) => offset + Math.round((v - offset) / step) * step
 
+/** The top (or with `bottom`, the bottom) edge of a row's box nearest `y`. */
+function nearestBoxEdge(g: Grid, y: number, bottom: boolean): number {
+  const edge = (row: number) => rowTop(g, row) + (g.cellH - g.boxH) / 2 + (bottom ? g.boxH : 0)
+  const row = rowAt(g, y)
+  return [row - 1, row, row + 1].map(edge).reduce((best, e) => (Math.abs(e - y) < Math.abs(best - y) ? e : best))
+}
+
 /** A resized space's dragged edges land on box edges, so it covers whole cells; the other edges stay. */
 export function snapResize(g: Grid, rect: DraftRect, corner: Corner): DraftRect {
   const leftOf = g.x0 + (g.cellW - g.boxW) / 2
-  const topOf = g.y0 + (g.cellH - g.boxH) / 2
   let left = rect.x
   let top = rect.y
   let right = rect.x + rect.w
   let bottom = rect.y + rect.h
   if (corner.endsWith('w')) left = Math.min(onLattice(left, leftOf, g.cellW), right - MIN_SIDE)
   else right = Math.max(onLattice(right, leftOf + g.boxW, g.cellW), left + MIN_SIDE)
-  if (corner.startsWith('n')) top = Math.min(onLattice(top, topOf, g.cellH), bottom - MIN_SIDE)
-  else bottom = Math.max(onLattice(bottom, topOf + g.boxH, g.cellH), top + MIN_SIDE)
+  if (corner.startsWith('n')) top = Math.min(nearestBoxEdge(g, top, false), bottom - MIN_SIDE)
+  else bottom = Math.max(nearestBoxEdge(g, bottom, true), top + MIN_SIDE)
   return { x: r2(left), y: r2(top), w: r2(right - left), h: r2(bottom - top) }
 }
 
@@ -177,14 +230,27 @@ export function cellsIn(g: Grid, a: Point, b: Point): Cell[] {
   return cells
 }
 
-/** Whether an active space other than `exceptId` uses `label` or sits (by its middle) in `cell`. */
+/** Share of a cell's box a space may cover before the cell counts as taken (a wide stall beside it). */
+const OVERLAP_TAKEN = 0.25
+
+function overlapArea(a: DraftRect, b: DraftRect): number {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
+  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
+  return w > 0 && h > 0 ? w * h : 0
+}
+
+/**
+ * Whether an active space other than `exceptId` uses `label`, sits (by its middle) in `cell`, or covers
+ * a good part of the cell's box (a wide space reaching into it).
+ */
 export function cellTaken(g: Grid, spaces: DraftSpace[], cell: Cell, label: string | null, exceptId?: string): boolean {
   const key = label && normalizeLabel(label)
+  const box = cellRect(g, cell)
   return spaces.some((s) => {
     if (s.retired || s.spaceId === exceptId) return false
     if (key && normalizeLabel(s.label) === key) return true
     const c = cellAt(g, center(s.rect))
-    return c.row === cell.row && c.col === cell.col
+    return (c.row === cell.row && c.col === cell.col) || overlapArea(s.rect, box) > OVERLAP_TAKEN * box.w * box.h
   })
 }
 
@@ -362,14 +428,17 @@ export function anchorGrid(g: Grid, rect: DraftRect, label = ''): Grid {
   const named = parsed && { row: rowIndex(parsed.row), col: parsed.num - 1 }
   const near = named && Math.abs(named.row - sits.row) <= LABEL_REACH && Math.abs(named.col - sits.col) <= LABEL_REACH
   const { row, col } = near ? named : sits
-  return {
-    x0: r2(rect.x - col * cellW - gapX / 2),
-    y0: r2(rect.y - row * cellH - gapY / 2),
-    cellW: r2(cellW),
-    cellH: r2(cellH),
-    boxW: rect.w,
-    boxH: rect.h,
-  }
+  return withAisles(
+    {
+      x0: r2(rect.x - col * cellW - gapX / 2),
+      y0: r2(rect.y - row * cellH - aisleSpace(g, row) - gapY / 2),
+      cellW: r2(cellW),
+      cellH: r2(cellH),
+      boxW: rect.w,
+      boxH: rect.h,
+    },
+    g.aisles ?? [],
+  )
 }
 
 /** Most grid lines drawn per direction; zoomed far out, the grid is left out rather than drawn as a blur. */
@@ -386,13 +455,25 @@ export function gridInView(
     return last - first + 1 > MAX_LINES ? [] : Array.from({ length: Math.max(0, last - first + 1) }, (_, i) => first + i)
   }
   const xk = span(view.x, view.x + view.w, g.x0, g.cellW)
-  const yk = span(view.y, view.y + view.h, g.y0, g.cellH)
+  // Rows by their top and bottom edges: an aisle leaves a gap between one row's bottom and the next top.
+  const first = rowAt(g, view.y) - 1
+  const last = rowAt(g, view.y + view.h) + 1
+  const inView = (y: number) => y >= view.y && y <= view.y + view.h
+  const ys: number[] = []
+  const rows: number[] = []
+  if (last - first < MAX_LINES) {
+    for (let row = first; row <= last; row++) {
+      const top = rowTop(g, row)
+      for (const y of [top, top + g.cellH]) if (inView(y) && !ys.some((v) => Math.abs(v - y) < 1e-6)) ys.push(y)
+      // A cell is labeled when its middle is in view.
+      if (inView(top + g.cellH / 2)) rows.push(row)
+    }
+  }
   return {
     xs: xk.map((k) => g.x0 + k * g.cellW),
-    ys: yk.map((k) => g.y0 + k * g.cellH),
-    // A cell is labeled when its middle is in view.
+    ys,
     cols: span(view.x - g.cellW / 2, view.x + view.w - g.cellW / 2, g.x0, g.cellW),
-    rows: span(view.y - g.cellH / 2, view.y + view.h - g.cellH / 2, g.y0, g.cellH),
+    rows,
   }
 }
 

@@ -41,6 +41,9 @@ export type LayoutVersionOut = S['LayoutVersionOut']
 export interface MappingSelection {
   selectedSpaceId: string | null
   onSelectSpace: (spaceId: string | null) => void
+  /** Several spaces picked at once (Shift+click), highlighted in both panels; empty for none. */
+  selectedSpaceIds?: ReadonlySet<string>
+  onSelectSpaces?: (spaceIds: ReadonlySet<string>) => void
   hoveredSpaceId: string | null // linked highlight between panels (US-08 #6)
   onHoverSpace: (spaceId: string | null) => void
 }
@@ -61,4 +64,8 @@ export interface ReferencePhotoPanelProps extends MappingSelection {
   grid?: Grid | null
   /** Snapping on: spaces added or moved from the photo also land squarely in the grid's cells. */
   snap?: boolean
+  /** An edit from the photo laid the whole lot out again (Find stalls straightening it): refit the grid. */
+  onRelaid?: (next: DraftLayout) => void
+  /** Spaces that may be published: removing one on the photo retires it rather than deleting it. */
+  publishedSpaceIds?: ReadonlySet<string>
 }

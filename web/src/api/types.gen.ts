@@ -665,6 +665,16 @@ export interface components {
         DraftSchematic: {
             /** Height */
             height: number;
+            /**
+             * Northdeg
+             * @description Where north is on the map: degrees clockwise from map-up; absent until set
+             */
+            northDeg?: number | null;
+            /**
+             * Rotationdeg
+             * @description Map shown turned this many degrees clockwise; absent when shown as laid out
+             */
+            rotationDeg?: number | null;
             /** Width */
             width: number;
         };
@@ -678,6 +688,11 @@ export interface components {
             rect: components["schemas"]["DraftRect"];
             /** Retired */
             retired: boolean;
+            /**
+             * Skewdeg
+             * @description Angled parking: how far the stall's sides lean from square to its row, in degrees (positive leans clockwise); absent for a square stall
+             */
+            skewDeg?: number | null;
             /**
              * Spaceid
              * @description Stable id; never changes once created
@@ -817,6 +832,11 @@ export interface components {
             publishedAt: string;
             /** Publishedby */
             publishedBy: string;
+            /**
+             * Rescoring
+             * @description Publish only: image ids of the latest photos being scored again against this version (one per viewpoint); absent when there is none
+             */
+            rescoring?: string[];
             /** Version */
             version: number;
         };
@@ -1108,7 +1128,16 @@ export interface components {
             col: number;
             /** Evidence */
             evidence: number;
+            /** Fromcar */
+            fromCar?: boolean | null;
             mapRect: components["schemas"]["Rect"];
+            /** Paint */
+            paint?: [
+                number,
+                number,
+                number,
+                number
+            ][] | null;
             /**
              * Partial
              * @default false
@@ -1221,6 +1250,16 @@ export interface components {
         SchematicOut: {
             /** Height */
             height: number;
+            /**
+             * Northdeg
+             * @description Which way north is on the map: degrees clockwise from map-up; absent if unset
+             */
+            northDeg?: number | null;
+            /**
+             * Rotationdeg
+             * @description Map shown turned this many degrees clockwise; absent when shown as laid out
+             */
+            rotationDeg?: number | null;
             /** Width */
             width: number;
         };
@@ -1229,6 +1268,11 @@ export interface components {
             /** Label */
             label: string;
             rect: components["schemas"]["RectOut"];
+            /**
+             * Skewdeg
+             * @description Angled parking: degrees the stall's sides lean from square (absent if square)
+             */
+            skewDeg?: number | null;
             /** Spaceid */
             spaceId: string;
             /** @description ParkingSpace.spaceType in the published layout JSON */

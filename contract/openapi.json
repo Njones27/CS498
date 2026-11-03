@@ -498,6 +498,34 @@
             "title": "Height",
             "type": "number"
           },
+          "northDeg": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 360.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where north is on the map: degrees clockwise from map-up; absent until set",
+            "title": "Northdeg"
+          },
+          "rotationDeg": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 360.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Map shown turned this many degrees clockwise; absent when shown as laid out",
+            "title": "Rotationdeg"
+          },
           "width": {
             "exclusiveMinimum": 0.0,
             "title": "Width",
@@ -524,6 +552,20 @@
           "retired": {
             "title": "Retired",
             "type": "boolean"
+          },
+          "skewDeg": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 80.0,
+                "exclusiveMinimum": -80.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Angled parking: how far the stall's sides lean from square to its row, in degrees (positive leans clockwise); absent for a square stall",
+            "title": "Skewdeg"
           },
           "spaceId": {
             "description": "Stable id; never changes once created",
@@ -840,6 +882,14 @@
           "publishedBy": {
             "title": "Publishedby",
             "type": "string"
+          },
+          "rescoring": {
+            "description": "Publish only: image ids of the latest photos being scored again against this version (one per viewpoint); absent when there is none",
+            "items": {
+              "type": "string"
+            },
+            "title": "Rescoring",
+            "type": "array"
           },
           "version": {
             "title": "Version",
@@ -1545,8 +1595,49 @@
             "title": "Evidence",
             "type": "number"
           },
+          "fromCar": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fromcar"
+          },
           "mapRect": {
             "$ref": "#/components/schemas/Rect"
+          },
+          "paint": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paint"
           },
           "partial": {
             "default": false,
@@ -1828,6 +1919,30 @@
             "title": "Height",
             "type": "number"
           },
+          "northDeg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which way north is on the map: degrees clockwise from map-up; absent if unset",
+            "title": "Northdeg"
+          },
+          "rotationDeg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Map shown turned this many degrees clockwise; absent when shown as laid out",
+            "title": "Rotationdeg"
+          },
           "width": {
             "title": "Width",
             "type": "number"
@@ -1848,6 +1963,18 @@
           },
           "rect": {
             "$ref": "#/components/schemas/RectOut"
+          },
+          "skewDeg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Angled parking: degrees the stall's sides lean from square (absent if square)",
+            "title": "Skewdeg"
           },
           "spaceId": {
             "title": "Spaceid",

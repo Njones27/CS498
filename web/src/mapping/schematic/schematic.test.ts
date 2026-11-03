@@ -184,3 +184,18 @@ describe('draft edits', () => {
     expect(canDeleteSpace('sp_new00001', 3, published)).toBe(true)
   })
 })
+
+
+describe('withRowLean', () => {
+  it('gives a new space in a row of angled stalls their lean, and leaves a mixed or lone row alone', async () => {
+    const { withRowLean } = await import('./edits')
+    const at = (id: string, x: number, skewDeg?: number) => ({
+      spaceId: id, label: id, type: 'STANDARD' as const, rect: { x, y: 20, w: 40, h: 40 }, retired: false, ...(skewDeg ? { skewDeg } : {}),
+    })
+    const row = [at('a', 20, 45), at('b', 60, 45), at('c', 100, 45)]
+    expect(withRowLean(row, at('n', 140)).skewDeg).toBe(45)
+    expect(withRowLean([at('a', 20, 45), at('b', 60)], at('n', 140)).skewDeg).toBeUndefined() // no clear lean
+    expect(withRowLean([at('a', 20, 45)], at('n', 140)).skewDeg).toBeUndefined() // one neighbour is not a row
+    expect(withRowLean(row, { ...at('n', 140), rect: { x: 140, y: 200, w: 40, h: 40 } }).skewDeg).toBeUndefined() // another row
+  })
+})

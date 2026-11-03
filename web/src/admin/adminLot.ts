@@ -6,6 +6,9 @@ export const ADMIN_LOT_KEY = 'parking.admin.lotId'
 /** Admin pages whose URL carries the lot: the picker follows them and switching rewrites them. */
 export const LOT_ROUTE = '/admin/lots/:lotId/*'
 
+/** One processed photo: it belongs to one lot, so it sets the picker, and switching goes to the new lot's photos. */
+export const PHOTO_ROUTE = '/admin/snapshots/:imageId/photo'
+
 export function readStoredLot(): string {
   try {
     return localStorage.getItem(ADMIN_LOT_KEY) ?? ''

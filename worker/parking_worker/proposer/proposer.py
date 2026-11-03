@@ -2,8 +2,8 @@
 
 Pipeline, all on one photo: paint mask -> divider direction (LSD) -> rotate into the divider
 frame -> stall bands split at row lines -> divider peaks per band -> lot pitch -> evenly spaced
-stalls per row (missing dividers filled, rows extended over parked cars) -> rows of cars with
-no paint -> outlines back on the photo.
+stalls per row (missing dividers filled, rows extended over parked cars and past the photo's
+edge) -> rows of cars with no paint -> outlines back on the photo.
 
 Evidence per stall (0..1), so admins can review the least certain first:
 
@@ -26,6 +26,7 @@ from parking_core.models import ProposedStall, Rect, touches_photo_edge
 
 from ..scorers.acpds_yolo import CarDetector, Detection, decode_photo
 from . import rows as R
+from .angled import car_stalls, paint_misses_cars, parked_cars
 from .cars import Car, car_boxes, to_frame
 from .frame import Frame, make_frame
 from .lines import divider_angle, paint_mask, segments, stroke_width
@@ -161,6 +162,7 @@ def find_rows(bgr: np.ndarray, boxes: np.ndarray) -> tuple[Frame, list[list[R.Fr
         for band in bands:
             peaks = R.column_peaks(vert, band, stroke)
             stalls = R.row_stalls(R.select_dividers(peaks, pitch), pitch, band, cars)
+            stalls = R.extend_to_edge(stalls, pitch, band, frame)
             if stalls:
                 rows.append(stalls)
     placed = [s for row in rows for s in row]
@@ -173,7 +175,19 @@ def find_rows(bgr: np.ndarray, boxes: np.ndarray) -> tuple[Frame, list[list[R.Fr
 
 
 def propose_stalls(bgr: np.ndarray, detections: Sequence[Detection]) -> list[ProposedStall]:
-    """Proposed stalls for a decoded BGR photo, sorted by row then column."""
+    """Proposed stalls for a decoded BGR photo, sorted by row then column: from the paint, or,
+    when the paint leaves most parked cars outside its stalls (a photo taken at an angle), one
+    stall per parked car (`angled.car_stalls`)."""
+    found = paint_stalls(bgr, detections)
+    height, width = bgr.shape[:2]
+    cars = parked_cars(detections)
+    if paint_misses_cars(found, cars, width, height):
+        return car_stalls(cars, width, height, bgr)
+    return found
+
+
+def paint_stalls(bgr: np.ndarray, detections: Sequence[Detection]) -> list[ProposedStall]:
+    """Stalls from the painted lines (cars add rows, fills and evidence)."""
     height, width = bgr.shape[:2]
     scale = min(1.0, WORK_SIDE / max(height, width))
     work = bgr

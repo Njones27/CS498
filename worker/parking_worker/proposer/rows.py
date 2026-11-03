@@ -46,6 +46,11 @@ CARS_PER_FILL = 3
 """A longer gap is filled when it holds at least one car per this many stalls."""
 MAX_EXTEND = 3
 """Stalls added past a row's last divider, one per car found there."""
+EDGE_REACH = 2
+"""A row ending within this many stalls of the photo's border runs on to it: stalls are
+filled up to the border, the last one cut off by it."""
+EDGE_SLIVER = 0.1
+"""A stall reaching less than this share of a pitch past the border is not cut off by it."""
 MISFIT_WEIGHT = 1.0
 SPLIT_DEPTH = 1.7
 """A band this many median row depths tall with no row line is split into equal rows."""
@@ -347,6 +352,37 @@ def row_stalls(
                 run.append(FrameStall(x, x + pitch, band.y0, band.y1, run[-1].right, 0.0))
         stalls.extend(run)
     return stalls
+
+
+def extend_to_edge(
+    stalls: Sequence[FrameStall], pitch: float, band: Band, frame: Frame
+) -> list[FrameStall]:
+    """Stalls past either end of a row that stops within `EDGE_REACH` stalls of the photo's
+    border, car or not, up to and including the one the border cuts off: a row reaching the
+    border goes on past it. The cut-off stall's share in view decides later whether it is
+    proposed (``MIN_PARTIAL`` in the proposer)."""
+    out = list(stalls)
+    if not out:
+        return out
+    yc = (band.y0 + band.y1) / 2
+
+    def runs_off(x: float) -> bool:  # past the border by more than a sliver
+        return not bool(frame.in_photo(np.array([[x, yc]]), margin=-EDGE_SLIVER * pitch)[0])
+
+    def reach(x: float, step: float) -> int:
+        """Stalls from ``x`` (in view) to the first one whose far side is off the photo."""
+        if runs_off(x):
+            return 0
+        return next((k for k in range(1, EDGE_REACH + 1) if runs_off(x + k * step)), 0)
+
+    # The first added stall shares the row's end divider; the rest are filled in (no paint).
+    for k in range(reach(out[0].x0, -pitch)):
+        x, seen = out[0].x0, out[0].left if k == 0 else 0.0
+        out.insert(0, FrameStall(x - pitch, x, band.y0, band.y1, 0.0, seen))
+    for k in range(reach(out[-1].x1, pitch)):
+        x, seen = out[-1].x1, out[-1].right if k == 0 else 0.0
+        out.append(FrameStall(x, x + pitch, band.y0, band.y1, seen, 0.0))
+    return out
 
 
 def car_rows(

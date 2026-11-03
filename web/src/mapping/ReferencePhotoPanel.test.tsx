@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { putFile } from '../lib/putFile'
 import { mockFetch } from '../test/helpers'
 import { rylanDraftFixture } from './fixtures/rylan'
+import { PKLOT_CAR_STALLS } from './fixtures/pklotCars'
 import { ReferencePhotoPanel } from './ReferencePhotoPanel'
 import { cellRect, fitGrid } from './schematic/grid'
-import type { DraftLayout, DraftSpace, ReferencePhotoPanelProps } from './types'
+import type { DraftLayout, DraftSpace, Outline, ReferencePhotoPanelProps } from './types'
 
 vi.mock('../lib/putFile', () => ({ putFile: vi.fn() }))
 
@@ -404,7 +405,7 @@ describe('ReferencePhotoPanel (US-08)', () => {
   it('allows deleting an existing outline', async () => {
     const { user, onChange, onSave } = renderPanel({ viewId: 'V1', selectedSpaceId: 'sp_a01' })
 
-    const deleteBtn = screen.getByRole('button', { name: 'Delete outline' })
+    const deleteBtn = screen.getByRole('button', { name: 'Clear outline' })
     await user.click(deleteBtn)
 
     expect(onChange).toHaveBeenCalledTimes(1)
@@ -542,6 +543,103 @@ describe('ReferencePhotoPanel (US-08)', () => {
       })
       expect(screen.getByText(/Proposed 1 stall in V1/)).toBeInTheDocument()
       expect(fetchMock).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('on a new lot seen at an angle, lays the stalls found from parked cars out in rows from above', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      mockFetch({
+        'POST /admin/lots/test-lot/views/V1/proposals': { status: 202, body: { ...RUN, status: 'QUEUED', stalls: [] } },
+        'GET /admin/lots/test-lot/views/V1/proposals': { body: { ...RUN, status: 'COMPLETE', stalls: PKLOT_CAR_STALLS } },
+      })
+      const base = rylanDraftFixture
+      const draft: DraftLayout = {
+        ...base,
+        basedOnVersion: null,
+        spaces: [],
+        viewpoints: base.viewpoints.map((v) =>
+          v.viewId === 'V1'
+            ? { ...v, referenceImage: { ...v.referenceImage!, width: 1280, height: 720 }, outlines: {}, outlineReview: {} }
+            : { ...v, outlines: {}, outlineReview: {} },
+        ),
+      }
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { onChange } = renderPanel({ draft, viewId: 'V1' })
+      await user.click(screen.getByTestId('find-stalls-btn'))
+      await pollUntil(() => expect(onChange).toHaveBeenCalledTimes(1))
+      const next: DraftLayout = onChange.mock.calls[0][0]
+      expect(new Set(next.spaces.map((sp) => sp.label[0])).size).toBe(7)
+      // The paint beside the cars gives the angle: every stall at 45 degrees.
+      expect(next.spaces.every((sp) => sp.skewDeg === 45)).toBe(true)
+      expect(screen.getByText(/Found 39 parked cars in V1 and laid the lot out from above in 7 rows; 7 empty stalls between them; 8 cars off the rows left out/)).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('on a lot already mapped, proposes the stalls from parked cars and lays the lot out only when asked', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      mockFetch({
+        'POST /admin/lots/test-lot/views/V1/proposals': { status: 202, body: { ...RUN, status: 'QUEUED', stalls: [] } },
+        'GET /admin/lots/test-lot/views/V1/proposals': { body: { ...RUN, status: 'COMPLETE', stalls: PKLOT_CAR_STALLS } },
+      })
+      const base = rylanDraftFixture
+      // Published, with four spaces the admin placed on the map and outlined on the photo (on four cars).
+      const mine = PKLOT_CAR_STALLS.slice(0, 4).map((_, k) => ({
+        spaceId: `mine${k}`,
+        label: `Q-0${k + 1}`,
+        type: 'STANDARD' as const,
+        rect: { x: 40 + 50 * k, y: 40, w: 40, h: 80 },
+        retired: false,
+      }))
+      const outlines = Object.fromEntries(mine.map((sp, k) => [sp.spaceId, PKLOT_CAR_STALLS[k].polygon as Outline]))
+      const outlineReview = Object.fromEntries(mine.map((sp) => [sp.spaceId, { source: 'drawn' as const, status: 'accepted' as const }]))
+      const draft: DraftLayout = {
+        ...base,
+        basedOnVersion: 1,
+        spaces: mine,
+        viewpoints: base.viewpoints.map((v) =>
+          v.viewId === 'V1'
+            ? { ...v, referenceImage: { ...v.referenceImage!, width: 1280, height: 720 }, outlines, outlineReview }
+            : { ...v, outlines: {}, outlineReview: {} },
+        ),
+      }
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const { onChange, onSave, rerender } = renderPanel({ draft, viewId: 'V1' })
+      await user.click(screen.getByTestId('find-stalls-btn'))
+      await pollUntil(() => expect(onChange).toHaveBeenCalledTimes(1))
+      // Proposals only: the admin's spaces keep their names and row, nothing leans yet.
+      const proposed: DraftLayout = onChange.mock.calls[0][0]
+      expect(proposed.spaces.slice(0, 4).map((sp) => [sp.label, sp.rect.y])).toEqual(mine.map((sp) => [sp.label, 40]))
+      expect(proposed.spaces.some((sp) => sp.skewDeg)).toBe(false)
+      expect(screen.getByText(/^Proposed \d+ stalls in V1/)).toBeInTheDocument()
+      // The page hands the saved draft back, as it does after every edit.
+      rerender(
+        <ReferencePhotoPanel
+          lotId="test-lot"
+          draft={proposed}
+          viewId="V1"
+          onViewChange={vi.fn()}
+          onChange={onChange}
+          onReferenceUploaded={vi.fn()}
+          issues={[]}
+          selectedSpaceId={null}
+          onSelectSpace={vi.fn()}
+          hoveredSpaceId={null}
+          onHoverSpace={vi.fn()}
+          onSave={onSave}
+        />,
+      )
+      const offer = screen.getByTestId('lay-out-from-cars')
+      await user.click(within(offer).getByRole('button', { name: 'Lay out the lot from the cars' }))
+      const laid: DraftLayout = onChange.mock.lastCall![0]
+      expect(laid.spaces.some((sp) => sp.skewDeg === 45)).toBe(true)
+      expect(screen.getByText(/laid the lot out from above in \d+ rows/)).toBeInTheDocument()
+      expect(screen.queryByTestId('lay-out-from-cars')).not.toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }

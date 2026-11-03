@@ -64,6 +64,32 @@ function loadPhoto(width = 4000, height = 3000) {
 }
 
 describe('snapshot photo page', () => {
+  it("names outlines by the lot's space labels, not their ids", async () => {
+    const withIds: SnapshotDetail = {
+      ...complete,
+      observations: complete.observations.map((o, i) => ({ ...o, spaceId: `sp_${i}` })),
+    }
+    mockFetch({
+      [API]: { body: withIds },
+      'GET /lots/drone-lot': {
+        body: {
+          lot: { lotId: 'drone-lot', name: 'Drone Lot', location: '', staleAfterMinutes: 30 },
+          viewpoints: [{ viewId: 'V1', name: 'Overhead' }],
+          layout: {
+            version: 1,
+            schematic: { width: 1000, height: 600 },
+            spaces: [{ spaceId: 'sp_0', label: 'C-07', type: 'STANDARD', rect: { x: 0, y: 0, w: 40, h: 80 } }],
+          },
+        },
+      },
+    })
+    renderApp(URL, ADMIN)
+    await screen.findByRole('heading', { name: /Photo: drone-lot/ })
+    loadPhoto()
+    expect(await within(screen.getByTestId('outline-sp_0')).findByText('C-07')).toBeInTheDocument()
+    expect(within(screen.getByTestId('outline-sp_1')).getByText('sp_1')).toBeInTheDocument() // not in the layout
+  })
+
   it('draws one outline per observation and one box per detection on the photo', async () => {
     mockFetch({ [API]: { body: complete } })
     renderApp(URL, ADMIN)

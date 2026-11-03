@@ -29,6 +29,20 @@ Outline = Annotated[
 class DraftSchematic(CamelModel):
     width: FiniteFloat = Field(gt=0)
     height: FiniteFloat = Field(gt=0)
+    north_deg: FiniteFloat | None = Field(
+        default=None,
+        ge=0,
+        lt=360,
+        exclude_if=lambda v: v is None,
+        description="Where north is on the map: degrees clockwise from map-up; absent until set",
+    )
+    rotation_deg: FiniteFloat | None = Field(
+        default=None,
+        ge=0,
+        lt=360,
+        exclude_if=lambda v: not v,
+        description="Map shown turned this many degrees clockwise; absent when shown as laid out",
+    )
 
 
 class DraftRect(CamelModel):
@@ -47,6 +61,16 @@ class DraftSpace(CamelModel):
     type: SpaceType
     rect: DraftRect
     retired: bool
+    skew_deg: FiniteFloat | None = Field(
+        default=None,
+        gt=-80,
+        lt=80,
+        exclude_if=lambda v: not v,
+        description=(
+            "Angled parking: how far the stall's sides lean from square to its row, in degrees "
+            "(positive leans clockwise); absent for a square stall"
+        ),
+    )
 
 
 class OutlineReviewOut(CamelModel):
@@ -140,6 +164,14 @@ class LayoutVersionOut(CamelModel):
     version: int
     published_by: str
     published_at: datetime
+    rescoring: list[str] = Field(
+        default_factory=list,
+        exclude_if=lambda v: not v,
+        description=(
+            "Publish only: image ids of the latest photos being scored again against this "
+            "version (one per viewpoint); absent when there is none"
+        ),
+    )
 
 
 class ValidationFailedResponse(ErrorResponse):

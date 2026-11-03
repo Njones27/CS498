@@ -4,306 +4,333 @@
   "location": "",
   "staleAfterMinutes": 30,
   "schematic": {
-    "width": 1000.0,
-    "height": 600.0
+    "width": 420,
+    "height": 292
   },
   "spaces": [
     {
       "spaceId": "pk-22",
-      "label": "A-01",
-      "spaceType": "STANDARD",
-      "rect": {
-        "x": 42.0,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
-    },
-    {
-      "spaceId": "pk-23",
-      "label": "A-02",
-      "spaceType": "STANDARD",
-      "rect": {
-        "x": 83.82,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
-    },
-    {
-      "spaceId": "pk-24",
-      "label": "A-03",
-      "spaceType": "STANDARD",
-      "rect": {
-        "x": 125.64,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
-    },
-    {
-      "spaceId": "pk-16",
       "label": "A-04",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 167.45,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 134,
+        "y": 20,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
-      "spaceId": "pk-25",
+      "spaceId": "pk-23",
       "label": "A-05",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 209.27,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 172,
+        "y": 20,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
-      "spaceId": "pk-26",
+      "spaceId": "pk-24",
       "label": "A-06",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 251.09,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 210,
+        "y": 20,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
-      "spaceId": "pk-17",
+      "spaceId": "pk-16",
+      "label": "B-05",
+      "spaceType": "STANDARD",
+      "rect": {
+        "x": 172,
+        "y": 58,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
+    },
+    {
+      "spaceId": "pk-25",
       "label": "A-07",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 292.91,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 248,
+        "y": 20,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
-      "spaceId": "pk-27",
+      "spaceId": "pk-26",
       "label": "A-08",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 334.73,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 286,
+        "y": 20,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
-      "spaceId": "pk-18",
+      "spaceId": "pk-17",
+      "label": "B-06",
+      "spaceType": "STANDARD",
+      "rect": {
+        "x": 210,
+        "y": 58,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
+    },
+    {
+      "spaceId": "pk-27",
       "label": "A-09",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 376.55,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 324,
+        "y": 20,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
+    },
+    {
+      "spaceId": "pk-18",
+      "label": "B-07",
+      "spaceType": "STANDARD",
+      "rect": {
+        "x": 248,
+        "y": 58,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-28",
       "label": "A-10",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 418.36,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 362,
+        "y": 20,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-19",
-      "label": "A-11",
+      "label": "B-08",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 460.18,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 286,
+        "y": 58,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-20",
-      "label": "A-12",
+      "label": "B-09",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 502.0,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 324,
+        "y": 58,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-21",
-      "label": "A-13",
+      "label": "B-10",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 543.82,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 362,
+        "y": 58,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-11",
-      "label": "A-14",
+      "label": "C-06",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 585.64,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 210,
+        "y": 196,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-12",
-      "label": "A-15",
+      "label": "C-07",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 627.45,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 248,
+        "y": 196,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-13",
-      "label": "A-16",
+      "label": "C-08",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 669.27,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 286,
+        "y": 196,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-14",
-      "label": "A-17",
+      "label": "C-09",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 711.09,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 324,
+        "y": 196,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-15",
-      "label": "A-18",
+      "label": "C-10",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 752.91,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 362,
+        "y": 196,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-5",
-      "label": "A-19",
+      "label": "D-05",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 794.73,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 172,
+        "y": 234,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-6",
-      "label": "A-20",
+      "label": "D-06",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 836.55,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 210,
+        "y": 234,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-7",
-      "label": "A-21",
+      "label": "D-07",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 878.36,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 248,
+        "y": 234,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-8",
-      "label": "A-22",
+      "label": "D-08",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 920.18,
-        "y": 44.0,
-        "w": 37.82,
-        "h": 83.2
-      }
+        "x": 286,
+        "y": 234,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-4",
-      "label": "B-01",
+      "label": "D-04",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 42.0,
-        "y": 148.0,
-        "w": 916.0,
-        "h": 83.2
-      }
+        "x": 134,
+        "y": 234,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-3",
-      "label": "C-01",
+      "label": "D-03",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 42.0,
-        "y": 252.0,
-        "w": 916.0,
-        "h": 83.2
-      }
+        "x": 96,
+        "y": 234,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-2",
-      "label": "D-01",
+      "label": "D-02",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 42.0,
-        "y": 356.0,
-        "w": 916.0,
-        "h": 83.2
-      }
+        "x": 58,
+        "y": 234,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-10",
-      "label": "E-01",
+      "label": "C-01",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 42.0,
-        "y": 460.0,
-        "w": 456.0,
-        "h": 83.2
-      }
+        "x": 20,
+        "y": 196,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     },
     {
       "spaceId": "pk-1",
-      "label": "E-02",
+      "label": "D-01",
       "spaceType": "STANDARD",
       "rect": {
-        "x": 502.0,
-        "y": 460.0,
-        "w": 456.0,
-        "h": 83.2
-      }
+        "x": 20,
+        "y": 234,
+        "w": 38,
+        "h": 38
+      },
+      "skewDeg": 45
     }
   ],
   "viewpoints": [

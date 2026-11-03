@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useAdminLot } from '../admin/AdminLotContext'
 import { api } from '../api/client'
-import type { CarBoxOut, ObservationOut, SnapshotDetail, SpaceState } from '../api/schemas'
+import type { CarBoxOut, LotDetail, ObservationOut, SnapshotDetail, SpaceState } from '../api/schemas'
 import { StateIconSvg } from '../components/StateIcon'
 import { CAR_CLASSES, classBreakdown } from '../lib/detections'
 import { dateTime } from '../lib/relativeTime'
@@ -18,6 +19,11 @@ interface Size {
   w: number
   h: number
 }
+
+/** Space id -> label, so outlines read "C-07" rather than an id like sp_k3x9q2m1. */
+type Labels = Map<string, string>
+const NO_LABELS: Labels = new Map()
+const nameOf = (labels: Labels, spaceId: string) => labels.get(spaceId) ?? spaceId
 
 /** Admin check of one processed photo: aligned outlines and car boxes drawn on the upload. */
 export function SnapshotPhotoPage() {
@@ -36,6 +42,21 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const data = snap.data
   if (data?.photoUrl && !photoUrl) setPhotoUrl(data.photoUrl)
+  // The header picker shows the photo's lot, like a page with the lot in its URL.
+  const { setLotId } = useAdminLot()
+  const photoLot = data?.lotId
+  useEffect(() => {
+    if (photoLot) setLotId(photoLot)
+  }, [photoLot, setLotId])
+  // Labels from the lot's live layout: space ids never change, so they name the spaces of older photos too.
+  const lot = useFetch<LotDetail | null>(
+    () => (photoLot ? api.get<LotDetail>(`/lots/${encodeURIComponent(photoLot)}`).catch(() => null) : Promise.resolve(null)),
+    `snapshot-photo-lot:${photoLot ?? ''}`,
+  )
+  const labels = useMemo<Labels>(
+    () => (lot.data ? new Map(lot.data.layout.spaces.map((sp) => [sp.spaceId, sp.label])) : NO_LABELS),
+    [lot.data],
+  )
 
   const pending = !!data && !data.finished && data.jobStatus !== 'EXPIRED'
   const { loading, reload } = snap
@@ -103,18 +124,19 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
               size={size}
               observations={showOutlines ? data.observations : []}
               boxes={data.detections}
+              labels={labels}
             />
           )}
         </div>
       )}
       {data && complete && <Legend />}
-      {data && complete && <SpacesTable observations={data.observations} />}
+      {data && complete && <SpacesTable observations={data.observations} labels={labels} />}
       {data?.modelVersion && <p className="hint photo-model">Model: {data.modelVersion}</p>}
     </main>
   )
 }
 
-function Overlay({ size, observations, boxes }: { size: Size; observations: ObservationOut[]; boxes: CarBoxOut[] }) {
+function Overlay({ size, observations, boxes, labels }: { size: Size; observations: ObservationOut[]; boxes: CarBoxOut[]; labels: Labels }) {
   const { w, h } = size
   const font = Math.max(10, w * 0.011)
   const halo = font * 0.18
@@ -135,12 +157,12 @@ function Overlay({ size, observations, boxes }: { size: Size; observations: Obse
           const [lx, ly] = o.polygon[0]
           return (
             <g key={o.spaceId} className={`photo-space ${v.className}`} data-testid={`outline-${o.spaceId}`} data-state={o.state}>
-              <title>{describe(o)}</title>
+              <title>{describe(o, labels)}</title>
               <polygon points={points} className="photo-space__line" vectorEffect="non-scaling-stroke" />
               {/* Occupied draws a second, thin inner line: a double line that reads without colour. */}
               <polygon points={points} className="photo-space__inner" vectorEffect="non-scaling-stroke" />
               <text x={lx * w} y={ly * h - halo} fontSize={font} strokeWidth={halo} className="photo-label">
-                {o.spaceId}
+                {nameOf(labels, o.spaceId)}
               </text>
             </g>
           )
@@ -177,7 +199,7 @@ function Overlay({ size, observations, boxes }: { size: Size; observations: Obse
 const num = (v: number | null) => (v === null ? 'n/a' : v.toFixed(2))
 
 /** The per-space numbers as text, so they are not hover-only (keyboard and screen readers). */
-function SpacesTable({ observations }: { observations: ObservationOut[] }) {
+function SpacesTable({ observations, labels }: { observations: ObservationOut[]; labels: Labels }) {
   return (
     <details className="photo-spaces">
       <summary>Spaces ({observations.length})</summary>
@@ -195,7 +217,7 @@ function SpacesTable({ observations }: { observations: ObservationOut[] }) {
           <tbody>
             {observations.map((o) => (
               <tr key={o.spaceId}>
-                <th scope="row">{o.spaceId}</th>
+                <th scope="row">{nameOf(labels, o.spaceId)}</th>
                 <td>{visualFor(o.state).label}</td>
                 <td>{num(o.acpdsScore)}</td>
                 <td>{num(o.carOverlap)}</td>
@@ -209,9 +231,9 @@ function SpacesTable({ observations }: { observations: ObservationOut[] }) {
   )
 }
 
-function describe(o: ObservationOut): string {
+function describe(o: ObservationOut, labels: Labels): string {
   return [
-    `${o.spaceId}: ${visualFor(o.state).label}`,
+    `${nameOf(labels, o.spaceId)}: ${visualFor(o.state).label}`,
     `ACPDS ${num(o.acpdsScore)}`,
     `car overlap ${num(o.carOverlap)}`,
     o.inFrame ? 'in frame' : 'partly out of frame',
