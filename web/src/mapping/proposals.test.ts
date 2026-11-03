@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   acceptProposals,
   alignRowsToPhoto,
+  area,
   findWideStalls,
   forgetRejected,
+  groundSizes,
   mergeWideStalls,
   insidePolygon,
   MAX_REJECTED,
@@ -17,6 +19,9 @@ import {
 } from './proposals'
 import { cellRect, fitGrid } from './schematic/grid'
 import { afterRectChange, photoToSchematic, proposeOutlines } from './sync'
+import { straightenFromPhoto } from './straighten'
+import { pklotFixture } from './fixtures/pklot'
+import { PKLOT_CAR_STALLS } from './fixtures/pklotCars'
 import type { DraftLayout, DraftSpace, Outline, Point } from './types'
 
 const box = (x: number, y: number, w: number, h: number): Outline => [
@@ -595,5 +600,71 @@ describe('rows laid out as wide as the photo shows them', () => {
     d.spaces = [0, 1, 2].map((k) => space(`s${k}`, `C-0${k + 1}`, 20 + 60 * k, 20))
     d.viewpoints[0].outlines = Object.fromEntries(d.spaces.map((sp, k) => [sp.spaceId, box(0.1 + 0.05 * k, 0.1, 0.05, 0.1)]))
     expect(alignRowsToPhoto(d, 'V1')).toBe(d)
+  })
+})
+
+describe('stalls near an angled camera are not taken for wide bays', () => {
+  /** A row of `n` stalls (those at `bays` 1.5 wide) seen by a camera at an angle: the ground mapped onto
+   * the photo by a homography, so stalls nearer the camera (lower on the photo) look bigger. `flat`
+   * looks straight down instead. */
+  function obliqueRow(n: number, bays: number[] = [], flat = false): DraftLayout {
+    const toPhoto = ([gx, gy]: Point): Point => {
+      if (flat) return [0.1 + 0.6 * gx, 0.05 + 0.3 * gy]
+      const w = 1 + 0.9 * gy
+      return [(0.1 + 0.8 * gx) / w + 0.05, (0.9 - 0.1 * gy) / w - 0.25]
+    }
+    const d = emptyDraft()
+    let at = 0
+    d.spaces = Array.from({ length: n }, (_, k) => space(`s${k}`, `C-${String(k + 1).padStart(2, '0')}`, 20 + 50 * k, 20))
+    d.viewpoints[0].outlines = Object.fromEntries(
+      d.spaces.map((sp, k) => {
+        const w = bays.includes(k) ? 0.15 : 0.1
+        // The row runs from the camera's foot out across the lot (up the photo).
+        const corners: Point[] = [[0.1, at], [0.1, at + w], [0.4, at + w], [0.4, at]]
+        at += w
+        return [sp.spaceId, corners.map(toPhoto) as Outline]
+      }),
+    )
+    return d
+  }
+
+  it('a row whose stalls only grow towards the camera is left alone', () => {
+    const d = obliqueRow(8)
+    const areas = d.spaces.map((sp) => area(d.viewpoints[0].outlines[sp.spaceId] as Point[]))
+    expect(areas[0] / areas[3]).toBeGreaterThan(1.4) // the old raw-area test called it a wide bay
+    expect(alignRowsToPhoto(d, 'V1')).toBe(d)
+  })
+
+  it('still finds a bay half as wide again, near the camera too', () => {
+    const next = alignRowsToPhoto(obliqueRow(8, [1]), 'V1')
+    const widths = Object.fromEntries(next.spaces.map((sp) => [sp.label, sp.rect.w]))
+    expect(widths['C-02']).toBe(75)
+    expect(Object.entries(widths).filter(([l]) => l !== 'C-02').every(([, w]) => w === 50)).toBe(true)
+  })
+
+  it.each([
+    ['overhead', [1, 2, 5], true],
+    ['overhead', [1, 3, 5, 7], true],
+    ['at an angle', [1, 4, 6], false],
+    ['at an angle', [0, 3, 5, 8], false],
+  ])('finds every bay when a row has several (%s, bays %j)', (_, bays, flat) => {
+    const d = obliqueRow(10, bays, flat)
+    const next = alignRowsToPhoto(d, 'V1')
+    expect(next.spaces.map((sp) => sp.rect.w)).toEqual(d.spaces.map((_, k) => (bays.includes(k) ? 75 : 50)))
+  })
+
+  it('PKLot UFPR04: Find stalls on the straightened lot keeps every stall one cell wide', () => {
+    const r = straightenFromPhoto(pklotFixture(), 'V1')
+    if (typeof r === 'string') throw new Error(r)
+    const cell = r.draft.spaces[0].rect.w
+    const merged = mergeProposals(r.draft, 'V1', PKLOT_CAR_STALLS)
+    const before = new Set(r.draft.spaces.map((sp) => sp.spaceId))
+    const wider = merged.draft.spaces.filter((sp) => before.has(sp.spaceId) && sp.rect.w !== cell).map((sp) => `${sp.label} ${sp.rect.w}`)
+    expect(wider).toEqual([])
+  })
+
+  it('an overhead photo (every stall drawn the same size) measures every stall as 1', () => {
+    const sizes = groundSizes([0, 1, 2, 3].map((k) => box(0.1 + 0.05 * k, 0.1 + 0.2 * (k % 2), 0.05, 0.1)))
+    for (const s of sizes) expect(s).toBeCloseTo(1, 6)
   })
 })
