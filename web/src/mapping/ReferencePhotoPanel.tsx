@@ -1122,6 +1122,7 @@ export function ReferencePhotoPanel({
                   type="text"
                   value={newViewpointName}
                   placeholder="e.g. South Corner"
+                  maxLength={120}
                   onChange={(e) => setNewViewpointName(e.target.value)}
                   autoFocus
                   required

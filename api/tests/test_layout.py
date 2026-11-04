@@ -10,7 +10,8 @@ from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from parking_api.layout_schemas import MAX_REJECTED_STALLS
+from parking_api.layout_schemas import MAX_LABEL_LENGTH, MAX_NAME_LENGTH, MAX_REJECTED_STALLS
+from parking_core.models import ParkingSpace, Rect
 from parking_worker.aligners import build_aligner
 from parking_worker.handler import process_message
 from parking_worker.scorers import build_scorer
@@ -376,6 +377,30 @@ def _missing_revision(b):
     del b["revision"]
 
 
+def _space_id_with_key_separator(b):
+    b["spaces"].append({**NEW_SPACE, "spaceId": "A-01#V1"})
+
+
+def _space_id_too_long(b):
+    b["spaces"].append({**NEW_SPACE, "spaceId": "s" * 65})
+
+
+def _label_too_long(b):
+    space(b, "A-01")["label"] = "x" * (MAX_LABEL_LENGTH + 1)
+
+
+def _view_id_with_path(b):
+    b["viewpoints"].append({"viewId": "../../layouts/other", "name": "Roof"})
+
+
+def _view_id_with_key_separator(b):
+    b["viewpoints"].append({"viewId": "V3#x", "name": "Roof"})
+
+
+def _view_name_too_long(b):
+    view(b, "V1")["name"] = "x" * (MAX_NAME_LENGTH + 1)
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -386,6 +411,12 @@ def _missing_revision(b):
         _duplicate_view_id,
         _bad_review_status,
         _missing_revision,
+        _space_id_with_key_separator,
+        _space_id_too_long,
+        _label_too_long,
+        _view_id_with_path,
+        _view_id_with_key_separator,
+        _view_name_too_long,
     ],
 )
 def test_malformed_body_is_422(client, admin_headers, mutate):
@@ -395,6 +426,32 @@ def test_malformed_body_is_422(client, admin_headers, mutate):
     assert r.status_code == 422
     assert r.json()["error"] == "validation_error"
     assert get_draft(client, admin_headers)["revision"] == 0
+
+
+def test_ids_and_lengths_at_the_limits_are_accepted(client, admin_headers):
+    body = as_body(get_draft(client, admin_headers))
+    long_id = "s_-" + "9" * 61
+    body["spaces"].append({**NEW_SPACE, "spaceId": long_id, "label": "x" * MAX_LABEL_LENGTH})
+    body["viewpoints"].append({"viewId": "V_3-b", "name": "n" * MAX_NAME_LENGTH})
+    r = put(client, admin_headers, body)
+    assert r.status_code == 200, r.text
+    assert space(r.json(), long_id)["label"] == "x" * MAX_LABEL_LENGTH
+    assert view(r.json(), "V_3-b")["name"] == "n" * MAX_NAME_LENGTH
+
+
+def test_a_draft_stored_before_the_id_rules_still_loads(client, admin_headers, adapters):
+    """The rules apply to saves only, so a draft already holding such a space still opens."""
+    get_draft(client, admin_headers)  # creates the draft meta
+    old = ParkingSpace(
+        lot_id="test-lot",
+        space_id="old#1",
+        label="y" * 100,
+        space_type="STANDARD",
+        rect=Rect(x=0, y=0, w=10, h=10),
+    )
+    adapters.repository.put_spaces([old])
+    draft = get_draft(client, admin_headers)
+    assert space(draft, "old#1")["label"] == "y" * 100
 
 
 # --- Validate, publish, versions, restore (brief §4.3) ---------------------------

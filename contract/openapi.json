@@ -428,7 +428,7 @@
         "type": "object"
       },
       "DraftLayoutUpdate": {
-        "description": "PUT body: the DraftLayout shape without updatedAt, updatedBy and referenceImage.",
+        "description": "PUT body: the DraftLayout shape without updatedAt, updatedBy and referenceImage.\n\nEach space's spaceId must be 1 to 64 letters, digits, '-' or '_', and its label at most 40\ncharacters. Those are checked here, not on DraftSpace, because DraftSpace is also the\nresponse shape and a draft stored before the rules must still load.",
         "properties": {
           "revision": {
             "description": "Must equal the stored revision, else 409 stale_revision",
@@ -678,6 +678,7 @@
         "description": "A viewpoint in a draft save. The reference photo is set only by its own endpoints.",
         "properties": {
           "name": {
+            "maxLength": 120,
             "title": "Name",
             "type": "string"
           },
@@ -736,7 +737,8 @@
             "type": "array"
           },
           "viewId": {
-            "minLength": 1,
+            "description": "Letters, digits, '-' and '_' only, at most 64",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
             "title": "Viewid",
             "type": "string"
           }
