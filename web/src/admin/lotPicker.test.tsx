@@ -176,36 +176,38 @@ describe('US-16 #3: lot picker on every admin page', () => {
     'GET /lots/north-lot/status': { body: status('north-lot') },
     'GET /admin/lots/test-lot/closures': { body: [] },
     'GET /admin/lots/north-lot/closures': { body: [] },
+    'GET /admin/lots/test-lot/overrides': { body: [] },
+    'GET /admin/lots/north-lot/overrides': { body: [] },
   }
 
-  it('switching lots reloads the Closures page for the new lot', async () => {
+  it('switching lots reloads the closures on Set space state for the new lot', async () => {
     const fetchMock = mockFetch({ ...routes, ...closuresRoutes })
-    renderApp('/admin/closures', ADMIN)
+    renderApp('/admin/overrides', ADMIN)
     await waitFor(() => expect(calls(fetchMock, 'GET', '/admin/lots/test-lot/closures')).toHaveLength(1))
     await userEvent.setup().selectOptions(await picker(), 'north-lot')
     await waitFor(() => expect(calls(fetchMock, 'GET', '/admin/lots/north-lot/closures')).toHaveLength(1))
   })
 
-  it('a remembered lot that no longer exists: Closures uses the picked lot, then follows a switch', async () => {
+  it('a remembered lot that no longer exists: Set space state uses the picked lot, then follows a switch', async () => {
     localStorage.setItem(KEY, 'deleted-lot')
     const fetchMock = mockFetch({ ...routes, ...closuresRoutes })
-    renderApp('/admin/closures', ADMIN)
-    expect(await screen.findByRole('heading', { name: 'Closures: North Lot' })).toBeInTheDocument()
+    renderApp('/admin/overrides', ADMIN)
+    expect(await screen.findByRole('heading', { name: 'Set space state: North Lot' })).toBeInTheDocument()
     expect((await picker()).value).toBe('north-lot')
     await userEvent.setup().selectOptions(await picker(), 'test-lot')
-    expect(await screen.findByRole('heading', { name: 'Closures: Test Lot' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Set space state: Test Lot' })).toBeInTheDocument()
     expect(calls(fetchMock, 'GET', '/admin/lots/test-lot/closures')).toHaveLength(1)
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes('deleted-lot'))).toBe(false)
   })
 
-  it('B1: picking an unpublished lot and opening Closures says to publish it first', async () => {
+  it('B1: picking an unpublished lot and opening Set space state says to publish it first', async () => {
     const fetchMock = mockFetch({ ...routes, 'GET /admin/lots': { body: [NEW_NORTH, TEST_LOT] }, ...closuresRoutes })
     renderApp('/admin', ADMIN)
     const user = userEvent.setup()
     await user.selectOptions(await picker(), 'north-lot')
-    await user.click(screen.getByRole('link', { name: 'Closures' }))
-    expect(await screen.findByText(/Publish the lot before closing spaces/)).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Closures: North Lot' })).toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Set space state' }))
+    expect(await screen.findByText(/Publish the lot before setting space states/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Set space state: North Lot' })).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(calls(fetchMock, 'GET', '/lots/north-lot')).toHaveLength(0)
   })

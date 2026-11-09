@@ -87,9 +87,10 @@ async function setup(routes: Parameters<typeof mockFetch>[0] = {}, closures: Clo
     'GET /lots/test-lot': { body: detail },
     'GET /lots/test-lot/status': { body: status },
     [`GET ${URL}`]: { body: closures },
+    'GET /admin/lots/test-lot/overrides': { body: [] },
     ...routes,
   })
-  renderApp('/admin/closures', ADMIN)
+  renderApp('/admin/overrides', ADMIN)
   await screen.findByRole('button', { name: 'Row B' })
   return { fetchMock, user: userEvent.setup() }
 }
@@ -100,8 +101,10 @@ const calls = (fetchMock: ReturnType<typeof mockFetch>, method: string, path: st
 async function openDialogForRowB(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Row B' }))
   expect(screen.getByText('7 selected')).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Close spaces…' }))
-  return screen.getByRole('dialog', { name: 'Close spaces' })
+  await user.click(screen.getByRole('button', { name: 'Set state…' }))
+  const dialog = screen.getByRole('dialog', { name: 'Set state' })
+  await user.click(within(dialog).getByRole('radio', { name: 'Closed' }))
+  return dialog
 }
 
 describe('closures list', () => {
@@ -156,13 +159,13 @@ describe('closures list', () => {
   it('falls back to the first published lot when none is remembered', async () => {
     localStorage.clear()
     await setup({ 'GET /admin/lots': { body: [NORTH_LOT, TEST_LOT] } })
-    expect(await screen.findByRole('heading', { name: 'Closures: Test Lot' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Set space state: Test Lot' })).toBeInTheDocument()
   })
 
   it('follows the picker, not a remembered lot that no longer exists', async () => {
     localStorage.setItem('parking.admin.lotId', 'deleted-lot')
     const { fetchMock } = await setup()
-    expect(screen.getByRole('heading', { name: 'Closures: Test Lot' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Set space state: Test Lot' })).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes('deleted-lot'))).toBe(false)
   })
@@ -170,19 +173,19 @@ describe('closures list', () => {
   it('an unpublished lot says to publish it first instead of failing to load', async () => {
     localStorage.setItem('parking.admin.lotId', 'north-lot')
     const fetchMock = mockFetch({ 'GET /admin/lots': { body: [NORTH_LOT, TEST_LOT] } })
-    renderApp('/admin/closures', ADMIN)
-    expect(await screen.findByText(/Publish the lot before closing spaces/)).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Closures: North Lot' })).toBeInTheDocument()
+    renderApp('/admin/overrides', ADMIN)
+    expect(await screen.findByText(/Publish the lot before setting space states/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Set space state: North Lot' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open the map editor' })).toHaveAttribute('href', '/admin/lots/north-lot/map')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Close spaces…' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Set state…' })).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes('north-lot'))).toBe(false)
   })
 
   it('says "No lots yet" when there are no lots', async () => {
     localStorage.clear()
     mockFetch({ 'GET /admin/lots': { body: [] } })
-    renderApp('/admin/closures', ADMIN)
+    renderApp('/admin/overrides', ADMIN)
     expect(await within(screen.getByRole('main')).findByText('No lots yet')).toBeInTheDocument()
   })
 })
@@ -199,7 +202,7 @@ describe('closing spaces', () => {
     const dialog = within(await openDialogForRowB(user))
     expect(dialog.getByText('Spaces: B-01 to B-07 (7 selected)')).toBeInTheDocument()
     await user.selectOptions(dialog.getByLabelText('Reason'), 'Event')
-    await user.click(dialog.getByRole('button', { name: 'Close spaces' }))
+    await user.click(dialog.getByRole('button', { name: 'Set state' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     const [post] = calls(fetchMock, 'POST', URL)
@@ -221,7 +224,7 @@ describe('closing spaces', () => {
     await user.type(dialog.getByLabelText(/^Ends/), '2099-11-07T09:00')
     expect(starts).toHaveValue('2099-11-07T10:00')
     expect(dialog.getByLabelText(/^Ends/)).toHaveValue('2099-11-07T09:00')
-    await user.click(dialog.getByRole('button', { name: 'Close spaces' }))
+    await user.click(dialog.getByRole('button', { name: 'Set state' }))
     expect(await dialog.findByText('End time must be after start time')).toBeInTheDocument()
     expect(calls(fetchMock, 'POST', URL)).toHaveLength(0)
   })
@@ -232,17 +235,17 @@ describe('closing spaces', () => {
     })
     const dialog = within(await openDialogForRowB(user))
     await user.selectOptions(dialog.getByLabelText('Reason'), 'Construction')
-    await user.click(dialog.getByRole('button', { name: 'Close spaces' }))
+    await user.click(dialog.getByRole('button', { name: 'Set state' }))
     expect(await dialog.findByText('Publish the lot before closing spaces')).toBeInTheDocument()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
-  it('returns focus to "Close spaces…" when the dialog is cancelled', async () => {
+  it('returns focus to "Set state…" when the dialog is cancelled', async () => {
     const { user } = await setup()
     const dialog = within(await openDialogForRowB(user))
     await user.click(dialog.getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Close spaces…' })).toHaveFocus()
+    expect(screen.getByRole('button', { name: 'Set state…' })).toHaveFocus()
   })
 
   it('toggles single spaces by click and keyboard, and clears the selection', async () => {
@@ -259,7 +262,7 @@ describe('closing spaces', () => {
     expect(screen.getByText('1 selected')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Clear selection' }))
     expect(screen.getByText('0 selected')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Close spaces…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Set state…' })).toBeDisabled()
   })
 })
 
@@ -276,10 +279,24 @@ describe('closure helpers', () => {
   })
 })
 
-describe('admin home', () => {
-  it('links to the closures page', async () => {
+describe('old closures route', () => {
+  it('admin home has no separate Closures link', async () => {
     mockFetch({})
     renderApp('/admin', ADMIN)
-    expect(await screen.findByRole('link', { name: 'Closures' })).toHaveAttribute('href', '/admin/closures')
+    expect(await screen.findByRole('link', { name: 'Set space state' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Closures' })).toBeNull()
+  })
+
+  it('/admin/closures opens Set space state', async () => {
+    mockFetch({
+      'GET /admin/lots': { body: [TEST_LOT] },
+      'GET /lots/test-lot': { body: detail },
+      'GET /lots/test-lot/status': { body: status },
+      [`GET ${URL}`]: { body: [] },
+      'GET /admin/lots/test-lot/overrides': { body: [] },
+    })
+    renderApp('/admin/closures', ADMIN)
+    expect(await screen.findByRole('heading', { name: 'Set space state: Test Lot' })).toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/admin/overrides')
   })
 })
