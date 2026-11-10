@@ -154,7 +154,7 @@ Driver page: `/lots/<lotId>` (`web/src/pages/LotMapPage.tsx`), reached from the 
 ## US-03 Admin Sign-In (Rylan Moseley)
 
 - [ ] **#1 Valid credentials** `[stub]`. Open `/signin` ("Admin sign in"), enter the dev admin.
-  Expect `/admin` ("Admin") with links Upload, Snapshots, Closures, Map, New lot; the header
+  Expect `/admin` ("Admin") with links Upload, Snapshots, Set space state, Map, New lot; the header
   shows the lot picker, Admin, the email and Sign out.
 - [ ] **#2 Wrong password** `[stub]`. Enter a wrong password. Expect
   "Email or password is incorrect", still on `/signin`, header without Sign out.
@@ -440,7 +440,7 @@ Page: `/` ("Parking lots", Refresh).
 - [ ] **#2 Duplicate lot name** `[stub]`. Create "Test Lot" again (any case). Expect
   "A lot with this name already exists"; the picker is unchanged.
 - [ ] **#3 Lot picker on every admin page** `[stub]`. With two published lots, pick North Lot in
-  the header picker on the mapping, Upload, Closures and Snapshots pages: each shows only North
+  the header picker on the mapping, Upload, Set space state and Snapshots pages: each shows only North
   Lot's data until you switch back. (An unpublished lot: see Gaps G3.)
 - [ ] **#4 Unpublished lot stays hidden** `[stub]`. Before publishing, `/` does not list North
   Lot.
