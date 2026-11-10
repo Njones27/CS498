@@ -1,5 +1,5 @@
 import { lazy } from 'react'
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { RequireAdmin } from './auth/RequireAdmin'
 import { AppShell } from './components/AppShell'
@@ -10,7 +10,6 @@ import { SignInPage } from './pages/SignInPage'
 
 const LotMappingPage = lazy(() => import('./mapping/LotMappingPage').then((m) => ({ default: m.LotMappingPage })))
 const VersionsPage = lazy(() => import('./mapping/VersionsPage').then((m) => ({ default: m.VersionsPage })))
-const ClosuresPage = lazy(() => import('./pages/ClosuresPage').then((m) => ({ default: m.ClosuresPage })))
 const NewLotPage = lazy(() => import('./pages/NewLotPage').then((m) => ({ default: m.NewLotPage })))
 const OverridesPage = lazy(() => import('./pages/OverridesPage').then((m) => ({ default: m.OverridesPage })))
 const SnapshotPhotoPage = lazy(() =>
@@ -32,7 +31,8 @@ export function AppRoutes() {
           <Route path="/admin/upload" element={<RequireAdmin><UploadPage /></RequireAdmin>} />
           <Route path="/admin/snapshots" element={<RequireAdmin><SnapshotsPage /></RequireAdmin>} />
           <Route path="/admin/snapshots/:imageId/photo" element={<RequireAdmin><SnapshotPhotoPage /></RequireAdmin>} />
-          <Route path="/admin/closures" element={<RequireAdmin><ClosuresPage /></RequireAdmin>} />
+          {/* Closures moved into Set space state; keep old links and bookmarks working. */}
+          <Route path="/admin/closures" element={<Navigate to="/admin/overrides" replace />} />
           <Route path="/admin/overrides" element={<RequireAdmin><OverridesPage /></RequireAdmin>} />
           <Route path="/admin/lots/new" element={<RequireAdmin><NewLotPage /></RequireAdmin>} />
           <Route path="/admin/lots/:lotId/map" element={<RequireAdmin><LotMappingPage /></RequireAdmin>} />

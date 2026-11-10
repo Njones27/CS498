@@ -108,6 +108,7 @@ async function setup(routes: Parameters<typeof mockFetch>[0] = {}) {
     'GET /lots/test-lot': { body: detail },
     'GET /lots/test-lot/status': { body: status },
     [`GET ${URL}`]: { body: [active, ended] },
+    'GET /admin/lots/test-lot/closures': { body: [] },
     ...routes,
   })
   renderApp('/admin/overrides', ADMIN)
@@ -247,7 +248,7 @@ describe('setting space state', () => {
     const { fetchMock, user } = await setup()
     const dialog = within(await openDialog(user))
     await user.click(dialog.getByRole('button', { name: 'Set state' }))
-    expect(await dialog.findByText('Choose Free or Occupied')).toBeInTheDocument()
+    expect(await dialog.findByText('Choose Free, Occupied or Closed')).toBeInTheDocument()
     await user.click(dialog.getByRole('radio', { name: 'Free' }))
     await user.type(dialog.getByLabelText(/^Until/), '2020-01-01T09:00')
     await user.click(dialog.getByRole('button', { name: 'Set state' }))

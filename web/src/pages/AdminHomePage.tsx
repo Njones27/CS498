@@ -26,11 +26,6 @@ export function AdminHomePage() {
           </Link>
         </li>
         <li>
-          <Link to="/admin/closures" className="admin-link">
-            Closures
-          </Link>
-        </li>
-        <li>
           <Link to="/admin/overrides" className="admin-link">
             Set space state
           </Link>

@@ -308,13 +308,14 @@ Buttons in the mapping header: Versions, Undo, Redo, Autosave, Save, Validate, P
 
 ## US-10 Close Spaces for an Event (Nathan Jones)
 
-Page: `/admin/closures` ("Closures: Test Lot"): a map to select spaces, row buttons, and the
-closures table. The table's Status (Scheduled, Active, Ended) is computed by the server when
+Page: `/admin/overrides` ("Set space state: Test Lot"). Closures now live on the Set space state
+page, and the old `/admin/closures` link redirects there. It has a map to select spaces, row
+buttons, and a Closures table under the Overrides table. The table's Status (Scheduled, Active, Ended) is computed by the server when
 the page loads; reload the page to see it change.
 
-- [ ] **#1 Close a row** `[stub]`. Press Row B ("7 selected"), Close spaces…, dialog
-  "Close spaces" with "Spaces: B-01 to B-07 (7 selected)", Reason Event, Starts now, Ends in two
-  hours, press Close spaces. Driver map after Refresh: B-01 to B-07 show the barrier glyph,
+- [ ] **#1 Close a row** `[stub]`. Press Row B ("7 selected"), Set state…, dialog
+  "Set state" with "Spaces: B-01 to B-07 (7 selected)", choose Closed, Reason Event, Starts now,
+  Ends in two hours, press Set state. Driver map after Refresh: B-01 to B-07 show the barrier glyph,
   "7 Closed", and are not in the free count.
 - [ ] **#2 Closure beats detection** `[stub]`. Upload a photo where B-03 comes out Free (try
   `test-lot-N.jpg` variants to North corner and check its Snapshot detail), with B-03 closed:
@@ -457,7 +458,7 @@ Found while checking the criteria against the code on `main` at b23ea0a (Oct 30)
 during the walkthrough; strike it when fixed.
 
 - **G1 Remembered lot can point at a lot that no longer exists.** The Closures page
-  (`web/src/pages/ClosuresPage.tsx`) and the admin home Map link (`web/src/mapping/MapLink.tsx`)
+  (then `web/src/pages/ClosuresPage.tsx`, now part of `web/src/pages/OverridesPage.tsx`) and the admin home Map link (`web/src/mapping/MapLink.tsx`)
   read `localStorage['parking.admin.lotId']` directly instead of the picker's validated lot.
   After restarting the dev runner with another `--lot` (or deleting a lot), Closures shows
   "Lot not found" and Map opens a missing lot. Workaround: in DevTools,
