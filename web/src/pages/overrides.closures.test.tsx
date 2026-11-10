@@ -279,6 +279,25 @@ describe('closure helpers', () => {
   })
 })
 
+describe('both lists together', () => {
+  it('shows overrides and closures side by side, each in its own table', async () => {
+    const override = {
+      overrideId: 'ov_1', lotId: 'test-lot', spaceIds: ['A-01'], state: 'OCCUPIED' as const, note: 'Coned',
+      startsAt: local(2026, 10, 31, 9), endsAt: null, createdBy: 'admin@example.edu',
+      createdAt: local(2026, 10, 31, 8, 55), endedAt: null, active: true, status: 'ACTIVE' as const,
+    }
+    await setup({ 'GET /admin/lots/test-lot/overrides': { body: [override] } })
+    const overridesList = within(screen.getByRole('region', { name: 'Overrides' }))
+    const closuresList = within(screen.getByRole('region', { name: 'Closures' }))
+    expect(await overridesList.findByTestId('override-ov_1')).toBeInTheDocument()
+    expect(overridesList.queryByTestId('closure-cl_1')).toBeNull()
+    expect(closuresList.getByTestId('closure-cl_1')).toBeInTheDocument()
+    expect(closuresList.getByTestId('closure-cl_0')).toBeInTheDocument()
+    expect(closuresList.queryByTestId('override-ov_1')).toBeNull()
+    expect(within(overridesList.getByTestId('override-ov_1')).getByText('Coned')).toBeInTheDocument()
+  })
+})
+
 describe('old closures route', () => {
   it('admin home has no separate Closures link', async () => {
     mockFetch({})
