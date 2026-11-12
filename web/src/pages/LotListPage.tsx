@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { LotListItem } from '../api/schemas'
+import { Main } from '../components/Main'
 import { displayOpenPercent, fullnessFor } from '../lib/fullness'
 import { useFetch } from '../lib/useFetch'
 
@@ -9,7 +10,7 @@ export function LotListPage() {
   const { data, error, loading, reload } = useFetch(() => api.get<LotListItem[]>('/lots'), 'lots')
 
   return (
-    <main id="main-content" className="page">
+    <Main>
       <div className="page__head">
         <h1>Parking lots</h1>
         <button type="button" className="button" onClick={reload} disabled={loading}>
@@ -26,7 +27,7 @@ export function LotListPage() {
       <ul className="lot-list" role="list">
         {data?.map((lot) => <LotRow key={lot.lotId} lot={lot} />)}
       </ul>
-    </main>
+    </Main>
   )
 }
 

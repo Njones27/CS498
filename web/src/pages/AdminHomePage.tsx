@@ -1,12 +1,13 @@
 import { Link } from 'react-router-dom'
 import { useAdminLot } from '../admin/AdminLotContext'
+import { Main } from '../components/Main'
 import { MapLink } from '../mapping/MapLink'
 
 export function AdminHomePage() {
   const { lotId, lots } = useAdminLot()
   const lot = lots?.find((l) => l.lotId === lotId)
   return (
-    <main id="main-content" className="page page--narrow">
+    <Main className="page page--narrow">
       <h1>Admin</h1>
       {lot && (
         <p className="hint">
@@ -39,6 +40,6 @@ export function AdminHomePage() {
           </Link>
         </li>
       </ul>
-    </main>
+    </Main>
   )
 }

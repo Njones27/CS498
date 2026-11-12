@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAdminLot } from '../admin/AdminLotContext'
 import { api, errorMessage } from '../api/client'
 import type { AdminLotCreate, AdminLotOut } from '../api/lotsAdmin'
+import { Main } from '../components/Main'
 
 export const NAME_REQUIRED = 'Enter a name for the lot'
 export const AGE_RANGE = 'Allowed data age must be a whole number of minutes from 1 to 1440'
@@ -37,7 +38,7 @@ export function NewLotPage() {
   }
 
   return (
-    <main id="main-content" className="page page--narrow">
+    <Main className="page page--narrow">
       <Link to="/admin" className="back-link">
         ← Admin
       </Link>
@@ -82,6 +83,6 @@ export function NewLotPage() {
           </button>
         </div>
       </form>
-    </main>
+    </Main>
   )
 }
