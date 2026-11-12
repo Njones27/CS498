@@ -13,6 +13,7 @@ import { readCaptureTime } from '../lib/exif'
 import { putFile } from '../lib/putFile'
 import { shortDate, toDateTimeLocal } from '../lib/relativeTime'
 import { sha256Hex } from '../lib/sha256'
+import { Main } from '../components/Main'
 import {
   FUTURE_TIME_MESSAGE,
   isAcceptedType,
@@ -125,7 +126,7 @@ export function UploadPage() {
   const canUpload = !busy && !!file && !!lotId && !!viewId && !!captureTime
 
   return (
-    <main id="main-content" className="page page--narrow">
+    <Main className="page page--narrow">
       <Link to="/admin" className="back-link">
         ← Admin
       </Link>
@@ -221,6 +222,6 @@ export function UploadPage() {
           {outcome.message}
         </p>
       )}
-    </main>
+    </Main>
   )
 }

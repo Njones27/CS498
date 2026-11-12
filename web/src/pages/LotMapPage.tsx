@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { LotDetail, LotStatusOut, SpaceStatusOut } from '../api/schemas'
 import { AdminBadgeIcon, LotMapSvg } from '../components/LotMapSvg'
+import { Main } from '../components/Main'
 import { StateIconSvg } from '../components/StateIcon'
 import { setByAdminText } from '../lib/overrides'
 import { dateTime, minutesAgo } from '../lib/relativeTime'
@@ -65,7 +66,7 @@ export function LotMapPage() {
   const st = status.data
 
   return (
-    <main id="main-content" className="page">
+    <Main>
       <Link to="/" className="back-link">
         ← All lots
       </Link>
@@ -112,7 +113,7 @@ export function LotMapPage() {
       )}
       {(detail.loading || status.loading) && !detail.data && <p>Loading…</p>}
       <Legend />
-    </main>
+    </Main>
   )
 }
 

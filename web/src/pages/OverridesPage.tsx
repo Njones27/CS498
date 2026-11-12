@@ -6,6 +6,7 @@ import type { ClosureCreate, ClosureOut, ClosureReason } from '../api/closures'
 import type { OverrideCreate, OverrideOut, OverrideState } from '../api/overrides'
 import type { LotDetail, LotStatusOut, SpaceStatusOut } from '../api/schemas'
 import { AdminBadgeIcon, LotMapSvg } from '../components/LotMapSvg'
+import { Main } from '../components/Main'
 import { StateIconSvg } from '../components/StateIcon'
 import { REASONS, STATUS_LABEL, closureWindow, compactLabels, reasonLabel, rowOf } from '../lib/closures'
 import { OVERRIDE_STATES, overrideStateLabel, overrideWindow } from '../lib/overrides'
@@ -161,7 +162,7 @@ export function OverridesPage() {
     (lots ? null : lotsError) ?? detail.error ?? status.error ?? overrides.error ?? closures.error
 
   return (
-    <main id="main-content" className="page">
+    <Main>
       <Link to="/admin" className="back-link">
         ← Admin
       </Link>
@@ -350,7 +351,7 @@ export function OverridesPage() {
           </div>
         )}
       </section>
-    </main>
+    </Main>
   )
 }
 

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from '../auth/AuthContext'
 import { AppShell, ChunkErrorBoundary } from './AppShell'
+import { Main } from './Main'
 
 function ThrowingComponent(): never {
   throw new Error('Failed to fetch dynamically imported module: /assets/SomePage.js')
@@ -73,5 +74,55 @@ describe('ChunkErrorBoundary', () => {
     expect(screen.getByText('Good Page')).toBeInTheDocument()
 
     consoleError.mockRestore()
+  })
+
+  it('renders fallback inside #main-content with tabIndex -1 on chunk error', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    render(
+      <ChunkErrorBoundary>
+        <ThrowingComponent />
+      </ChunkErrorBoundary>,
+    )
+    const main = screen.getByRole('main')
+    expect(main).toHaveAttribute('id', 'main-content')
+    expect(main).toHaveAttribute('tabindex', '-1')
+    consoleError.mockRestore()
+  })
+})
+
+describe('AppShell skip link and Main', () => {
+  it('skip link targets #main-content', () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/" element={<AppShell />}>
+              <Route index element={<Main><h1>Content</h1></Main>} />
+            </Route>
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    )
+    const skipLink = screen.getByRole('link', { name: 'Skip to main content' })
+    expect(skipLink).toBeInTheDocument()
+    expect(skipLink).toHaveAttribute('href', '#main-content')
+    const main = screen.getByRole('main')
+    expect(main).toHaveAttribute('id', 'main-content')
+    expect(main).toHaveAttribute('tabindex', '-1')
+  })
+
+  it('Main component defaults to className="page" and sets accessibility attributes', () => {
+    const { unmount } = render(<Main><p>Hello</p></Main>)
+    const main = screen.getByRole('main')
+    expect(main).toHaveAttribute('id', 'main-content')
+    expect(main).toHaveAttribute('tabindex', '-1')
+    expect(main).toHaveClass('page')
+    unmount()
+
+    render(<Main className="page page--narrow" data-testid="custom"><p>Narrow</p></Main>)
+    const custom = screen.getByTestId('custom')
+    expect(custom).toHaveClass('page', 'page--narrow')
+    expect(custom).toHaveAttribute('id', 'main-content')
+    expect(custom).toHaveAttribute('tabindex', '-1')
   })
 })

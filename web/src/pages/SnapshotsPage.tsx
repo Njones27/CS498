@@ -5,6 +5,7 @@ import { api, errorMessage } from '../api/client'
 import type { SnapshotOut } from '../api/lotsAdmin'
 import type { LotDetail, ObservationOut, SnapshotDetail } from '../api/schemas'
 import { StateIconSvg } from '../components/StateIcon'
+import { Main } from '../components/Main'
 import { dateTime } from '../lib/relativeTime'
 import { POLL_MS, canRetry, isActive, modelName, processingTime, score, statusLabel } from '../lib/snapshots'
 import { visualFor } from '../lib/status'
@@ -93,7 +94,7 @@ export function SnapshotsPage() {
   const selectedRow = rows.find((r) => r.imageId === selectedId)
 
   return (
-    <main id="main-content" className="page snapshots-page">
+    <Main className="page snapshots-page">
       <Link to="/admin" className="back-link">
         ← Admin
       </Link>
@@ -198,8 +199,11 @@ export function SnapshotsPage() {
                           type="button"
                           className="button"
                           disabled={retrying === s.imageId}
-                          title={`Retry processing photo from ${dateTime(s.captureTime)}`}
-                          aria-description={`Photo from ${dateTime(s.captureTime)}`}
+                          aria-label={
+                            retrying === s.imageId
+                              ? `Retrying photo from ${dateTime(s.captureTime)}`
+                              : `Retry photo from ${dateTime(s.captureTime)}`
+                          }
                           onClick={(e) => {
                             e.stopPropagation()
                             void retry(s.imageId)
@@ -228,7 +232,7 @@ export function SnapshotsPage() {
           onClose={() => setSelectedId(null)}
         />
       )}
-    </main>
+    </Main>
   )
 }
 

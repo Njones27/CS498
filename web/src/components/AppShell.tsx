@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom'
 import { AdminLotProvider, useAdminLot } from '../admin/AdminLotContext'
 import { LotPicker } from '../admin/LotPicker'
 import { useAuth } from '../auth/AuthContext'
+import { Main } from './Main'
 import { ThemeToggle } from './ThemeToggle'
 
 interface ChunkErrorBoundaryProps {
@@ -23,7 +24,7 @@ export class ChunkErrorBoundary extends Component<ChunkErrorBoundaryProps, Chunk
   override render() {
     if (this.state.hasError) {
       return (
-        <main className="page">
+        <Main>
           <p className="notice notice--error" role="alert">
             Something went wrong loading this page.{' '}
             <button
@@ -34,7 +35,7 @@ export class ChunkErrorBoundary extends Component<ChunkErrorBoundaryProps, Chunk
               Reload the page
             </button>
           </p>
-        </main>
+        </Main>
       )
     }
     return this.props.children
@@ -80,7 +81,7 @@ function Shell() {
       </header>
       {/* Switching lots in the picker remounts the page, so pages that read the lot once reload. */}
       <ChunkErrorBoundary key={`${location.pathname}:${generation}`}>
-        <Suspense fallback={<main id="main-content" className="page"><p className="muted">Loading…</p></main>}>
+        <Suspense fallback={<Main><p className="muted">Loading…</p></Main>}>
           <Outlet key={generation} />
         </Suspense>
       </ChunkErrorBoundary>

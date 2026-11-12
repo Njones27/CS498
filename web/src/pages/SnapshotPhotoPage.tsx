@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useAdminLot } from '../admin/AdminLotContext'
 import { api } from '../api/client'
 import type { CarBoxOut, LotDetail, ObservationOut, SnapshotDetail, SpaceState } from '../api/schemas'
+import { Main } from '../components/Main'
 import { StateIconSvg } from '../components/StateIcon'
 import { CAR_CLASSES, classBreakdown } from '../lib/detections'
 import { dateTime } from '../lib/relativeTime'
@@ -73,7 +74,7 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
   const settled = !!data && (data.finished || data.jobStatus === 'EXPIRED')
 
   return (
-    <main id="main-content" className="page">
+    <Main>
       <Link to="/admin" className="back-link">
         ← Admin
       </Link>
@@ -132,7 +133,7 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
       {data && complete && <Legend />}
       {data && complete && <SpacesTable observations={data.observations} labels={labels} />}
       {data?.modelVersion && <p className="hint photo-model">Model: {data.modelVersion}</p>}
-    </main>
+    </Main>
   )
 }
 
