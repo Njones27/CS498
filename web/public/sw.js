@@ -68,11 +68,11 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Public driver API calls (/api/lots and /api/lots/:lotId):
+  // Public driver API calls (/api/lots, /api/lots/:lotId, and /api/lots/:lotId/status):
   // Network-first with cache fallback for offline viewing.
   // Explicitly excludes admin endpoints, auth endpoints, or photo/upload assets.
   const isPublicDriverApi =
-    /\/api\/lots(?:\/[^/]+)?$/.test(url.pathname) &&
+    /\/api\/lots(?:\/[^/]+(?:\/status)?)?$/.test(url.pathname) &&
     !url.pathname.includes('/admin/')
 
   if (isPublicDriverApi) {
@@ -101,7 +101,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   // For any other /api/ requests (admin, auth, snapshots), do not cache or intercept.
-  if (url.pathname.startsWith('/api/')) {
+  if (url.pathname.includes('/api/')) {
     return
   }
 
