@@ -129,9 +129,9 @@ describe('Snapshots page (US-06)', () => {
       },
     })
     const tr = await rowOf('img-1335')
-    await user.click(within(tr).getByRole('button', { name: 'Retry' }))
+    await user.click(within(tr).getByRole('button', { name: /^Retry/ }))
     await waitFor(() => expect(within(tr).getByText('QUEUED')).toBeInTheDocument())
-    expect(within(tr).queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    expect(within(tr).queryByRole('button', { name: /^Retry/ })).not.toBeInTheDocument()
     expect(within(tr).queryByText('Too few matches')).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
   })
@@ -144,18 +144,18 @@ describe('Snapshots page (US-06)', () => {
       },
     })
     const tr = await rowOf('img-1335')
-    await user.click(within(tr).getByRole('button', { name: 'Retry' }))
+    await user.click(within(tr).getByRole('button', { name: /^Retry/ }))
     expect(await within(tr).findByRole('alert')).toHaveTextContent('Only finished, failed jobs can be retried')
-    expect(within(tr).getByRole('button', { name: 'Retry' })).toBeEnabled()
+    expect(within(tr).getByRole('button', { name: /^Retry/ })).toBeEnabled()
   })
 
   it('US-06 #4: no Retry button for COMPLETE, QUEUED or PROCESSING', async () => {
     const stillRetrying = row('img-flaky', { jobStatus: 'FAILED', finished: false, error: 'flaky' })
     setup([...SKETCH, stillRetrying])
     for (const id of ['img-1405', 'img-1350', 'img-1320', 'img-flaky']) {
-      expect(within(await rowOf(id)).queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+      expect(within(await rowOf(id)).queryByRole('button', { name: /^Retry/ })).not.toBeInTheDocument()
     }
-    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /^Retry/ })).toHaveLength(1)
   })
 
   it('US-06 #5: "Failed after 3 attempts" still shows Retry', async () => {
@@ -163,7 +163,7 @@ describe('Snapshots page (US-06)', () => {
     const tr = await rowOf('img-x')
     expect(within(tr).getByText('FAILED')).toBeInTheDocument()
     expect(within(tr).getByText('Failed after 3 attempts')).toBeInTheDocument()
-    expect(within(tr).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(within(tr).getByRole('button', { name: /^Retry/ })).toBeInTheDocument()
   })
 
   it('US-06 #6: the detail shows per-space state, confidence, overlap and layout version', async () => {

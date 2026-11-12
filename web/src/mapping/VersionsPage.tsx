@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, errorMessage } from '../api/client'
 import type { LotDetail } from '../api/schemas'
+import { Main } from '../components/Main'
 import { dateTime } from '../lib/relativeTime'
 import { useFetch } from '../lib/useFetch'
 import type { MappingLocationState } from './LotMappingPage'
@@ -39,7 +40,7 @@ export function VersionsPage() {
 
   const rows = versions.data ?? []
   return (
-    <main className="page versions-page">
+    <Main className="page versions-page">
       <Link to={`${base}/map`} className="back-link">
         ← Lot Mapping
       </Link>
@@ -99,6 +100,6 @@ export function VersionsPage() {
           </table>
         </div>
       )}
-    </main>
+    </Main>
   )
 }

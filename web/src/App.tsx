@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { RequireAdmin } from './auth/RequireAdmin'
 import { AppShell } from './components/AppShell'
+import { Main } from './components/Main'
 import { AdminHomePage } from './pages/AdminHomePage'
 import { LotListPage } from './pages/LotListPage'
 import { LotMapPage } from './pages/LotMapPage'
@@ -37,7 +38,7 @@ export function AppRoutes() {
           <Route path="/admin/lots/new" element={<RequireAdmin><NewLotPage /></RequireAdmin>} />
           <Route path="/admin/lots/:lotId/map" element={<RequireAdmin><LotMappingPage /></RequireAdmin>} />
           <Route path="/admin/lots/:lotId/versions" element={<RequireAdmin><VersionsPage /></RequireAdmin>} />
-          <Route path="*" element={<main className="page"><h1>Page not found</h1></main>} />
+          <Route path="*" element={<Main><h1>Page not found</h1></Main>} />
         </Route>
       </Routes>
     </AuthProvider>

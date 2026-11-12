@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, api, errorMessage } from '../api/client'
 import type { LotDetail, SnapshotDetail } from '../api/schemas'
+import { Main } from '../components/Main'
 import { useFetch } from '../lib/useFetch'
 import { ReferencePhotoPanel } from './ReferencePhotoPanel'
 import { SchematicEditor } from './SchematicEditor'
@@ -223,7 +224,7 @@ export function LotMappingPage() {
   }
 
   return (
-    <main className="page mapping-page">
+    <Main className="page mapping-page">
       <Link to="/admin" className="back-link">
         ← Admin
       </Link>
@@ -353,7 +354,7 @@ export function LotMappingPage() {
           <ValidationPanel report={report} draft={draft} onSelectSpace={setSelectedSpaceId} />
         </>
       )}
-    </main>
+    </Main>
   )
 }
 

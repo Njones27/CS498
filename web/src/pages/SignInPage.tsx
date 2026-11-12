@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ApiError, errorMessage } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { clearFlash, peekFlash } from '../auth/session'
+import { Main } from '../components/Main'
 
 /** Only same-app paths may be used as a post-login destination. */
 function safeNext(next: string | null): string {
@@ -39,7 +40,7 @@ export function SignInPage() {
   }
 
   return (
-    <main className="page page--narrow">
+    <Main className="page page--narrow">
       <h1>Admin sign in</h1>
       {notice && (
         <p className="notice" role="status">
@@ -76,6 +77,6 @@ export function SignInPage() {
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
-    </main>
+    </Main>
   )
 }

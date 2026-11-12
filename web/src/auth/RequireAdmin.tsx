@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
+import { Main } from '../components/Main'
 import { useAuth } from './AuthContext'
 
 /** Gate for /admin routes: sign-in redirect with `next`, or a no-access message. */
@@ -13,11 +14,11 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
   }
   if (!isAdmin) {
     return (
-      <main className="page">
+      <Main>
         <p className="notice notice--error" role="alert">
           You do not have admin access
         </p>
-      </main>
+      </Main>
     )
   }
   return <>{children}</>
