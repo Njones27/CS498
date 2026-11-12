@@ -31,6 +31,8 @@ import numpy as np
 from parking_core.errors import PermanentJobError
 from parking_core.models import AlignedOutline, CarBox, Cutoffs, Point, SpaceScore
 
+from .occlusion import HIDDEN_SHARE, hidden_by_foliage
+
 if TYPE_CHECKING:
     from parking_core.settings import Settings
 
@@ -482,6 +484,7 @@ class AcpdsYoloScorer:
             f"|low={c.low}|high={c.high}|overlap_cut={c.overlap}|margin={c.margin}"
             f"|require_car_check={c.require_car_check}|yolo_conf={self.yolo_conf}"
             f"|imgsz={self.yolo_imgsz}|input_res={self.input_res or 'native'}"
+            f"|foliage={HIDDEN_SHARE}"
         )
 
     def score(self, image: bytes, outlines: list[AlignedOutline]) -> list[SpaceScore]:
@@ -497,8 +500,13 @@ class AcpdsYoloScorer:
         # still scores one whose outline lies on the photo (a stall the photo cuts off, outlined
         # up to the border), since a car it sees there marks it OCCUPIED; drone photos get no
         # car boxes from YOLO, so without this such stalls could only ever be UNKNOWN. An
-        # outline running off the photo gets no ACPDS score, only its car overlap.
-        scored = [o.in_frame or on_photo(o.polygon) for o in outlines]
+        # outline running off the photo gets no ACPDS score, only its car overlap; nor does a
+        # stall hidden under a tree (occlusion), where ACPDS would be scoring the leaves.
+        hidden = hidden_by_foliage(bgr, outlines)
+        scored = [
+            (o.in_frame or on_photo(o.polygon)) and not under
+            for o, under in zip(outlines, hidden, strict=True)
+        ]
         visible = [o for o, yes in zip(outlines, scored, strict=True) if yes]
         scores = iter(self.acpds_scores(bgr, visible)) if visible else iter(())
         acpds = [float(next(scores)) if yes else None for yes in scored]
