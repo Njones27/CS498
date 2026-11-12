@@ -14,9 +14,6 @@
   --accent: #3d54d6;
   --accent-text: #ffffff;
 
-  --plenty: #1f7a4d;
-  --filling: #9a5a00;
-  --nearly-full: #b3261e;
 
   --free-bg: #f2f4f8;
   --occupied-bg: #d3d8e1;
@@ -34,6 +31,20 @@
   --soft-primary: 4px 4px 10px color-mix(in srgb, var(--accent) 35%, var(--soft-dark)), -4px -4px 9px var(--soft-light);
   --soft-radius: 18px;
   --soft-radius-sm: 12px;
+
+  /* Lot states, as solid colour blocks (the style study's map). */
+  --soft-free: #3db58a;
+  --soft-occupied: #ec6767;
+  --soft-occupied-ink: rgba(110, 20, 20, 0.45);
+  --soft-unknown: #a1a8b8;
+  --soft-closed: #eaa83a;
+  --soft-closed-bg: #f7e3bf;
+  --soft-space-label: #ffffff;
+  --soft-label-halo: rgba(30, 40, 60, 0.22);
+  --soft-filling: #eaa83a;
+  --plenty: #23865f;
+  --filling: #a86b0a;
+  --nearly-full: #c23f3f;
 
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
@@ -53,6 +64,17 @@
   --selected-bg: #2a3460;
   --soft-light: #2a2f3a;
   --soft-dark: #13161b;
+  --soft-free: #2f9e77;
+  --soft-occupied: #d65a5a;
+  --soft-occupied-ink: rgba(60, 0, 0, 0.45);
+  --soft-unknown: #6f7686;
+  --soft-closed: #e0a43a;
+  --soft-closed-bg: #3d3220;
+  --soft-label-halo: rgba(0, 0, 0, 0.35);
+  --soft-filling: #e0a43a;
+  --plenty: #4cc27a;
+  --filling: #f0a43a;
+  --nearly-full: #ff8a80;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
@@ -70,6 +92,17 @@
     --selected-bg: #2a3460;
     --soft-light: #2a2f3a;
     --soft-dark: #13161b;
+  --soft-free: #2f9e77;
+  --soft-occupied: #d65a5a;
+  --soft-occupied-ink: rgba(60, 0, 0, 0.45);
+  --soft-unknown: #6f7686;
+  --soft-closed: #e0a43a;
+  --soft-closed-bg: #3d3220;
+  --soft-label-halo: rgba(0, 0, 0, 0.35);
+  --soft-filling: #e0a43a;
+  --plenty: #4cc27a;
+  --filling: #f0a43a;
+  --nearly-full: #ff8a80;
   }
 }
 
@@ -141,6 +174,34 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .schematic-orient__panel { border: 0; border-radius: var(--soft-radius-sm); box-shadow: var(--soft-raised); }
 .validation-issue__button { border-radius: var(--soft-radius-sm); }
 button.validation-issue__button:hover, button.validation-issue__button:focus-visible { background: var(--surface); box-shadow: var(--soft-inset); }
+
+/* Lot map spaces are solid colour blocks with a white label; each state keeps its own glyph
+   (car, question mark, barrier) and closed spaces are hatched, so colour is never the only cue. */
+.space__rect { stroke: var(--surface); stroke-width: 2; }
+.space--free .space__rect { fill: var(--soft-free); stroke: var(--surface); stroke-dasharray: none; }
+.space--occupied .space__rect { fill: var(--soft-occupied); stroke: var(--surface); }
+.space--occupied { color: var(--soft-occupied-ink); }
+.space--unknown .space__rect, .legend-swatch.space--unknown .space__rect { fill: var(--soft-unknown); stroke: var(--surface); }
+.space--unknown { color: #ffffff; }
+.space--closed .space__rect { fill: url(#hatch); stroke: var(--soft-closed); }
+.legend-swatch.space--closed .space__rect { fill: var(--soft-closed-bg); stroke: var(--soft-closed); }
+.space--closed { color: var(--soft-closed); }
+.hatch__bg { fill: var(--soft-closed-bg); }
+.hatch__line { stroke: var(--soft-closed); }
+.glyph__stripes { stroke: var(--soft-closed-bg); }
+.space__label { fill: var(--soft-space-label); font-weight: 700; paint-order: stroke; stroke: var(--soft-label-halo); stroke-width: 2px; }
+.space--closed .space__label { fill: var(--text); stroke: none; }
+.space--stale { opacity: 0.4; filter: none; }
+.space--selected .space__rect, .space:focus-visible .space__rect { stroke: var(--text); stroke-width: 4; }
+
+/* Occupancy bars use the same colours as the map. */
+.bar--plenty .bar__fill { background: var(--soft-free); }
+.bar--filling .bar__fill { background: var(--soft-filling); }
+.bar--nearly-full .bar__fill { background: var(--soft-occupied); }
+
+/* Editor schematic: pale stalls, the selected one tinted with the accent. */
+.schematic-space__rect { fill: var(--surface); stroke: color-mix(in srgb, var(--muted) 55%, var(--surface)); }
+.schematic-space--selected .schematic-space__rect { fill: var(--selected-bg); }
 
 @media (prefers-reduced-motion: reduce) {
   .button, .lot-row { transition: none; }
