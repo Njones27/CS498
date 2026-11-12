@@ -35,10 +35,30 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); }
+#main-content:focus { outline: none; }
 h1 { font-size: 1.5rem; margin: 0.25rem 0 1rem; overflow-wrap: break-word; word-break: break-word; }
 h2 { font-size: 1rem; margin: 0 0 0.5rem; }
 a { color: var(--accent); }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* Accessible skip link (WCAG 2.4.1) */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 1rem;
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  border-radius: 6px;
+  z-index: 1000;
+  text-decoration: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  transition: top 0.15s ease;
+}
+.skip-link:focus-visible {
+  top: 1rem;
+}
 
 .topbar {
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;

@@ -37,7 +37,7 @@ export function NewLotPage() {
   }
 
   return (
-    <main className="page page--narrow">
+    <main id="main-content" className="page page--narrow">
       <Link to="/admin" className="back-link">
         ← Admin
       </Link>

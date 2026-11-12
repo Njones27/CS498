@@ -102,9 +102,10 @@ export function LotMapSvg({
                   onToggle ? onToggle(space.spaceId) : onSelect(space.spaceId)
                 }
                 onKeyDown={(e) => {
-                  if (onToggle && (e.key === "Enter" || e.key === " ")) {
+                  if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    onToggle(space.spaceId);
+                    if (onToggle) onToggle(space.spaceId);
+                    else onSelect(space.spaceId);
                   } else if (e.key === "Escape") onSelect(null);
                 }}
               >

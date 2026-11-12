@@ -39,7 +39,7 @@ export function SignInPage() {
   }
 
   return (
-    <main className="page page--narrow">
+    <main id="main-content" className="page page--narrow">
       <h1>Admin sign in</h1>
       {notice && (
         <p className="notice" role="status">

@@ -223,7 +223,7 @@ export function LotMappingPage() {
   }
 
   return (
-    <main className="page mapping-page">
+    <main id="main-content" className="page mapping-page">
       <Link to="/admin" className="back-link">
         ← Admin
       </Link>

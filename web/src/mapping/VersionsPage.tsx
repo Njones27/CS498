@@ -39,7 +39,7 @@ export function VersionsPage() {
 
   const rows = versions.data ?? []
   return (
-    <main className="page versions-page">
+    <main id="main-content" className="page versions-page">
       <Link to={`${base}/map`} className="back-link">
         ← Lot Mapping
       </Link>
