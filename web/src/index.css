@@ -259,6 +259,10 @@ a { color: var(--accent); }
 .closures-table td:first-child {
   white-space: normal;
 }
+.closures-table td:nth-child(4) {
+  white-space: normal;
+  min-width: 12rem;
+}
 .closure-status { font-weight: 600; }
 .closure-status--active { color: var(--plenty); }
 .closure-status--active::before { content: '● '; }
@@ -603,6 +607,11 @@ a { color: var(--accent); }
 .snapshots-table-wrap { overflow-x: auto; margin-top: 0.75rem; -webkit-overflow-scrolling: touch; }
 .snapshots-table { width: 100%; border-collapse: collapse; background: var(--surface); font-variant-numeric: tabular-nums; }
 .snapshots-table th, .snapshots-table td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
+.snapshots-table td:nth-child(6) {
+  white-space: normal;
+  min-width: 12rem;
+  overflow-wrap: break-word;
+}
 .snapshot-row { cursor: pointer; }
 .snapshot-row:hover { background: var(--bg); }
 .snapshot-row--selected { background: var(--selected-bg); }
@@ -733,10 +742,8 @@ a { color: var(--accent); }
 .schematic-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .schematic {
   display: block; width: 100%; height: auto; max-height: 60vh;
-  border: 1px solid var(--border); border-radius: 6px; touch-action: pan-y; user-select: none;
+  border: 1px solid var(--border); border-radius: 6px; touch-action: none; user-select: none;
 }
-.schematic--pan, .schematic--draw { touch-action: none; }
-.schematic-space, .schematic-handle { touch-action: none; }
 .schematic__bg { fill: var(--bg); stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; stroke-dasharray: 6 4; }
 .schematic__outside { fill: var(--surface); }
 .schematic--pan .schematic__bg, .schematic--pan .schematic__outside { cursor: grab; }
