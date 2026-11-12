@@ -1,0 +1,147 @@
+/* Soft Shadow theme (style study 10).
+   Surfaces are shaped from one base colour and raised or pressed with a pair of shadows, one lighter
+   and one darker than the base. This file loads after index.css and only restyles: every state keeps
+   its pattern and icon (NFR-8), focus rings stay, and fields keep a faint border so their edges do not
+   rely on shadow alone. Light and dark values are defined three times, the same way as index.css
+   (bare :root, the OS dark setting, and data-theme="dark"); keep the dark lists in step. */
+
+:root {
+  --bg: #e7eaf0;
+  --surface: #e7eaf0;
+  --text: #2b3245;
+  --muted: #555e75;
+  --border: #cdd2dc;
+  --accent: #3d54d6;
+  --accent-text: #ffffff;
+
+  --plenty: #1f7a4d;
+  --filling: #9a5a00;
+  --nearly-full: #b3261e;
+
+  --free-bg: #f2f4f8;
+  --occupied-bg: #d3d8e1;
+  --unknown-bg: #dde1e8;
+  --track: #e7eaf0;
+  --selected-bg: #d9e0fb;
+
+  --soft-light: #ffffff;
+  --soft-dark: #c3c8d2;
+  --soft-raised: 8px 8px 18px var(--soft-dark), -8px -8px 18px var(--soft-light);
+  --soft-raised-sm: 4px 4px 9px var(--soft-dark), -4px -4px 9px var(--soft-light);
+  --soft-lifted: 12px 12px 24px var(--soft-dark), -12px -12px 24px var(--soft-light);
+  --soft-inset: inset 3px 3px 7px var(--soft-dark), inset -3px -3px 7px var(--soft-light);
+  --soft-inset-deep: inset 5px 5px 12px var(--soft-dark), inset -5px -5px 12px var(--soft-light);
+  --soft-primary: 4px 4px 10px color-mix(in srgb, var(--accent) 35%, var(--soft-dark)), -4px -4px 9px var(--soft-light);
+  --soft-radius: 18px;
+  --soft-radius-sm: 12px;
+
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+:root[data-theme='dark'] {
+  --bg: #1f232b;
+  --surface: #1f232b;
+  --text: #e4e7ee;
+  --muted: #a3abbb;
+  --border: #363c49;
+  --accent: #8fa2ff;
+  --accent-text: #10163a;
+  --free-bg: #252a33;
+  --occupied-bg: #3a414e;
+  --unknown-bg: #22262e;
+  --track: #1f232b;
+  --selected-bg: #2a3460;
+  --soft-light: #2a2f3a;
+  --soft-dark: #13161b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #1f232b;
+    --surface: #1f232b;
+    --text: #e4e7ee;
+    --muted: #a3abbb;
+    --border: #363c49;
+    --accent: #8fa2ff;
+    --accent-text: #10163a;
+    --free-bg: #252a33;
+    --occupied-bg: #3a414e;
+    --unknown-bg: #22262e;
+    --track: #1f232b;
+    --selected-bg: #2a3460;
+    --soft-light: #2a2f3a;
+    --soft-dark: #13161b;
+  }
+}
+
+body { color: var(--text); }
+h1, h2, h3 { letter-spacing: -0.01em; }
+:focus-visible { outline-offset: 3px; border-radius: 4px; }
+
+/* Header: one raised band instead of a ruled line. */
+.topbar { border-bottom: 0; box-shadow: 0 6px 14px var(--soft-dark); position: relative; z-index: 2; }
+
+/* Buttons are raised; pressed and toggled-on buttons sink into the surface. */
+.button {
+  border: 0; border-radius: var(--soft-radius-sm); background: var(--surface);
+  box-shadow: var(--soft-raised-sm); font-weight: 600; transition: box-shadow 0.15s ease;
+}
+.button:hover:not(:disabled) { box-shadow: 6px 6px 12px var(--soft-dark), -6px -6px 12px var(--soft-light); }
+.button:active:not(:disabled) { box-shadow: var(--soft-inset); }
+.button--primary { background: var(--accent); color: var(--accent-text); box-shadow: var(--soft-primary); }
+.button--ghost { background: transparent; box-shadow: none; }
+.button--ghost:hover:not(:disabled) { box-shadow: var(--soft-raised-sm); }
+.button:disabled { box-shadow: none; }
+.schematic-tools .button[aria-pressed='true'] { box-shadow: var(--soft-inset); }
+
+/* Fields sit pressed into the surface. */
+.form input, .form select, .ref-select, .lot-picker select, .theme-toggle select, .schematic-size input,
+.schematic-orient__row input[type='number'] {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--soft-radius-sm); box-shadow: var(--soft-inset);
+}
+
+/* Cards and panels are raised; content wells (map, photo, tables) are pressed. */
+.lot-row, .summary, .mapping-panel, .snapshot-detail, .admin-link, .modal, .ref-proposals, .notice {
+  border: 0; border-radius: var(--soft-radius); background: var(--surface); box-shadow: var(--soft-raised);
+}
+.lot-list { gap: 1.25rem; }
+.lot-row { padding: 1.1rem 1.2rem; transition: box-shadow 0.15s ease; }
+.lot-row:hover { box-shadow: var(--soft-lifted); }
+.lot-row:active { box-shadow: var(--soft-inset); }
+.admin-links { gap: 1rem; }
+.summary { padding: 0.9rem 1.1rem; margin-bottom: 1.25rem; }
+.map-wrap { border: 0; border-radius: var(--soft-radius); background: var(--surface); box-shadow: var(--soft-inset-deep); padding: 0.75rem; margin: 1.25rem 0; }
+.mapping-panels { gap: 1.5rem; }
+.mapping-panel { padding: 1rem; }
+.mapping-validation { margin-top: 1.5rem; }
+.schematic { border: 0; border-radius: var(--soft-radius-sm); box-shadow: var(--soft-inset-deep); }
+.schematic__bg { stroke: none; }
+.schematic-dialog, .schematic-side { border: 0; border-radius: var(--soft-radius-sm); background: var(--surface); box-shadow: var(--soft-inset); }
+.photo-view { border-radius: var(--soft-radius-sm); box-shadow: var(--soft-raised-sm); }
+.photo-zoom { border-radius: var(--soft-radius-sm); }
+.override-states { border: 0; border-radius: var(--soft-radius-sm); box-shadow: var(--soft-inset); }
+
+/* Notices keep their colour, now as a tinted raised card with a coloured edge. */
+.notice--warn { background: var(--warn-bg); box-shadow: var(--soft-raised-sm), inset 4px 0 0 var(--warning); }
+.notice--error { background: var(--error-bg); box-shadow: var(--soft-raised-sm), inset 4px 0 0 var(--nearly-full); }
+.notice--ok { background: var(--ok-bg); box-shadow: var(--soft-raised-sm), inset 4px 0 0 var(--plenty); }
+
+/* Occupancy bars are grooves the fill runs along. */
+.bar { height: 12px; border-radius: 99px; background: var(--track); box-shadow: var(--soft-inset); }
+.bar__fill { border-radius: 99px; }
+
+/* Tables sit flat on the surface, in a pressed well. */
+.closures-table, .snapshots-table, .versions-table, .photo-spaces__table { background: transparent; }
+.closures-table-wrap, .snapshots-table-wrap, .versions-table-wrap, .ref-spaces__wrap, .photo-spaces__wrap {
+  border: 0; border-radius: var(--soft-radius-sm); background: var(--surface); box-shadow: var(--soft-inset); padding: 0.25rem;
+}
+.ref-spaces__table th { background: var(--surface); }
+
+.popover { border-radius: var(--soft-radius-sm); box-shadow: var(--soft-raised-sm); }
+.schematic-orient__panel { border: 0; border-radius: var(--soft-radius-sm); box-shadow: var(--soft-raised); }
+.validation-issue__button { border-radius: var(--soft-radius-sm); }
+button.validation-issue__button:hover, button.validation-issue__button:focus-visible { background: var(--surface); box-shadow: var(--soft-inset); }
+
+@media (prefers-reduced-motion: reduce) {
+  .button, .lot-row { transition: none; }
+}
