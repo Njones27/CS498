@@ -8,7 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { addRow, addSpace, canDeleteSpace, deleteSpace, fitSchematic, updateSpace, type Grown } from './schematic/edits'
+import { addRow, addSpace, canDeleteSpace, deleteSpace, fitSchematic, leanLikeRows, updateSpace, type Grown } from './schematic/edits'
 import {
   CORNERS,
   MARGIN,
@@ -370,7 +370,9 @@ export function SchematicEditor({
       )
     }
     const relabel = rename && !inserted ? relabelMoved(gr, current.spaces, spaceId, to) : { labels: new Map<string, string>() }
-    const edited = inserted ?? applyLabels(updateSpace(current, spaceId, { rect }), relabel.labels)
+    const placed = inserted ?? applyLabels(updateSpace(current, spaceId, { rect }), relabel.labels)
+    // Snapped into a row of angled stalls, an upright space leans like them, as a new one there would.
+    const edited = isMove && cell ? leanLikeRows(placed, [spaceId]) : placed
     const grown = afterRectChange(current, edited, [spaceId])
     if (inserted) {
       const label = inserted.spaces.find((s) => s.spaceId === spaceId)!.label

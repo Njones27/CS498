@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { davidFixture, space } from './fixtures/david'
-import { matchRowToPhoto, outlineLike, placeFromPhoto, photoCell } from './photoGrid'
+import { matchRowToPhoto, outlineLike, placeFromPhoto, placeInPhotoRow, photoCell, photoRowSlot } from './photoGrid'
 import { cellRect, fitGrid } from './schematic/grid'
 import { addSpaceFromOutline, followOutline } from './sync'
 import type { DraftLayout, Outline } from './types'
@@ -469,5 +469,102 @@ describe('cutByBorder', () => {
     expect(cutByBorder([[0.1, 0], [0.15, 0.01], [0.15, 0.1], [0.1, 0.1]])).toBe(false) // flush corner
     // A whole stall running past the border (while being placed) is not cut.
     expect(cutByBorder([[0.1, -0.05], [0.15, -0.05], [0.15, 0.04], [0.1, 0.04]])).toBe(false)
+  })
+})
+
+describe('a photo whose rows converge', () => {
+  // Rows A to C fan out (A climbs, C falls), so no lattice reads across them: photoCell gives up. Stalls
+  // are 0.05 wide at a pitch of 0.06. Row B has a stall-sized hole at position 2 that the schematic
+  // doesn't know of: B-02 (position 1) and B-03 (position 3) are numbered, and drawn, side by side.
+  const SLOPE = { A: -0.5, B: 0, C: 0.5 }
+  const BASE = { A: 0.2, B: 0.45, C: 0.7 }
+  type Row = keyof typeof SLOPE
+  const stall = (row: Row, pos: number, dy = 0): Outline => {
+    const x = 0.1 + pos * 0.06
+    const y = BASE[row] + SLOPE[row] * (x - 0.1) + dy
+    return [[x, y], [x + 0.05, y], [x + 0.05, y + 0.08], [x, y + 0.08]]
+  }
+  const POSITIONS: Record<Row, number[]> = { A: [0, 1, 2, 3, 4, 5], B: [0, 1, 3, 4, 5], C: [0, 1, 2, 3, 4, 5] }
+  const cellOf = (r: number, n: number) => ({ x: 20 + (n - 1) * 50, y: 30 + r * 100, w: 40, h: 72 })
+
+  function fan(extra: { label: string; outline: Outline }[] = []): DraftLayout {
+    const outlines: Record<string, Outline> = {}
+    const spaces = (['A', 'B', 'C'] as const).flatMap((row, r) =>
+      POSITIONS[row].map((pos, i) => {
+        const id = `${row}-0${i + 1}`
+        outlines[id] = stall(row, pos)
+        return space(id, 0, 0, { rect: cellOf(r, i + 1), ...(row === 'B' ? { skewDeg: 45 } : {}) })
+      }),
+    )
+    extra.forEach((e, i) => {
+      spaces.push(space(`x${i}`, 0, 0, { label: e.label, rect: cellOf(3, 2 + i) }))
+      outlines[`x${i}`] = e.outline
+    })
+    return davidFixture({ spaces, viewpoints: [{ ...davidFixture().viewpoints[0], outlines, outlineReview: {} }] })
+  }
+  const labels = (d: DraftLayout) => Object.fromEntries(d.spaces.map((s) => [s.spaceId, s.label]))
+
+  it('cannot be read as rows and columns', () => {
+    const draft = fan()
+    expect(photoCell(draft, draft.viewpoints[0], stall('B', 2))).toBeNull()
+  })
+
+  it('still shows the two neighbours of a row an outline sits between', () => {
+    const draft = fan()
+    const v = draft.viewpoints[0]
+    expect(photoRowSlot(draft, v, stall('B', 2))).toEqual({ row: 1, num: 3 }) // between B-02 and B-03
+    expect(photoRowSlot(draft, v, stall('B', 1))).toBeNull() // on top of B-02
+    expect(photoRowSlot(draft, v, stall('B', 2, 0.12))).toBeNull() // a stall and a half below the row
+    expect(photoRowSlot(draft, v, stall('A', 1, 0.01), 'A-02')).toEqual({ row: 0, num: 2 }) // its own place
+  })
+
+  it('reads a free number between two neighbours further apart', () => {
+    const draft = fan()
+    const v = draft.viewpoints[0]
+    const { 'B-04': _, ...outlines } = v.outlines // B-03 and B-05 are now the neighbours, B-04 between
+    const gap = { ...draft, spaces: draft.spaces.filter((s) => s.spaceId !== 'B-04'), viewpoints: [{ ...v, outlines }] }
+    expect(photoRowSlot(gap, gap.viewpoints[0], stall('B', 4))).toEqual({ row: 1, num: 4 })
+  })
+
+  it('a space outlined in the hole joins the row, and the spaces in the way move up one', () => {
+    const draft = fan([{ label: 'D-02', outline: stall('B', 2) }])
+    const grid = fitGrid(draft.spaces)
+    const placed = placeInPhotoRow(draft, 'V1', 'x0', grid)!
+    expect(placed.note).toBe('Now B-03; the 3 spaces after it in row B moved up one to make room')
+    expect(placed.moved).toEqual(['x0', 'B-03', 'B-04', 'B-05'])
+    expect(labels(placed.draft)).toMatchObject({ 'B-02': 'B-02', x0: 'B-03', 'B-03': 'B-04', 'B-04': 'B-05', 'B-05': 'B-06' })
+    const me = placed.draft.spaces.find((s) => s.spaceId === 'x0')!
+    expect(me).toMatchObject({ rect: cellRect(grid, { row: 1, col: 2 }), skewDeg: 45 }) // leans like row B
+    // Already there: nothing more to do.
+    expect(placeInPhotoRow(placed.draft, 'V1', 'x0', grid)).toEqual({ draft: placed.draft, moved: [] })
+  })
+
+  it('keeps a name, and says so when the row cannot make room', () => {
+    const named = fan([{ label: 'Gate', outline: stall('B', 2) }])
+    expect(placeInPhotoRow(named, 'V1', 'x0', fitGrid(named.spaces))).toBeNull()
+    const draft = fan([{ label: 'D-02', outline: stall('B', 2) }])
+    const grid = fitGrid(draft.spaces)
+    const inTheWay = { ...draft, spaces: [...draft.spaces, space('g', 0, 0, { label: 'Gate', rect: cellRect(grid, { row: 1, col: 5 }) })] }
+    expect(placeInPhotoRow(inTheWay, 'V1', 'x0', grid)).toMatchObject({ moved: [], note: expect.stringContaining("Row B can't make room") })
+  })
+
+  it('Match schematic to photo, a moved outline and a drawn box all use it', () => {
+    const draft = fan([{ label: 'D-02', outline: stall('C', 2, 0.15) }]) // outlined below row C
+    const grid = fitGrid(draft.spaces)
+    const v = draft.viewpoints[0]
+    const moved = { ...draft, viewpoints: [{ ...v, outlines: { ...v.outlines, x0: stall('B', 2) } }] }
+
+    const matched = placeFromPhoto(moved, 'V1', 'x0', grid)
+    expect(matched).toMatchObject({ note: 'Now B-03; the 3 spaces after it in row B moved up one to make room', renumbered: true })
+
+    const followed = followOutline(draft, moved, 'V1', 'x0', grid)
+    expect(followed.note).toBe(matched.note)
+    expect(labels(followed.draft)).toMatchObject({ x0: 'B-03', 'B-03': 'B-04', 'B-05': 'B-06' })
+
+    const bare = fan()
+    const { space: added, draft: next, note } = addSpaceFromOutline(bare, 'V1', stall('B', 2), fitGrid(bare.spaces))
+    expect(added).toMatchObject({ label: 'B-03', skewDeg: 45 })
+    expect(note).toBe(matched.note)
+    expect(next.spaces.find((s) => s.spaceId === 'B-03')!.label).toBe('B-04')
   })
 })

@@ -13,6 +13,7 @@ import { placeFromPhoto } from './photoGrid'
 import { ProposalReview } from './ProposalReview'
 import {
   acceptProposals,
+  addLeftOutCars,
   forgetRejected,
   mergeProposals,
   mergeWideStalls,
@@ -22,6 +23,7 @@ import {
 } from './proposals'
 import { straightenFoundCars } from './straighten'
 import { canDeleteSpace, removeSpaces } from './schematic/edits'
+import { fitGrid } from './schematic/grid'
 import { useStallFinder } from './useStallFinder'
 import { addSpaceFromOutline, followOutline, suggestOutline } from './sync'
 import type {
@@ -787,7 +789,8 @@ export function ReferencePhotoPanel({
   /**
    * A photo taken at an angle: lay the lot out from the parked cars and the spaces it has, all on the
    * ground (rows levelled, their lean, the empty stalls between cars), so the map matches the photo;
-   * cars standing off the rows are left out. False when it can't be done.
+   * cars standing off the rows are put back as proposals where they land in a cell (addLeftOutCars),
+   * else left out. False when it can't be done.
    */
   const layOutFromCars = (
     base: DraftLayout,
@@ -808,13 +811,19 @@ export function ReferencePhotoPanel({
       setStatusNotice(straight)
       return false
     }
-    onRelaid?.(straight.draft)
-    commitOutlines(straight.draft)
+    // The cars left out of the rows go back where the photo puts them, as proposals to check first.
+    const found = base.viewpoints.find((v) => v.viewId === viewId)?.outlines ?? {}
+    const leftOut = straight.droppedIds.flatMap((id) => (found[id] ? [found[id]] : []))
+    const back = addLeftOutCars(straight.draft, viewId, leftOut, fitGrid(straight.draft.spaces))
+    onRelaid?.(back.draft)
+    commitOutlines(back.draft)
     const kept = cars - straight.dropped
+    const count = (n: number) => `${n} ${n === 1 ? 'car' : 'cars'}`
     const parts = [
       `Found ${kept} parked ${kept === 1 ? 'car' : 'cars'} in ${viewId} and laid the lot out from above in ${straight.rows} ${straight.rows === 1 ? 'row' : 'rows'}`,
       straight.found ? `${straight.found} empty ${straight.found === 1 ? 'stall' : 'stalls'} between them` : '',
-      straight.dropped ? `${straight.dropped} ${straight.dropped === 1 ? 'car' : 'cars'} off the rows left out` : '',
+      back.added ? `${count(back.added)} off the rows added where the photo puts ${back.added === 1 ? 'it' : 'them'}, check ${back.added === 1 ? 'it' : 'those'} first` : '',
+      back.skipped ? (back.added ? `${back.skipped} left out` : `${count(back.skipped)} off the rows left out`) : '',
     ].filter(Boolean)
     setStatusNotice(`${parts.join('; ')}. Review them, weakest first.`)
     return true

@@ -21,6 +21,7 @@ interface Props {
  */
 export function ProposalReview({ draft, view, selectedSpaceId, onSelectSpace, onHoverSpace, onAccept, onReject }: Props) {
   const [showAll, setShowAll] = useState(false)
+  const [confirmingReject, setConfirmingReject] = useState(false)
   const pending = pendingProposals(view)
   if (pending.length === 0) return null
   const label = (id: string) => draft.spaces.find((s) => s.spaceId === id)?.label ?? id
@@ -34,26 +35,48 @@ export function ProposalReview({ draft, view, selectedSpaceId, onSelectSpace, on
           {pending.length} proposed {pending.length === 1 ? 'outline' : 'outlines'}
         </h2>
         <span className="hint">Weakest first. Check these on the photo, then accept the rest.</span>
-        <div className="ref-proposals__bulk">
-          <button
-            type="button"
-            className="button button--primary button--sm"
-            onClick={() => onAccept(all)}
-            data-testid="accept-all-proposals-btn"
-          >
-            Accept all
-          </button>
-          <button
-            type="button"
-            className="button button--ghost button--sm"
-            onClick={() => {
-              if (window.confirm(`Reject all ${pending.length} proposed outlines in ${view.viewId}?`)) onReject(all)
-            }}
-            data-testid="reject-all-proposals-btn"
-          >
-            Reject all
-          </button>
-        </div>
+        {confirmingReject ? (
+          // Asked in the page, not with window.confirm: embedded browsers cancel that without showing it.
+          <div className="ref-proposals__bulk" role="group" aria-label="Confirm rejecting all proposals">
+            <span>
+              Reject all {pending.length} in {view.viewId}?
+            </span>
+            <button
+              type="button"
+              className="button button--primary button--sm"
+              autoFocus
+              onClick={() => {
+                setConfirmingReject(false)
+                onReject(all)
+              }}
+              data-testid="confirm-reject-all-btn"
+            >
+              Reject {pending.length}
+            </button>
+            <button type="button" className="button button--ghost button--sm" onClick={() => setConfirmingReject(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <div className="ref-proposals__bulk">
+            <button
+              type="button"
+              className="button button--primary button--sm"
+              onClick={() => onAccept(all)}
+              data-testid="accept-all-proposals-btn"
+            >
+              Accept all
+            </button>
+            <button
+              type="button"
+              className="button button--ghost button--sm"
+              onClick={() => setConfirmingReject(true)}
+              data-testid="reject-all-proposals-btn"
+            >
+              Reject all
+            </button>
+          </div>
+        )}
       </div>
       <ul className="ref-proposals__list">
         {shown.map(({ spaceId, evidence, partial }) => (

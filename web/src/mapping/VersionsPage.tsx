@@ -22,10 +22,12 @@ export function VersionsPage() {
   const live = detail.data?.layout.version ?? null
   const [restoring, setRestoring] = useState<number | null>(null)
   const [restoreError, setRestoreError] = useState<string | null>(null)
+  // The version waiting for a yes. Asked in the page, not with window.confirm: embedded browsers
+  // cancel that without showing it.
+  const [confirming, setConfirming] = useState<number | null>(null)
 
   async function onRestore(version: number) {
-    const ok = window.confirm(`Replace the draft with v${version}? Draft changes that are not published will be lost.`)
-    if (!ok) return
+    setConfirming(null)
     setRestoring(version)
     setRestoreError(null)
     try {
@@ -57,6 +59,17 @@ export function VersionsPage() {
           {versions.error}
         </p>
       )}
+      {confirming != null && (
+        <div className="notice notice--warn" role="group" aria-label={`Confirm restoring v${confirming}`}>
+          <span>Replace the draft with v{confirming}? Draft changes that are not published will be lost.</span>{' '}
+          <button type="button" className="button button--primary button--sm" autoFocus onClick={() => void onRestore(confirming)}>
+            Replace the draft
+          </button>{' '}
+          <button type="button" className="button button--ghost button--sm" onClick={() => setConfirming(null)}>
+            Cancel
+          </button>
+        </div>
+      )}
       {versions.loading && !versions.data && <p className="muted">Loading versions…</p>}
       {versions.data && rows.length === 0 && <p className="muted">Nothing published yet.</p>}
       {rows.length > 0 && (
@@ -87,7 +100,7 @@ export function VersionsPage() {
                     <button
                       type="button"
                       className="button"
-                      onClick={() => void onRestore(v.version)}
+                      onClick={() => setConfirming(v.version)}
                       disabled={restoring != null}
                       aria-label={`Restore v${v.version}`}
                     >

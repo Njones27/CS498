@@ -83,7 +83,8 @@ describe('VersionsPage', () => {
 
   // US-09 #7: Restore v3 loads it into the draft and returns to the mapping page with a note.
   it('Restore loads the version into the draft and returns to the mapping page', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    // Asked in the page: a native confirm an embedded browser cancels must not block it.
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const restored = draftFixture({ revision: 9, basedOnVersion: 3 })
     const fetchMock = mockFetch({
       'GET /lots/test-lot': { body: detail },
@@ -94,8 +95,10 @@ describe('VersionsPage', () => {
     })
     renderApp('/admin/lots/test-lot/versions', ADMIN)
     await userEvent.click(await screen.findByRole('button', { name: 'Restore v3' }))
+    expect(screen.getByText('Replace the draft with v3? Draft changes that are not published will be lost.')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Replace the draft' }))
 
-    expect(confirm).toHaveBeenCalledWith('Replace the draft with v3? Draft changes that are not published will be lost.')
+    expect(confirm).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/admin/lots/test-lot/map'))
     expect(await screen.findByText('Draft restored from v3. Publish to make it live.')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Draft based on v3'))
@@ -110,7 +113,6 @@ describe('VersionsPage', () => {
 
   // The note comes from navigation state; Back (or a refresh) to that entry must not repeat it.
   it('the restore note shows once, not again on Back', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const restored = draftFixture({ revision: 9, basedOnVersion: 3 })
     mockFetch({
       'GET /lots/test-lot': { body: detail },
@@ -120,6 +122,7 @@ describe('VersionsPage', () => {
     })
     renderApp('/admin/lots/test-lot/versions', ADMIN, <Back />)
     await userEvent.click(await screen.findByRole('button', { name: 'Restore v3' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Replace the draft' }))
     expect(await screen.findByText('Draft restored from v3. Publish to make it live.')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('link', { name: 'Versions' }))
@@ -131,16 +134,16 @@ describe('VersionsPage', () => {
   })
 
   it('does nothing when the restore is not confirmed', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
     const fetchMock = mockFetch({ 'GET /lots/test-lot': { body: detail }, [`GET ${VERSIONS}`]: { body: versions } })
     renderApp('/admin/lots/test-lot/versions', ADMIN)
     await userEvent.click(await screen.findByRole('button', { name: 'Restore v3' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('button', { name: 'Replace the draft' })).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
     expect(screen.getByTestId('location')).toHaveTextContent('/admin/lots/test-lot/versions')
   })
 
   it('shows a restore error and stays on the page', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     mockFetch({
       'GET /lots/test-lot': { body: detail },
       [`GET ${VERSIONS}`]: { body: versions },
@@ -151,6 +154,7 @@ describe('VersionsPage', () => {
     })
     renderApp('/admin/lots/test-lot/versions', ADMIN)
     await userEvent.click(await screen.findByRole('button', { name: 'Restore v3' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Replace the draft' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('This draft changed in another window.')
     expect(screen.getByRole('button', { name: 'Restore v3' })).toBeEnabled()
     expect(screen.getByTestId('location')).toHaveTextContent('/admin/lots/test-lot/versions')
