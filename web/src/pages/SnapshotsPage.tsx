@@ -93,7 +93,7 @@ export function SnapshotsPage() {
   const selectedRow = rows.find((r) => r.imageId === selectedId)
 
   return (
-    <main className="page snapshots-page">
+    <main id="main-content" className="page snapshots-page">
       <Link to="/admin" className="back-link">
         ← Admin
       </Link>
@@ -198,6 +198,8 @@ export function SnapshotsPage() {
                           type="button"
                           className="button"
                           disabled={retrying === s.imageId}
+                          title={`Retry processing photo from ${dateTime(s.captureTime)}`}
+                          aria-description={`Photo from ${dateTime(s.captureTime)}`}
                           onClick={(e) => {
                             e.stopPropagation()
                             void retry(s.imageId)

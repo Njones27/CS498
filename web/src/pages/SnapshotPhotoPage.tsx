@@ -73,7 +73,7 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
   const settled = !!data && (data.finished || data.jobStatus === 'EXPIRED')
 
   return (
-    <main className="page">
+    <main id="main-content" className="page">
       <Link to="/admin" className="back-link">
         ← Admin
       </Link>

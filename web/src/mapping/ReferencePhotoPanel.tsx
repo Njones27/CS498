@@ -1697,7 +1697,7 @@ export function ReferencePhotoPanel({
                   </span>
                 </div>
                 <div className="ref-prompt__actions">
-                  <button type="button" className="button button--ghost button--sm" onClick={handleUndoPoint}>
+                  <button type="button" className="button button--ghost button--sm" onClick={handleUndoPoint} aria-label="Undo point">
                     ↶ Undo point
                   </button>
                   <button type="button" className="button button--ghost button--sm" onClick={() => setClicks([])}>
@@ -1878,6 +1878,7 @@ export function ReferencePhotoPanel({
                             <button
                               type="button"
                               className={`button button--sm ${isSelected ? 'button--primary' : 'button--ghost'}`}
+                              aria-label={`${isSelected ? 'Selected outline for space' : 'Select outline for space'} ${space.label}`}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 onSelectSpace(space.spaceId)

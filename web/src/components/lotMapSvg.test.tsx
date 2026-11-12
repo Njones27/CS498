@@ -43,4 +43,29 @@ describe('driver lot map', () => {
     draw(layout({ northDeg: 135 }))
     expect(screen.getByRole('img', { name: 'North is 135° clockwise from up' })).toBeInTheDocument()
   })
+
+  it('selects a space on Enter and Space, and clears on Escape', () => {
+    let selected: string | null = null
+    render(
+      <LotMapSvg
+        layout={layout()}
+        statusById={new Map()}
+        selectedId={selected}
+        onSelect={(id) => {
+          selected = id
+        }}
+        describe={(id) => `Space ${id}`}
+      />,
+    )
+    const spaceA = screen.getByTestId('space-a')
+    spaceA.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(selected).toBe('a')
+
+    spaceA.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(selected).toBeNull()
+
+    const spaceB = screen.getByTestId('space-b')
+    spaceB.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }))
+    expect(selected).toBe('b')
+  })
 })

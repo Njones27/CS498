@@ -65,7 +65,7 @@ export function LotMapPage() {
   const st = status.data
 
   return (
-    <main className="page">
+    <main id="main-content" className="page">
       <Link to="/" className="back-link">
         ← All lots
       </Link>

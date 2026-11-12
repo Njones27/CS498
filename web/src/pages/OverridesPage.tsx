@@ -161,7 +161,7 @@ export function OverridesPage() {
     (lots ? null : lotsError) ?? detail.error ?? status.error ?? overrides.error ?? closures.error
 
   return (
-    <main className="page">
+    <main id="main-content" className="page">
       <Link to="/admin" className="back-link">
         ← Admin
       </Link>

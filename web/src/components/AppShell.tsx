@@ -55,15 +55,20 @@ function Shell() {
   const location = useLocation()
   return (
     <>
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
       <header className="topbar">
-        <Link to="/" className="brand">
+        <Link to="/" className="brand" aria-label="Campus Parking Availability - Home">
           Parking Availability
         </Link>
         <div className="topbar__end">
           {session && (
             <nav className="topbar__nav" aria-label="Account">
               {isAdmin && <LotPicker />}
-              <Link to="/admin">Admin</Link>
+              <Link to="/admin" aria-current={location.pathname === '/admin' ? 'page' : undefined}>
+                Admin
+              </Link>
               <span className="topbar__email">{session.email}</span>
               <button type="button" className="button button--ghost" onClick={signOut}>
                 Sign out
@@ -75,7 +80,7 @@ function Shell() {
       </header>
       {/* Switching lots in the picker remounts the page, so pages that read the lot once reload. */}
       <ChunkErrorBoundary key={`${location.pathname}:${generation}`}>
-        <Suspense fallback={<main className="page"><p className="muted">Loading…</p></main>}>
+        <Suspense fallback={<main id="main-content" className="page"><p className="muted">Loading…</p></main>}>
           <Outlet key={generation} />
         </Suspense>
       </ChunkErrorBoundary>

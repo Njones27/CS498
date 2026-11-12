@@ -6,7 +6,7 @@ export function AdminHomePage() {
   const { lotId, lots } = useAdminLot()
   const lot = lots?.find((l) => l.lotId === lotId)
   return (
-    <main className="page page--narrow">
+    <main id="main-content" className="page page--narrow">
       <h1>Admin</h1>
       {lot && (
         <p className="hint">
@@ -14,7 +14,7 @@ export function AdminHomePage() {
           {!lot.published && ' (not published yet)'}. Switch lots with the picker at the top.
         </p>
       )}
-      <ul className="admin-links">
+      <ul className="admin-links" role="list">
         <li>
           <Link to="/admin/upload" className="admin-link">
             Upload
