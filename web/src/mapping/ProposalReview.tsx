@@ -23,19 +23,25 @@ export function ProposalReview({ draft, view, selectedSpaceId, onSelectSpace, on
   const [showAll, setShowAll] = useState(false)
   const pending = pendingProposals(view)
   // The set of proposals "Reject all" was asked about: the question closes by itself when the view or
-  // the number waiting changes, so it never opens on a list the admin has not been asked about.
-  const asking = `${view.viewId}:${pending.length}`
+  // the proposals waiting change, so it never opens on a list the admin has not been asked about.
+  const asking = `${view.viewId}:${pending.map((p) => p.spaceId).join(',')}`
   const [askedFor, setAskedFor] = useState<string | null>(null)
   if (askedFor !== null && askedFor !== asking) setAskedFor(null) // asked about another set: forget it
   const confirmingReject = askedFor === asking && pending.length > 0
   const questionId = useId()
   const rejectAllRef = useRef<HTMLButtonElement>(null)
-  const wasConfirming = useRef(false)
-  // Cancelled (or closed with Escape): focus goes back to the button that asked.
+  // Cancelled (or closed with Escape): focus goes back to the button that asked. Not when the question
+  // closes by itself, which would pull focus from whatever the admin was doing.
+  const backToButton = useRef(false)
   useEffect(() => {
-    if (wasConfirming.current && !confirmingReject) rejectAllRef.current?.focus()
-    wasConfirming.current = confirmingReject
+    if (confirmingReject || !backToButton.current) return
+    backToButton.current = false
+    rejectAllRef.current?.focus()
   }, [confirmingReject])
+  const cancel = () => {
+    backToButton.current = true
+    setAskedFor(null)
+  }
   if (pending.length === 0) return null
   const label = (id: string) => draft.spaces.find((s) => s.spaceId === id)?.label ?? id
   const shown = showAll ? pending : pending.slice(0, SHOWN)
@@ -56,8 +62,10 @@ export function ProposalReview({ draft, view, selectedSpaceId, onSelectSpace, on
             aria-labelledby={questionId}
             onKeyDown={(e) => {
               if (e.key !== 'Escape') return
+              // Escape answers the question only: the photo panel's own Escape (deselect, drop a
+              // half-drawn outline) must not run as well.
               e.stopPropagation()
-              setAskedFor(null)
+              cancel()
             }}
           >
             <span id={questionId}>
@@ -76,7 +84,7 @@ export function ProposalReview({ draft, view, selectedSpaceId, onSelectSpace, on
             >
               Reject {pending.length}
             </button>
-            <button type="button" className="button button--ghost button--sm" onClick={() => setAskedFor(null)}>
+            <button type="button" className="button button--ghost button--sm" onClick={cancel}>
               Cancel
             </button>
           </div>

@@ -28,11 +28,16 @@ export function VersionsPage() {
   const questionId = useId()
   // Cancelled (or closed with Escape): focus goes back to the Restore button that asked.
   const restoreButtons = useRef(new Map<number, HTMLButtonElement>())
-  const asked = useRef<number | null>(null)
+  const backTo = useRef<number | null>(null)
   useEffect(() => {
-    if (asked.current != null && confirming == null) restoreButtons.current.get(asked.current)?.focus()
-    asked.current = confirming
+    if (confirming != null || backTo.current == null) return
+    restoreButtons.current.get(backTo.current)?.focus()
+    backTo.current = null
   }, [confirming])
+  const cancel = () => {
+    backTo.current = confirming
+    setConfirming(null)
+  }
 
   async function onRestore(version: number) {
     setConfirming(null)
@@ -73,7 +78,7 @@ export function VersionsPage() {
           role="group"
           aria-labelledby={questionId}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') setConfirming(null)
+            if (e.key === 'Escape') cancel()
           }}
         >
           <span id={questionId}>Replace the draft with v{confirming}? Draft changes that are not published will be lost.</span>{' '}
@@ -86,7 +91,7 @@ export function VersionsPage() {
           >
             Replace the draft
           </button>{' '}
-          <button type="button" className="button button--ghost button--sm" onClick={() => setConfirming(null)}>
+          <button type="button" className="button button--ghost button--sm" onClick={cancel}>
             Cancel
           </button>
         </div>

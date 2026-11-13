@@ -48,8 +48,16 @@ describe('Reject all asks in the page', () => {
     const { rerender } = render(panel(['sp_a01', 'sp_a02']))
     await user.click(screen.getByTestId('reject-all-proposals-btn'))
     expect(screen.getByTestId('confirm-reject-all-btn')).toBeInTheDocument()
-    // One is accepted elsewhere: "Reject all 2" no longer says what would happen.
+    // The admin moves on to a row and one proposal is accepted: "Reject all 2" no longer says what
+    // would happen. Closing by itself, it does not pull focus back to the Reject all button.
+    const row = screen.getAllByRole('button', { name: /^Accept proposal for/ })[0]
+    row.focus()
     rerender(panel(['sp_a01']))
+    expect(screen.queryByTestId('confirm-reject-all-btn')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /^Accept proposal for/ })[0]).toHaveFocus()
+    // Asked again, then one proposal swapped for another (the same number waiting): closed too.
+    await user.click(screen.getByTestId('reject-all-proposals-btn'))
+    rerender(panel(['sp_a02']))
     expect(screen.queryByTestId('confirm-reject-all-btn')).not.toBeInTheDocument()
     // None left, then new ones found: the old question does not come back by itself.
     rerender(panel([]))
