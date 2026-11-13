@@ -470,13 +470,13 @@ def test_model_version_names_weights_mode_and_cutoffs():
     assert s.model_version == (
         "acpds_yolo|acpds=96901e9003a3|yolo=401cea9ab23a|overlap=box_lower_half"
         "|low=0.25|high=0.75|overlap_cut=0.3|margin=0.05|require_car_check=True"
-        "|yolo_conf=0.25|imgsz=1280|input_res=native|foliage=0.5"
+        "|yolo_conf=0.25|imgsz=1280|input_res=native|foliage=0.5:h50-160:s0.2:v0.7"
     )
     other = scorer(
         yolo_conf=0.4, yolo_imgsz=640, input_res=720, cutoffs=Cutoffs(require_car_check=False)
     )
     assert other.model_version.endswith(
-        "|require_car_check=False|yolo_conf=0.4|imgsz=640|input_res=720|foliage=0.5"
+        "|require_car_check=False|yolo_conf=0.4|imgsz=640|input_res=720|foliage=0.5:h50-160:s0.2:v0.7"
     )
 
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, errorMessage } from '../api/client'
 import type { LotDetail } from '../api/schemas'
@@ -25,6 +25,14 @@ export function VersionsPage() {
   // The version waiting for a yes. Asked in the page, not with window.confirm: embedded browsers
   // cancel that without showing it.
   const [confirming, setConfirming] = useState<number | null>(null)
+  const questionId = useId()
+  // Cancelled (or closed with Escape): focus goes back to the Restore button that asked.
+  const restoreButtons = useRef(new Map<number, HTMLButtonElement>())
+  const asked = useRef<number | null>(null)
+  useEffect(() => {
+    if (asked.current != null && confirming == null) restoreButtons.current.get(asked.current)?.focus()
+    asked.current = confirming
+  }, [confirming])
 
   async function onRestore(version: number) {
     setConfirming(null)
@@ -60,9 +68,22 @@ export function VersionsPage() {
         </p>
       )}
       {confirming != null && (
-        <div className="notice notice--warn" role="group" aria-label={`Confirm restoring v${confirming}`}>
-          <span>Replace the draft with v{confirming}? Draft changes that are not published will be lost.</span>{' '}
-          <button type="button" className="button button--primary button--sm" autoFocus onClick={() => void onRestore(confirming)}>
+        <div
+          className="notice notice--warn"
+          role="group"
+          aria-labelledby={questionId}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setConfirming(null)
+          }}
+        >
+          <span id={questionId}>Replace the draft with v{confirming}? Draft changes that are not published will be lost.</span>{' '}
+          <button
+            type="button"
+            className="button button--primary button--sm"
+            autoFocus
+            aria-describedby={questionId}
+            onClick={() => void onRestore(confirming)}
+          >
             Replace the draft
           </button>{' '}
           <button type="button" className="button button--ghost button--sm" onClick={() => setConfirming(null)}>
@@ -100,6 +121,10 @@ export function VersionsPage() {
                     <button
                       type="button"
                       className="button"
+                      ref={(el) => {
+                        if (el) restoreButtons.current.set(v.version, el)
+                        else restoreButtons.current.delete(v.version)
+                      }}
                       onClick={() => setConfirming(v.version)}
                       disabled={restoring != null}
                       aria-label={`Restore v${v.version}`}

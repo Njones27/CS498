@@ -31,7 +31,8 @@ import numpy as np
 from parking_core.errors import PermanentJobError
 from parking_core.models import AlignedOutline, CarBox, Cutoffs, Point, SpaceScore
 
-from .occlusion import HIDDEN_SHARE, hidden_by_foliage
+from .occlusion import RULE as FOLIAGE_RULE
+from .occlusion import hidden_by_foliage
 
 if TYPE_CHECKING:
     from parking_core.settings import Settings
@@ -484,7 +485,7 @@ class AcpdsYoloScorer:
             f"|low={c.low}|high={c.high}|overlap_cut={c.overlap}|margin={c.margin}"
             f"|require_car_check={c.require_car_check}|yolo_conf={self.yolo_conf}"
             f"|imgsz={self.yolo_imgsz}|input_res={self.input_res or 'native'}"
-            f"|foliage={HIDDEN_SHARE}"
+            f"|foliage={FOLIAGE_RULE}"
         )
 
     def score(self, image: bytes, outlines: list[AlignedOutline]) -> list[SpaceScore]:

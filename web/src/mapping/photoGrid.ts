@@ -287,6 +287,10 @@ export function photoRowSlot(
 ): { row: number; num: number } | null {
   const me = inProportion(view, outline)
   const mid = box(me)
+  // The space's own number (when the outline is one it already has): kept while it stays between the
+  // same two neighbours, so a nudge along the row never renames it.
+  const mine = exceptId ? draft.spaces.find((s) => s.spaceId === exceptId && !s.retired) : undefined
+  const own = mine ? parseLabel(mine.label) : null
   const byRow = new Map<number, Marker[]>()
   for (const m of markers(draft, view, exceptId)) byRow.set(m.row, [...(byRow.get(m.row) ?? []), m])
   let best: { row: number; num: number; off: number } | null = null
@@ -311,7 +315,8 @@ export function photoRowSlot(
       if (room < wm / 2 || room > 2 * (free + 1) * Math.max(wa, wb, wm)) continue
       if (best && best.off <= off) continue
       const step = free > 0 ? Math.min(free, Math.max(1, Math.round((along / length) * (free + 1)))) : 1
-      best = { row, num: a.col + 1 + step, off }
+      const stays = own && rowIndex(own.row) === row && own.num - 1 > a.col && own.num - 1 < b.col
+      best = { row, num: stays ? own.num : a.col + 1 + step, off }
     }
   }
   return best && { row: best.row, num: best.num }

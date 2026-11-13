@@ -8,8 +8,12 @@ marks it Occupied, and otherwise the state rule reports it Unknown.
 Foliage is told by colour: a green hue, saturated enough not to be asphalt under a colour cast
 and dark enough not to be a bright green car. Measured on the UFPR04 photo (six stalls under two
 trees: 0.50 to 0.98 covered, every other stall 0.36 or less), the drone lot (nothing over 0.25)
-and a top-down lot with a lime car and a green van (0.35 at most). Other obstacles (a pole, a
-truck in the aisle) are not recognised; the admin's "Set space state" covers those.
+and a top-down lot with a lime car and a green van (0.35 at most).
+
+Limits. Colour alone cannot tell leaves from a dark green car or a stall on grass: where YOLO
+sees no car (a photo from straight above), such a stall reads Unknown too. That errs the safe
+way (never Free), and no photo of either was at hand to tune against. Other obstacles (a pole,
+a truck in the aisle) are not recognised; the admin's "Set space state" covers those.
 """
 
 from __future__ import annotations
@@ -28,6 +32,9 @@ MAX_VALUE = 0.7
 """Above this a saturated green is a bright car, not leaves."""
 HIDDEN_SHARE = 0.5
 """A stall with at least this share of its outline under foliage is hidden."""
+RULE = f"{HIDDEN_SHARE:g}:h{HUE_DEG[0]:g}-{HUE_DEG[1]:g}:s{MIN_SATURATION:g}:v{MAX_VALUE:g}"
+"""Every parameter above, for the scorer's model version: a reading scored under other values
+is not the same reading."""
 
 
 def foliage_mask(bgr: np.ndarray) -> np.ndarray:

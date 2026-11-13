@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { davidFixture, space } from './fixtures/david'
 import { matchRowToPhoto, outlineLike, placeFromPhoto, placeInPhotoRow, photoCell, photoRowSlot } from './photoGrid'
+import { addLeftOutCars } from './proposals'
 import { cellRect, fitGrid } from './schematic/grid'
 import { addSpaceFromOutline, followOutline } from './sync'
 import type { DraftLayout, Outline } from './types'
@@ -524,6 +525,36 @@ describe('a photo whose rows converge', () => {
     const { 'B-04': _, ...outlines } = v.outlines // B-03 and B-05 are now the neighbours, B-04 between
     const gap = { ...draft, spaces: draft.spaces.filter((s) => s.spaceId !== 'B-04'), viewpoints: [{ ...v, outlines }] }
     expect(photoRowSlot(gap, gap.viewpoints[0], stall('B', 4))).toEqual({ row: 1, num: 4 })
+  })
+
+  it('a space keeps its number while it stays between the same two neighbours', () => {
+    const draft = fan()
+    const v = draft.viewpoints[0]
+    const { 'A-04': _, ...outlines } = v.outlines // A-03's neighbours are now A-02 and A-05: 3 and 4 are free
+    const gap = { ...draft, spaces: draft.spaces.filter((s) => s.spaceId !== 'A-04'), viewpoints: [{ ...v, outlines }] }
+    // Nudged half a stall along the row, past where rounding alone would call it A-04.
+    const nudged = stall('A', 2.6)
+    expect(photoRowSlot(gap, gap.viewpoints[0], nudged, 'A-03')).toEqual({ row: 0, num: 3 })
+    const grid = fitGrid(gap.spaces)
+    const moved = { ...gap, viewpoints: [{ ...gap.viewpoints[0], outlines: { ...outlines, 'A-03': nudged } }] }
+    expect(placeInPhotoRow(moved, 'V1', 'A-03', grid)).toEqual({ draft: moved, moved: [] })
+    // A space from elsewhere dropped on the same spot is read by where it is.
+    const other = fan([{ label: 'D-02', outline: nudged }])
+    const others = { ...other, spaces: other.spaces.filter((s) => s.spaceId !== 'A-04' && s.spaceId !== 'A-03') }
+    expect(photoRowSlot(others, others.viewpoints[0], nudged, 'x0')?.num).toBe(4)
+  })
+
+  it('a car left out of the rows is not put back when making room would renumber the row', () => {
+    const draft = fan()
+    const grid = fitGrid(draft.spaces)
+    // In the hole between B-02 and B-03, which are numbered side by side: B-03 on would have to move.
+    expect(addLeftOutCars(draft, 'V1', [stall('B', 2)], grid)).toEqual({ draft, dx: 0, dy: 0, added: 0, skipped: 1 })
+    // Past the end of row C there is a free cell: that one goes in, as a proposal.
+    const { 'C-06': _, ...outlines } = draft.viewpoints[0].outlines
+    const shorter = { ...draft, spaces: draft.spaces.filter((s) => s.spaceId !== 'C-06'), viewpoints: [{ ...draft.viewpoints[0], outlines }] }
+    const back = addLeftOutCars(shorter, 'V1', [stall('C', 5)], fitGrid(shorter.spaces))
+    expect([back.added, back.skipped]).toEqual([1, 0])
+    for (const was of shorter.spaces) expect(back.draft.spaces.find((s) => s.spaceId === was.spaceId)).toEqual(was)
   })
 
   it('a space outlined in the hole joins the row, and the spaces in the way move up one', () => {

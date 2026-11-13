@@ -547,8 +547,9 @@ export const STRAY_EVIDENCE = 0.05
  * parked cars drops a car standing alone or in a pair: straightenFoundCars). Each goes in as a box drawn
  * on it would (`addSpaceFromOutline`), but as a pending proposal for the admin to accept or reject, the
  * weakest of all so these are reviewed first. The cars nearest the stalls already outlined go first, so
- * later ones are placed against them. A car that lands in no grid cell (above row A, or with no free
- * cell near) stays out: `skipped` counts those.
+ * later ones are placed against them. A car stays out when it lands in no grid cell (above row A, or
+ * with no free cell near), or when making room for it would move or rename other spaces (rejecting it
+ * later would not put those back): `skipped` counts both.
  */
 export function addLeftOutCars(
   draft: DraftLayout,
@@ -559,15 +560,18 @@ export function addLeftOutCars(
   const view = draft.viewpoints.find((v) => v.viewId === viewId)
   if (!view || cars.length === 0) return { draft, dx: 0, dy: 0, added: 0, skipped: cars.length }
   const outlined = Object.values(view.outlines).map((o) => centroid(o))
-  const reach = (car: Outline) => {
-    const [x, y] = centroid(car)
-    return outlined.reduce((best, [ox, oy]) => Math.min(best, Math.hypot(ox - x, oy - y)), Infinity)
-  }
+  const byReach = cars
+    .map((car) => {
+      const [x, y] = centroid(car)
+      return { car, reach: outlined.reduce((best, [ox, oy]) => Math.min(best, Math.hypot(ox - x, oy - y)), Infinity) }
+    })
+    .sort((a, b) => a.reach - b.reach)
   let next = draft
   let moved = grid
   let [dx, dy, added] = [0, 0, 0]
-  for (const car of [...cars].sort((a, b) => reach(a) - reach(b))) {
+  for (const { car } of byReach) {
     const placed = addSpaceFromOutline(next, viewId, car, moved)
+    if (placed.renumbered) continue
     const shifted = shiftGrid(moved, placed.dx, placed.dy)
     const { spaceId, rect } = placed.space
     const cell = cellAt(shifted, [rect.x + rect.w / 2, rect.y + rect.h / 2])

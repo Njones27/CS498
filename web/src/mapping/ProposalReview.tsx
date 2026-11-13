@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { evidenceWord, pendingProposals } from './proposals'
 import type { DraftLayout, DraftViewpoint } from './types'
 
@@ -21,8 +21,21 @@ interface Props {
  */
 export function ProposalReview({ draft, view, selectedSpaceId, onSelectSpace, onHoverSpace, onAccept, onReject }: Props) {
   const [showAll, setShowAll] = useState(false)
-  const [confirmingReject, setConfirmingReject] = useState(false)
   const pending = pendingProposals(view)
+  // The set of proposals "Reject all" was asked about: the question closes by itself when the view or
+  // the number waiting changes, so it never opens on a list the admin has not been asked about.
+  const asking = `${view.viewId}:${pending.length}`
+  const [askedFor, setAskedFor] = useState<string | null>(null)
+  if (askedFor !== null && askedFor !== asking) setAskedFor(null) // asked about another set: forget it
+  const confirmingReject = askedFor === asking && pending.length > 0
+  const questionId = useId()
+  const rejectAllRef = useRef<HTMLButtonElement>(null)
+  const wasConfirming = useRef(false)
+  // Cancelled (or closed with Escape): focus goes back to the button that asked.
+  useEffect(() => {
+    if (wasConfirming.current && !confirmingReject) rejectAllRef.current?.focus()
+    wasConfirming.current = confirmingReject
+  }, [confirmingReject])
   if (pending.length === 0) return null
   const label = (id: string) => draft.spaces.find((s) => s.spaceId === id)?.label ?? id
   const shown = showAll ? pending : pending.slice(0, SHOWN)
@@ -37,23 +50,33 @@ export function ProposalReview({ draft, view, selectedSpaceId, onSelectSpace, on
         <span className="hint">Weakest first. Check these on the photo, then accept the rest.</span>
         {confirmingReject ? (
           // Asked in the page, not with window.confirm: embedded browsers cancel that without showing it.
-          <div className="ref-proposals__bulk" role="group" aria-label="Confirm rejecting all proposals">
-            <span>
+          <div
+            className="ref-proposals__bulk"
+            role="group"
+            aria-labelledby={questionId}
+            onKeyDown={(e) => {
+              if (e.key !== 'Escape') return
+              e.stopPropagation()
+              setAskedFor(null)
+            }}
+          >
+            <span id={questionId}>
               Reject all {pending.length} in {view.viewId}?
             </span>
             <button
               type="button"
               className="button button--primary button--sm"
               autoFocus
+              aria-describedby={questionId}
               onClick={() => {
-                setConfirmingReject(false)
+                setAskedFor(null)
                 onReject(all)
               }}
               data-testid="confirm-reject-all-btn"
             >
               Reject {pending.length}
             </button>
-            <button type="button" className="button button--ghost button--sm" onClick={() => setConfirmingReject(false)}>
+            <button type="button" className="button button--ghost button--sm" onClick={() => setAskedFor(null)}>
               Cancel
             </button>
           </div>
@@ -69,8 +92,9 @@ export function ProposalReview({ draft, view, selectedSpaceId, onSelectSpace, on
             </button>
             <button
               type="button"
+              ref={rejectAllRef}
               className="button button--ghost button--sm"
-              onClick={() => setConfirmingReject(true)}
+              onClick={() => setAskedFor(asking)}
               data-testid="reject-all-proposals-btn"
             >
               Reject all

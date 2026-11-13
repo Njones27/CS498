@@ -8,6 +8,7 @@ import pytest
 from parking_core.models import AlignedOutline
 from parking_worker.scorers.occlusion import (
     HIDDEN_SHARE,
+    RULE,
     foliage_mask,
     foliage_shares,
     hidden_by_foliage,
@@ -32,6 +33,9 @@ def hsv_pixel(hue_deg: float, saturation: float, value: float) -> np.ndarray:
         ("teal car", 190, 0.60, 0.40, False),
         ("red car", 0, 0.80, 0.70, False),
         ("black car", 0, 0.00, 0.10, False),
+        # Known limit: colour alone cannot tell these from leaves (see the module's notes).
+        ("dark green car", 120, 0.50, 0.30, True),
+        ("grass", 100, 0.45, 0.50, True),
     ],
 )
 def test_foliage_is_green_saturated_and_not_bright(what, hue, saturation, value, foliage):
@@ -69,3 +73,7 @@ def test_outline_off_the_photo_or_without_area_has_no_share():
     hanging = outline([(-0.3, 0.2), (0.3, 0.2), (0.3, 0.6), (-0.3, 0.6)])  # the part in view
     assert foliage_shares(bgr, [off, line]) == [0.0, 0.0]
     assert foliage_shares(bgr, [hanging])[0] == pytest.approx(1.0)
+
+
+def test_rule_names_every_parameter():
+    assert RULE == "0.5:h50-160:s0.2:v0.7"

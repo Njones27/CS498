@@ -133,6 +133,22 @@ describe('VersionsPage', () => {
     expect(screen.queryByText(/Draft restored from v3/)).not.toBeInTheDocument()
   })
 
+  it('names the question for the confirm button, and Cancel or Escape hands focus back to Restore', async () => {
+    mockFetch({ 'GET /lots/test-lot': { body: detail }, [`GET ${VERSIONS}`]: { body: versions } })
+    renderApp('/admin/lots/test-lot/versions', ADMIN)
+    const restore = await screen.findByRole('button', { name: 'Restore v3' })
+    await userEvent.click(restore)
+    const confirm = screen.getByRole('button', { name: 'Replace the draft' })
+    expect(confirm).toHaveFocus()
+    expect(confirm).toHaveAccessibleDescription('Replace the draft with v3? Draft changes that are not published will be lost.')
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('button', { name: 'Replace the draft' })).not.toBeInTheDocument()
+    expect(restore).toHaveFocus()
+    await userEvent.click(restore)
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(restore).toHaveFocus()
+  })
+
   it('does nothing when the restore is not confirmed', async () => {
     const fetchMock = mockFetch({ 'GET /lots/test-lot': { body: detail }, [`GET ${VERSIONS}`]: { body: versions } })
     renderApp('/admin/lots/test-lot/versions', ADMIN)

@@ -818,12 +818,13 @@ export function ReferencePhotoPanel({
     onRelaid?.(back.draft)
     commitOutlines(back.draft)
     const kept = cars - straight.dropped
+    const stillOut = straight.dropped - back.added
     const count = (n: number) => `${n} ${n === 1 ? 'car' : 'cars'}`
     const parts = [
       `Found ${kept} parked ${kept === 1 ? 'car' : 'cars'} in ${viewId} and laid the lot out from above in ${straight.rows} ${straight.rows === 1 ? 'row' : 'rows'}`,
       straight.found ? `${straight.found} empty ${straight.found === 1 ? 'stall' : 'stalls'} between them` : '',
       back.added ? `${count(back.added)} off the rows added where the photo puts ${back.added === 1 ? 'it' : 'them'}, check ${back.added === 1 ? 'it' : 'those'} first` : '',
-      back.skipped ? (back.added ? `${back.skipped} left out` : `${count(back.skipped)} off the rows left out`) : '',
+      stillOut ? (back.added ? `${stillOut} left out` : `${count(stillOut)} off the rows left out`) : '',
     ].filter(Boolean)
     setStatusNotice(`${parts.join('; ')}. Review them, weakest first.`)
     return true
