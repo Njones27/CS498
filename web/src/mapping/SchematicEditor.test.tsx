@@ -508,6 +508,15 @@ describe('SchematicEditor', () => {
       expect(byId(last(), 'A-03')).toMatchObject({ label: 'B-03', rect: { x: 260, y: 170 } })
     })
 
+    it('a space moved into a row of angled stalls leans like them', async () => {
+      const row = [space('B-01', 40, 170, { skewDeg: 45 }), space('B-02', 150, 170, { skewDeg: 45 }), space('B-04', 370, 170, { skewDeg: 45 })]
+      const draft = davidFixture({ spaces: [...davidFixture().spaces, ...row] })
+      const { last, user } = setup({ draft, withGrid: true, selectedSpaceId: 'A-03' })
+      spaceEl('A-03').focus()
+      await user.keyboard('{ArrowDown}')
+      expect(byId(last(), 'A-03')).toMatchObject({ label: 'B-03', rect: { x: 260, y: 170 }, skewDeg: 45 })
+    })
+
     it('Draw space across cells adds one space per free cell, named for each', async () => {
       const { last, user } = setup({ withGrid: true })
       await user.click(screen.getByRole('button', { name: 'Draw space' }))

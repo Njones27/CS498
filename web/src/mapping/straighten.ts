@@ -707,7 +707,7 @@ const STRAY_ROUNDS = 3
  * Straighten stalls Find stalls found from parked cars (a photo taken at an angle): as
  * straightenFromPhoto, but a car standing off the rows (driving through, or stopped in the aisle) is no
  * stall, so its proposal is dropped and the rest are straightened again, until none is left over.
- * `dropped` counts them.
+ * `dropped` counts them and `droppedIds` names them (the caller may put them back: addLeftOutCars).
  *
  * On a lot that already has spaces, `stalls` (the whole Find stalls run, cars on spaces included) keeps
  * the outlines alike: the ground is fitted on car outlines only, and a space the lot had is seen by the
@@ -720,9 +720,10 @@ export function straightenFoundCars(
   paint: [number, number, number, number][] = [],
   stalls: { polygon: Point[]; fromCar?: boolean | null }[] = [],
   newIds?: ReadonlySet<string>,
-): (StraightenResult & { dropped: number }) | string {
+): (StraightenResult & { dropped: number; droppedIds: string[] }) | string {
   let current = draft
   let dropped = 0
+  const droppedIds: string[] = []
   for (let round = 0; ; round++) {
     const view = current.viewpoints.find((v) => v.viewId === viewId)!
     const review = view.outlineReview
@@ -757,10 +758,12 @@ export function straightenFoundCars(
       return {
         ...result,
         dropped,
+        droppedIds,
         draft: { ...placed, viewpoints: placed.viewpoints.map((v) => (v.viewId === viewId ? { ...out, outlines } : v)) },
       }
     }
     dropped += drop.size
+    droppedIds.push(...drop)
     const keep = ([id]: [string, unknown]) => !drop.has(id)
     current = {
       ...current,

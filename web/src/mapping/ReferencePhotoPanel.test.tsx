@@ -5,6 +5,7 @@ import { putFile } from '../lib/putFile'
 import { mockFetch } from '../test/helpers'
 import { rylanDraftFixture } from './fixtures/rylan'
 import { PKLOT_CAR_STALLS } from './fixtures/pklotCars'
+import { STRAY_EVIDENCE } from './proposals'
 import { ReferencePhotoPanel } from './ReferencePhotoPanel'
 import { cellRect, fitGrid } from './schematic/grid'
 import type { DraftLayout, DraftSpace, Outline, ReferencePhotoPanelProps } from './types'
@@ -571,10 +572,19 @@ describe('ReferencePhotoPanel (US-08)', () => {
       await user.click(screen.getByTestId('find-stalls-btn'))
       await pollUntil(() => expect(onChange).toHaveBeenCalledTimes(1))
       const next: DraftLayout = onChange.mock.calls[0][0]
-      expect(new Set(next.spaces.map((sp) => sp.label[0])).size).toBe(7)
-      // The paint beside the cars gives the angle: every stall at 45 degrees.
-      expect(next.spaces.every((sp) => sp.skewDeg === 45)).toBe(true)
-      expect(screen.getByText(/Found 39 parked cars in V1 and laid the lot out from above in 7 rows; 7 empty stalls between them; 8 cars off the rows left out/)).toBeInTheDocument()
+      // Six of the eight cars left out of the rows are put back as the weakest proposals, in cells.
+      const review = next.viewpoints.find((v) => v.viewId === 'V1')!.outlineReview
+      const putBack = next.spaces.filter((sp) => review[sp.spaceId]?.evidence === STRAY_EVIDENCE)
+      expect(putBack.map((sp) => sp.label).sort()).toEqual(['B-02', 'C-01', 'D-01', 'G-09', 'H-01', 'H-02'])
+      const rows = next.spaces.filter((sp) => !putBack.includes(sp))
+      expect(new Set(rows.map((sp) => sp.label[0])).size).toBe(7)
+      // The paint beside the cars gives the angle: every stall of the rows at 45 degrees.
+      expect(rows.every((sp) => sp.skewDeg === 45)).toBe(true)
+      expect(
+        screen.getByText(
+          /Found 39 parked cars in V1 and laid the lot out from above in 7 rows; 7 empty stalls between them; 6 cars off the rows added where the photo puts them, check those first; 2 left out\. Review them, weakest first\./,
+        ),
+      ).toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }
@@ -816,8 +826,15 @@ describe('ReferencePhotoPanel (US-08)', () => {
     expect(accepted.outlineReview?.sp_a01).toEqual({ source: 'proposed', status: 'accepted', evidence: 0.5 })
     expect(accepted.outlineReview?.sp_a02?.status).toBe('accepted')
 
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    // Asked in the page: a native confirm an embedded browser cancels must not block it.
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     await user.click(screen.getByTestId('reject-all-proposals-btn'))
+    expect(onChange).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onChange).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByTestId('reject-all-proposals-btn'))
+    await user.click(screen.getByTestId('confirm-reject-all-btn'))
+    expect(confirm).not.toHaveBeenCalled()
     const rejected = onChange.mock.calls[1][0].viewpoints.find((v) => v.viewId === 'V1')!
     expect(rejected.outlines.sp_a01).toBeUndefined()
     expect(rejected.outlines.sp_a02).toBeUndefined()

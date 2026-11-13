@@ -1,5 +1,5 @@
-import { fitSchematic, updateSpace, type Grown } from './schematic/edits'
-import { cellLabel, cellRect, cellTaken, insertAtRowStart, labelDigits, rowIndex, rowLetter, type Cell, type Grid } from './schematic/grid'
+import { fitSchematic, leanLikeRows, updateSpace, type Grown } from './schematic/edits'
+import { cellLabel, cellRect, cellTaken, insertAtRowStart, insertInRow, labelDigits, rowIndex, rowLetter, type Cell, type Grid } from './schematic/grid'
 import { formatLabel, normalizeLabel, parseLabel } from './schematic/labels'
 import { cutByBorder } from './photo/geom'
 import type { DraftLayout, DraftViewpoint, Outline } from './types'
@@ -263,6 +263,100 @@ export function photoCell(draft: DraftLayout, view: DraftViewpoint, outline: Out
   return { row, col: Math.round(at), at, rowAt, named }
 }
 
+/** How far an outline reaches along the unit direction (ux, uy). */
+function reach(o: Outline, ux: number, uy: number): number {
+  const along = o.map(([x, y]) => x * ux + y * uy)
+  return Math.max(...along) - Math.min(...along)
+}
+
+/**
+ * The place in a row that `outline` sits in on the photo, read from that row's outlines alone: the two
+ * outlined neighbours (next to each other among the row's outlines) its middle lies between. `num` is the
+ * number it should have: the one its position points at when numbers are free between the two, else the
+ * higher neighbour's (which then has to move up). Unlike photoCell this needs no lattice across the
+ * rows, so it still reads a photo whose rows converge. Null when it lies between no two: on top of a
+ * neighbour, off their line by more than half a stall's depth, with less than half a stall of room
+ * between them, or with far more room than the numbers between them account for. Of several pairs, the
+ * one whose line it is nearest.
+ */
+export function photoRowSlot(
+  draft: DraftLayout,
+  view: DraftViewpoint,
+  outline: Outline,
+  exceptId?: string,
+): { row: number; num: number } | null {
+  const me = inProportion(view, outline)
+  const mid = box(me)
+  // The space's own number (when the outline is one it already has): kept while it stays between the
+  // same two neighbours, so a nudge along the row never renames it.
+  const mine = exceptId ? draft.spaces.find((s) => s.spaceId === exceptId && !s.retired) : undefined
+  const own = mine ? parseLabel(mine.label) : null
+  const byRow = new Map<number, Marker[]>()
+  for (const m of markers(draft, view, exceptId)) byRow.set(m.row, [...(byRow.get(m.row) ?? []), m])
+  let best: { row: number; num: number; off: number } | null = null
+  for (const [row, ms] of byRow) {
+    const sorted = [...ms].sort((a, b) => a.col - b.col)
+    for (let i = 1; i < sorted.length; i++) {
+      const [a, b] = [sorted[i - 1], sorted[i]]
+      const length = Math.hypot(b.x - a.x, b.y - a.y)
+      if (b.col === a.col || length < 1e-9) continue
+      const [ux, uy] = [(b.x - a.x) / length, (b.y - a.y) / length]
+      const along = (mid.x - a.x) * ux + (mid.y - a.y) * uy
+      const off = Math.abs((mid.x - a.x) * uy - (mid.y - a.y) * ux)
+      const [wa, wb] = [reach(a.outline, ux, uy), reach(b.outline, ux, uy)]
+      const depth = (reach(a.outline, -uy, ux) + reach(b.outline, -uy, ux)) / 2
+      // Between the two and clear of both, on their line.
+      if (along <= wa / 2 || length - along <= wb / 2 || off > depth / 2) continue
+      const free = b.col - a.col - 1 // numbers between the two
+      // Room between them for at least half of it, and no more than the stalls that could be missing
+      // there (a space labeled for the wrong end of the row is no neighbour).
+      const wm = reach(me, ux, uy)
+      const room = length - (wa + wb) / 2
+      if (room < wm / 2 || room > 2 * (free + 1) * Math.max(wa, wb, wm)) continue
+      if (best && best.off <= off) continue
+      const step = free > 0 ? Math.min(free, Math.max(1, Math.round((along / length) * (free + 1)))) : 1
+      const stays = own && rowIndex(own.row) === row && own.num - 1 > a.col && own.num - 1 < b.col
+      best = { row, num: stays ? own.num : a.col + 1 + step, off }
+    }
+  }
+  return best && { row: best.row, num: best.num }
+}
+
+/**
+ * Put `spaceId` in the place of a row its outline sits in on `viewId`'s photo (photoRowSlot): it takes
+ * that number and cell and leans like the row, and spaces in the way move up one (insertInRow). `moved`
+ * lists the spaces whose cell changed: none when it is already there, or (with a `note`) when the row
+ * can't make room. Null when the photo shows no such place, or the space has a name like "Gate". The
+ * map is not grown here (fitSchematic is the caller's).
+ */
+export function placeInPhotoRow(
+  draft: DraftLayout,
+  viewId: string,
+  spaceId: string,
+  grid: Grid,
+): { draft: DraftLayout; moved: string[]; note?: string } | null {
+  const view = draft.viewpoints.find((v) => v.viewId === viewId)
+  const space = draft.spaces.find((s) => s.spaceId === spaceId)
+  const outline = view?.outlines[spaceId]
+  if (!view || !space || !outline || space.retired) return null
+  if (!parseLabel(space.label) && space.label.trim() !== '') return null
+  const slot = photoRowSlot(draft, view, outline, spaceId)
+  if (!slot) return null
+  const letter = rowLetter(slot.row)
+  const target = { row: slot.row, col: slot.num - 1 }
+  const placed = insertInRow(draft, grid, spaceId, target.row, target.col)
+  if (!placed) {
+    return { draft, moved: [], note: `Row ${letter} can't make room for ${space.label.trim() || 'this space'}: a space that isn't numbered in the row sits in the way` }
+  }
+  const now = placed.draft.spaces.find((s) => s.spaceId === spaceId)!
+  const rect = cellRect(grid, target)
+  const stayed = normalizeLabel(now.label) === normalizeLabel(space.label) && rect.x === space.rect.x && rect.y === space.rect.y && rect.w === space.rect.w && rect.h === space.rect.h
+  if (stayed && placed.shifted.length === 0) return { draft, moved: [] }
+  const n = placed.shifted.length
+  const note = n === 0 ? `Now ${now.label}` : `Now ${now.label}; ${n === 1 ? 'the space' : `the ${n} spaces`} after it in row ${letter} moved up one to make room`
+  return { draft: leanLikeRows(placed.draft, [spaceId]), moved: [spaceId, ...placed.shifted], note }
+}
+
 /** Outlines this close along the row (a share of the narrower one's width) are side by side. */
 const BESIDE = 0.35
 
@@ -391,7 +485,13 @@ export function placeFromPhoto(
   const outline = view?.outlines[spaceId]
   if (!view || !space || !outline || space.retired) return unchanged
   const cell = photoCell(draft, view, outline, spaceId)
-  if (!cell) return { ...unchanged, note: 'Outline more spaces on this photo first, so it can tell rows and columns' }
+  if (!cell) {
+    // A photo whose rows and columns can't be read may still show the two neighbours it sits between.
+    const inRow = placeInPhotoRow(draft, viewId, spaceId, grid)
+    if (!inRow) return { ...unchanged, note: 'Outline more spaces on this photo first, so it can tell rows and columns' }
+    if (inRow.moved.length === 0) return { ...unchanged, note: inRow.note ?? `${space.label} is already where the photo puts it` }
+    return { ...fitSchematic(inRow.draft), note: inRow.note, renumbered: inRow.moved.length > 1 }
+  }
   const letter = rowLetter(cell.row)
   if (!letter) return { ...unchanged, note: 'The photo puts this space above row A; it stays as it is' }
   const digits = Math.max(2, parseLabel(space.label)?.digits ?? labelDigits(draft.spaces))

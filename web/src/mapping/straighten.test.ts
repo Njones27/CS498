@@ -259,6 +259,9 @@ describe('straightenFromPhoto', () => {
     if (typeof r === 'string') throw new Error(r)
     // 47 cars: 8 stand off the rows (driving or stopped), 39 are parked in 7 rows; 7 empty stalls between.
     expect([r.dropped, r.placed, r.rows, r.found, r.loose.length]).toEqual([8, 39, 7, 7, 0])
+    // The cars left out are named, so they can be put back as proposals (addLeftOutCars).
+    expect(r.droppedIds).toHaveLength(8)
+    expect(r.droppedIds.every((id) => !r.draft.spaces.some((sp) => sp.spaceId === id))).toBe(true)
     const sizes = new Map<string, number>()
     for (const s of r.draft.spaces) sizes.set(s.label[0], (sizes.get(s.label[0]) ?? 0) + 1)
     expect([...sizes.values()].every((n) => n >= 3)).toBe(true)
