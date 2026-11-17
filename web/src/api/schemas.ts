@@ -2,6 +2,7 @@ import type { components } from './types.gen'
 
 /** Short aliases for the generated OpenAPI schemas. Never hand-write response shapes. */
 type S = components['schemas']
+export type AuthConfigResponse = S['AuthConfigResponse']
 export type ErrorResponse = S['ErrorResponse']
 export type LoginRequest = S['LoginRequest']
 export type LoginResponse = S['LoginResponse']

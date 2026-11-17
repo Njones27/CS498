@@ -5,12 +5,14 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api, setSessionExpiredHandler, setTokenGetter } from '../api/client'
-import type { LoginRequest, LoginResponse } from '../api/schemas'
+import type { AuthConfigResponse, LoginRequest, LoginResponse } from '../api/schemas'
+import { signInWithCognito, UNAVAILABLE_MESSAGE } from './cognito'
 import { clearSession, loadSession, saveSession, setFlash, type Session } from './session'
 
 export const SESSION_EXPIRED_MESSAGE = 'Your session expired. Please sign in again'
@@ -48,14 +50,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [navigate, pathname, search],
   )
 
+  // The sign-in mode is fixed per deployment, so one successful answer lasts the page's lifetime.
+  const authConfig = useRef<AuthConfigResponse | null>(null)
+
   const signIn = useCallback(async (email: string, password: string) => {
-    const body: LoginRequest = { email, password }
-    const res = await api.post<LoginResponse>('/auth/login', body)
-    const s: Session = {
-      token: res.token,
-      email: res.email,
-      groups: res.groups,
-      expiresAt: res.expiresAt,
+    authConfig.current ??= await api.get<AuthConfigResponse>('/auth/config').catch(() => {
+      throw new Error(UNAVAILABLE_MESSAGE)
+    })
+    const { mode, region, userPoolClientId } = authConfig.current
+    let s: Session
+    if (mode === 'cognito') {
+      if (!region || !userPoolClientId) throw new Error(UNAVAILABLE_MESSAGE)
+      s = await signInWithCognito(region, userPoolClientId, email, password)
+    } else {
+      const body: LoginRequest = { email, password }
+      const res = await api.post<LoginResponse>('/auth/login', body)
+      s = { token: res.token, email: res.email, groups: res.groups, expiresAt: res.expiresAt }
     }
     saveSession(s)
     setSession(s)

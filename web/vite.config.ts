@@ -4,7 +4,8 @@ import react from '@vitejs/plugin-react'
 
 // The web app always calls `<base>api/...`. In dev, Vite forwards that to the API service
 // (HDD §7.1) and strips the prefix, so the API serves the HDD §6.1 paths at its root.
-// In Phase 2 set VITE_API_BASE to the API Gateway URL and no proxy is involved.
+// On AWS (Phase 2) CloudFront serves the app and forwards /api to the API on the same origin, so nothing
+// is set there either. VITE_API_BASE is only for pointing a build at an API on another origin.
 //
 // Behind code-server's port proxy, run with VITE_BASE=/proxy/5173/: the app is then served
 // under that prefix and HMR connects back through the proxy on 443 (`npm run dev:proxy`).
