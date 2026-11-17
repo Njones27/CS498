@@ -7,7 +7,7 @@ dependencies = [
   "pydantic>=2.11",
   "pydantic-settings>=2.6",
   "boto3>=1.35",
-  "PyJWT[crypto]>=2.10",  # crypto: RS256 for Cognito ID tokens
+  "PyJWT[crypto]>=2.15",  # crypto: RS256 for Cognito ID tokens
 ]
 
 [build-system]

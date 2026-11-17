@@ -41,8 +41,8 @@ export class OpsStack extends BaseStack {
             });
 
         // Reached when the worker is killed (timeout, out of memory) or cannot finish a job's bookkeeping on
-        // every delivery. Such a job is left unfinished: look at the message, then use Retry on the snapshot.
-        this.alarm('JobsDeadLettered', 'A job message was set aside after three deliveries the worker did not survive', {
+        // delivery after delivery. Such a job is left unfinished: look at the message, then use Retry on the snapshot.
+        this.alarm('JobsDeadLettered', 'A job message was set aside after five deliveries without the worker finishing the job', {
             metric: new cloudwatch.Metric({
                 namespace: 'AWS/SQS',
                 metricName: 'ApproximateNumberOfMessagesVisible',

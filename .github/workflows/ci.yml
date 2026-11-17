@@ -61,7 +61,8 @@ jobs:
   # account, so this is safe for pull requests from forks. Deploying happens only from main (deploy.yml).
   infra:
     name: CDK typecheck, tests, synth
-    runs-on: ubuntu-latest
+    # Pinned: the import check below runs the API code with the system python3.12, the Lambda runtime's version.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

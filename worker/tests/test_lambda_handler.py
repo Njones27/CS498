@@ -178,3 +178,63 @@ def test_handler_builds_the_runtime_once_from_settings(monkeypatch):
 @pytest.mark.parametrize("event", [{}, {"Records": []}])
 def test_empty_events_are_fine(world: World, event):
     assert handle(event, runtime(world)) == {"batchItemFailures": []}
+
+
+def test_kept_flag_on_the_results_themselves(world: World, monkeypatch):
+    """`message_kept` is set by the job code, whatever the outcome: here a permanent failure
+    whose final FAILED transition lost a race while the job is still unfinished."""
+    from parking_core.errors import AlignmentError
+    from parking_worker.handler import process_message
+
+    class Misaligned:
+        def align(self, image: bytes, viewpoint: Viewpoint):
+            raise AlignmentError()
+
+    world.add_snapshot("img-1")
+    [msg] = world.queue.receive()
+    result = process_message(msg, world.adapters, IdentityAligner(), StubScorer(), Cutoffs())
+    assert (result.outcome, result.message_kept) == ("completed", False)
+
+    world.add_snapshot("img-2")
+    real = world.repo.transition_job
+    monkeypatch.setattr(
+        world.repo,
+        "transition_job",
+        lambda image_id, expected, to, **f: (
+            False if to is JobStatus.FAILED else real(image_id, expected, to, **f)
+        ),
+    )
+    event = sqs_event(world)
+    assert handle(event, runtime(world, aligner=Misaligned())) == {
+        "batchItemFailures": [{"itemIdentifier": "m-0"}]
+    }
+    assert world.repo.get_snapshot("img-2").job_status is JobStatus.PROCESSING
+    assert len(world.queue) == 1
+
+
+def test_kept_proposal_message_is_not_deleted_by_lambda(world: World, monkeypatch):
+    key = f"reference/{LOT}/V1/abc"
+    world.adapters.object_store.put(key, b"photo", "image/jpeg")
+    world.repo.update_viewpoint(LOT, "V1", reference_image_key=key)
+    world.repo.put_proposal_run(
+        ProposalRun(
+            lot_id=LOT,
+            view_id="V1",
+            run_id="r1",
+            reference_image_key=key,
+            requested_by="admin@example.edu",
+            requested_at=T0,
+        )
+    )
+    world.queue.send(ProposalJobMessage(lot_id=LOT, view_id="V1", run_id="r1").model_dump_json())
+    real = world.repo.transition_proposal_run
+
+    def lose_the_final_transition(lot_id, view_id, run_id, expected, to, **fields):
+        if to is ProposalStatus.COMPLETE:
+            return False
+        return real(lot_id, view_id, run_id, expected, to, **fields)
+
+    monkeypatch.setattr(world.repo, "transition_proposal_run", lose_the_final_transition)
+    result = handle(sqs_event(world), runtime(world, proposer=FakeProposer()))
+    assert result == {"batchItemFailures": [{"itemIdentifier": "m-0"}]}
+    assert len(world.queue) == 1

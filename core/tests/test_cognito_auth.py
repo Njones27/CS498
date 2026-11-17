@@ -25,6 +25,7 @@ def id_token(key=KEY, **overrides) -> str:
     claims = {
         "sub": "5f0c2d0e-user",
         "email": "admin@example.edu",
+        "email_verified": True,
         "cognito:groups": ["admin"],
         "token_use": "id",
         "iss": ISSUER,
@@ -71,6 +72,9 @@ def test_expired_token_is_flagged_not_rejected(verifier):
         {"iss": "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_Other"},
         {"token_use": "access"},
         {"email": None},
+        {"email_verified": False},
+        {"email_verified": None},
+        {"email_verified": "true"},
         {"exp": None},
         {"cognito:groups": "admin"},
     ],

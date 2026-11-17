@@ -1,6 +1,6 @@
 # Deploys the prod stage to AWS and smoke-tests it once CI has passed for a push to main (a merged pull request).
 # A commit whose checks fail is never deployed, and pull requests are only checked (ci.yml): nothing reaches AWS
-# before it is merged. Can also be run by hand from the Actions tab, which deploys main as it is.
+# before it is merged. Can also be run by hand from the Actions tab, on main only, which deploys main as it is.
 name: Deploy
 
 on:
@@ -18,7 +18,7 @@ jobs:
   prod:
     # `event == push` matters: a pull request from a fork's own `main` branch also completes a CI run "on main".
     if: >-
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
       || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     uses: ./.github/workflows/deploy-stage.yml
     with:

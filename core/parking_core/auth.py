@@ -138,6 +138,10 @@ class CognitoVerifier:
         groups = claims.get(COGNITO_GROUPS_CLAIM) or []
         if claims.get("token_use") != "id" or not isinstance(email, str):
             return None
+        # A signed-in user may change their own email attribute; until the new address is
+        # verified it must not become the name admin actions are recorded under.
+        if claims.get("email_verified") is not True:
+            return None
         if not isinstance(groups, list):
             return None
         return Principal(email=email, groups=[str(g) for g in groups], expired=expired)

@@ -125,7 +125,7 @@ delivered.
 ## What it costs
 
 Everything is pay-per-use and a pilot stays inside the free tiers apart from a few dollars: the worker images in
-ECR (about $0.20 a month each, five kept), five CloudWatch alarms ($0.10 each) and Lambda time for scoring (a
+ECR (about $0.20 a month each, five kept), five CloudWatch alarms ($0.10 each), one custom metric ($0.30) and Lambda time for scoring (a
 photo takes 10 to 20 s at 3 GB, about $0.001). The budgets email at 80% of $10 and of $25.
 
 ## How fast photos are scored
@@ -142,13 +142,12 @@ the API the rest; `setup_initial.sh` prints the command that requests the usual 
 ## Alarms
 
 All five email the alert address: `JobsExhausted` (a photo or Find stalls job failed on all three attempts and
-was marked failed), `JobsDeadLettered` (a job's message was set aside because the worker was killed on every
-delivery; that job is left unfinished, so use Retry on its snapshot), `WorkerErrors`, `ApiErrors` and `Api5xx`.
+was marked failed), `JobsDeadLettered` (a job's message was set aside after five deliveries because the worker kept being killed; that job is left unfinished, so use Retry on its snapshot), `WorkerErrors`, `ApiErrors` and `Api5xx`.
 
 ## Security notes
 
 - The API verifies Cognito ID tokens itself (`core/parking_core/auth.py`): signature against the pool's keys,
-  issuer, audience, `token_use`. The dev login and its public secret cannot run here: `APP_ENV=aws` refuses
+  issuer, audience, `token_use`, and a verified email (`create_user.sh` marks it verified). The dev login and its public secret cannot run here: `APP_ENV=aws` refuses
   `AUTH_MODE=dev`, and `/auth/login` answers 404.
 - Accounts are created by an administrator only. The web client has no secret and allows the password flow only.
   The `admin` group is read from the token, so removing someone from it (or disabling them) takes effect when

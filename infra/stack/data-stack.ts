@@ -11,8 +11,12 @@ import { AppContext, StackConfig } from '../lib/app-context';
 import { BaseStack } from '../lib/base-stack';
 import { configBoolean, configNumber, configStringList } from '../lib/config-values';
 
-/** The worker gives up on a job after this many deliveries (MAX_ATTEMPTS in worker/parking_worker/handler.py). */
-export const MAX_RECEIVE_COUNT = 3;
+/**
+ * Deliveries before SQS sets a message aside. More than the worker's own limit (MAX_ATTEMPTS = 3 in
+ * worker/parking_worker/handler.py), which marks a job failed and deletes its message: a delivery that never ran
+ * the job (not claimable yet, a killed invocation) counts here too and must not cost the job its last attempt.
+ */
+export const MAX_RECEIVE_COUNT = 5;
 
 export class DataStack extends BaseStack {
     public readonly table: dynamodb.Table;

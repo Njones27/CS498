@@ -30,27 +30,36 @@ use_profile "$APP_CONFIG"
 require_account "$APP_CONFIG"
 POOL_ID="$(stage_parameter "$PREFIX" UserPoolId)"
 
-if aws cognito-idp admin-get-user --user-pool-id "$POOL_ID" --username "$EMAIL" >/dev/null 2>&1; then
-  echo "$EMAIL already has an account in $PREFIX-Users; updating it."
-else
-  # SUPPRESS: no invitation email with a temporary password; the password is set below.
-  aws cognito-idp admin-create-user --user-pool-id "$POOL_ID" --username "$EMAIL" --message-action SUPPRESS \
-    --user-attributes Name=email,Value="$EMAIL" Name=email_verified,Value=true >/dev/null
-  echo "Created $EMAIL in $PREFIX-Users."
-fi
-
-read -r -s -p "Password for $EMAIL: " PASSWORD
+# Asked before anything is created, so a typo or Ctrl-C here changes nothing. IFS= keeps the password exactly as typed.
+IFS= read -r -s -p "Password for $EMAIL: " PASSWORD
 echo
-read -r -s -p "Again: " PASSWORD_AGAIN
+IFS= read -r -s -p "Again: " PASSWORD_AGAIN
 echo
 if [ "$PASSWORD" != "$PASSWORD_AGAIN" ]; then
   echo "The passwords differ; nothing changed. Run this again to set one." >&2
+  exit 1
+fi
+
+if LOOKUP="$(aws cognito-idp admin-get-user --user-pool-id "$POOL_ID" --username "$EMAIL" 2>&1)"; then
+  echo "$EMAIL already has an account in $PREFIX-Users; updating it."
+elif [[ "$LOOKUP" == *UserNotFoundException* ]]; then
+  # SUPPRESS: no invitation email with a temporary password; the password is set below. The API accepts only
+  # tokens whose email is verified, and an administrator typing the address here is that verification.
+  aws cognito-idp admin-create-user --user-pool-id "$POOL_ID" --username "$EMAIL" --message-action SUPPRESS \
+    --user-attributes Name=email,Value="$EMAIL" Name=email_verified,Value=true >/dev/null
+  echo "Created $EMAIL in $PREFIX-Users."
+else
+  echo "$LOOKUP" >&2
   exit 1
 fi
 # Through a file only this user can read, deleted on the way out, not as an argument: arguments show in the
 # machine's process list. (The AWS CLI cannot read --cli-input-json from a pipe.)
 REQUEST="$(umask 077 && mktemp)"
 trap 'rm -f "$REQUEST"' EXIT
+# bash skips the EXIT trap when a signal kills it (Ctrl-C, a closed terminal): turn those into exits.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 POOL_ID="$POOL_ID" EMAIL="$EMAIL" PASSWORD="$PASSWORD" node -e '
   const { POOL_ID, EMAIL, PASSWORD } = process.env;
   process.stdout.write(JSON.stringify({ UserPoolId: POOL_ID, Username: EMAIL, Password: PASSWORD, Permanent: true }));

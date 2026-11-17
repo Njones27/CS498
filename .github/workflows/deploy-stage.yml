@@ -57,6 +57,15 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
+      # A CI run that is re-run or finishes late must not put an older commit back over a newer deploy.
+      - name: Deploy only the tip of main
+        run: |
+          tip="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [ "$(git rev-parse HEAD)" != "$tip" ]; then
+            echo "::error::$(git rev-parse --short HEAD) is no longer the tip of main (${tip:0:7}); that commit's own run deploys it."
+            exit 1
+          fi
+
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           version: "0.12.23"

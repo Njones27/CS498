@@ -80,15 +80,18 @@ describe('the prod stage', () => {
         });
     });
 
-    it('sets a job aside after three deliveries and never redelivers one that is still running', () => {
+    it('sets a job aside only after the worker had its attempts and never redelivers one that is still running', () => {
         template('data').hasResourceProperties('AWS::SQS::Queue', {
             VisibilityTimeout: 300,
             RedrivePolicy: Match.objectLike({ maxReceiveCount: MAX_RECEIVE_COUNT }),
         });
         expect(() => synth({ 'Stack.Worker.TimeoutSeconds': 301 })).toThrow(/JobVisibilityTimeoutSeconds/);
-        // The worker marks a job failed on this delivery; the queue must not set the message aside before it.
+        // The worker marks a job failed on its own last attempt; the queue must not set the message aside before
+        // that, and leaves room for deliveries that never ran the job.
         const worker = fs.readFileSync(path.resolve(__dirname, '../../worker/parking_worker/handler.py'), 'utf8');
-        expect(worker).toMatch(new RegExp(`^MAX_ATTEMPTS = ${MAX_RECEIVE_COUNT}$`, 'm'));
+        const maxAttempts = Number(/^MAX_ATTEMPTS = (\d+)$/m.exec(worker)?.[1]);
+        expect(maxAttempts).toBeGreaterThan(0);
+        expect(MAX_RECEIVE_COUNT).toBeGreaterThan(maxAttempts);
     });
 
     it('has no self sign-up and a password-only web client without a secret', () => {
