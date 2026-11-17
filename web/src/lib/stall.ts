@@ -49,7 +49,10 @@ export function stallPoints(r: Rect, skewDeg?: number | null, row?: [number, num
   return pts.map(([x, y]) => `${Math.round(x * 100) / 100},${Math.round(y * 100) / 100}`).join(' ')
 }
 
-/** Each row's left and right ends (by space id): spaces side by side at the same height and depth. */
+/**
+ * Each row's left and right ends (by space id): spaces side by side at the same height and depth. A stall
+ * on its own is no row: it has no ends, so it is drawn as the whole leaning stall, not cut on both sides.
+ */
 export function rowEnds(spaces: { spaceId: string; rect: Rect }[]): Map<string, [number, number]> {
   const rows = new Map<string, { ids: string[]; lo: number; hi: number }>()
   for (const s of spaces) {
@@ -61,6 +64,6 @@ export function rowEnds(spaces: { spaceId: string; rect: Rect }[]): Map<string, 
     rows.set(key, row)
   }
   const ends = new Map<string, [number, number]>()
-  for (const row of rows.values()) for (const id of row.ids) ends.set(id, [row.lo, row.hi])
+  for (const row of rows.values()) if (row.ids.length > 1) for (const id of row.ids) ends.set(id, [row.lo, row.hi])
   return ends
 }

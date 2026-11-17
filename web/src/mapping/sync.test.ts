@@ -378,6 +378,27 @@ describe('photo <-> schematic sync', () => {
     expect(added).toMatchObject({ label: 'B-05', rect: cellRect(grid, { row: 1, col: 4 }) })
   })
 
+  // Spaces with names, not row numbers: the photo's rows can't be read (photoCell), so the box is placed
+  // through the photo-to-map fit, as on a photo taken at an angle.
+  const named = (draft: DraftLayout): DraftLayout => ({ ...draft, spaces: draft.spaces.map((s, i) => ({ ...s, label: `Bay ${i}` })) })
+
+  it('a box drawn where a space already is takes the nearest free cell, not a spot off the grid', () => {
+    const grid = fitGrid(gridDraft().spaces)
+    // Mostly over the space in B-04's cell (x 370..470).
+    const { space: added } = addSpaceFromOutline(named(gridDraft()), 'V1', outlineOf({ x: 400, y: 245, w: 90, h: 100 }), grid)
+    expect(added).toMatchObject({ label: 'B-05', rect: cellRect(grid, { row: 1, col: 4 }) })
+  })
+
+  it('a box drawn just left of column 1 goes into the free first cell', () => {
+    const full = gridDraft()
+    const grid = fitGrid(full.spaces)
+    const v = full.viewpoints[0]
+    const { 'B-01': _, ...outlines } = v.outlines
+    const draft = named({ ...full, spaces: full.spaces.filter((s) => s.spaceId !== 'B-01'), viewpoints: [{ ...v, outlines }] })
+    const { space: added } = addSpaceFromOutline(draft, 'V1', outlineOf({ x: -30, y: 245, w: 100, h: 110 }), grid)
+    expect(added).toMatchObject({ label: 'B-01', rect: cellRect(grid, { row: 1, col: 0 }) })
+  })
+
   it('a box across cells on the schematic adds one space per free cell', () => {
     const draft = gridDraft()
     const grid = fitGrid(draft.spaces)

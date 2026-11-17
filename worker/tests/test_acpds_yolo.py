@@ -41,6 +41,7 @@ W, H = 100, 100
 SPACE = [(0.2, 0.2), (0.6, 0.2), (0.6, 0.6), (0.2, 0.6)]
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
+LEAF_BGR = (40, 90, 60)  # dark, saturated green: hue 96 degrees, saturation 0.56, value 0.35
 
 
 def png(bgr: np.ndarray) -> bytes:
@@ -265,6 +266,30 @@ def test_cut_off_stall_is_scored_on_the_part_in_view_and_only_ever_occupied():
     assert decide_state(looks_free.acpds_score, 0.0, False, lenient) == SpaceState.UNKNOWN
 
 
+def test_stall_under_a_tree_gets_no_acpds_score_and_is_unknown_unless_a_car_is_seen():
+    """Leaves hide the stall: ACPDS would be scoring the tree, so it is not asked. The stall
+    is still in frame; a car the detector sees there marks it OCCUPIED, else it is UNKNOWN."""
+    torch = pytest.importorskip("torch")
+    photo = blank()
+    photo[:] = (120, 120, 120)  # asphalt
+    photo[20:60, 20:60] = LEAF_BGR  # a tree over the first stall
+    clear = [(0.6, 0.2), (0.9, 0.2), (0.9, 0.6), (0.6, 0.6)]
+    fake = FakeAcpds(logits=torch.tensor([[5.0, 0.0]]))  # the clear stall looks empty
+    out = scorer(acpds=fake).score(png(photo), [outline("TREE", SPACE), outline("CLEAR", clear)])
+
+    assert len(fake.calls) == 1 and tuple(fake.calls[0][1].shape) == (1, 4, 2)  # only CLEAR
+    assert out[0].acpds_score is None and out[0].in_frame and out[1].acpds_score < 0.01
+    cutoffs = Cutoffs()
+    assert decide_state(None, out[0].car_overlap, True, cutoffs) == SpaceState.UNKNOWN
+    lenient = cutoffs.model_copy(update={"require_car_check": False})
+    assert decide_state(None, out[0].car_overlap, True, lenient) == SpaceState.UNKNOWN
+    # A car seen in the stall (through or beside the leaves) still marks it OCCUPIED.
+    parked = scorer(acpds=FakeAcpds(), detector=FakeDetector([car((20, 20, 60, 60))]))
+    seen = parked.score(png(photo), [outline("TREE", SPACE)])[0]
+    assert seen.acpds_score is None and seen.car_overlap == 1.0
+    assert decide_state(None, seen.car_overlap, True, cutoffs) == SpaceState.OCCUPIED
+
+
 def test_zero_area_space_still_gets_acpds_score():
     pytest.importorskip("torch")
     degenerate = [(0.3, 0.3)] * 4
@@ -445,13 +470,13 @@ def test_model_version_names_weights_mode_and_cutoffs():
     assert s.model_version == (
         "acpds_yolo|acpds=96901e9003a3|yolo=401cea9ab23a|overlap=box_lower_half"
         "|low=0.25|high=0.75|overlap_cut=0.3|margin=0.05|require_car_check=True"
-        "|yolo_conf=0.25|imgsz=1280|input_res=native"
+        "|yolo_conf=0.25|imgsz=1280|input_res=native|foliage=0.5:h50-160:s0.2:v0.7"
     )
     other = scorer(
         yolo_conf=0.4, yolo_imgsz=640, input_res=720, cutoffs=Cutoffs(require_car_check=False)
     )
     assert other.model_version.endswith(
-        "|require_car_check=False|yolo_conf=0.4|imgsz=640|input_res=720"
+        "|require_car_check=False|yolo_conf=0.4|imgsz=640|input_res=720|foliage=0.5:h50-160:s0.2:v0.7"
     )
 
 

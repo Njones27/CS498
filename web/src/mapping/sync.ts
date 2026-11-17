@@ -1,8 +1,8 @@
 import { MIN_SIDE, clearOf, medianSize } from './schematic/geometry'
 import { addSpace, addSpaceAt, addSpacesAt, fitSchematic, leanLikeRows, updateSpace, type Grown } from './schematic/edits'
-import { applyLabels, cellAt, cellLabel, cellRect, cellTaken, labelDigits, relabelMoved, rowIndex, type Cell, type Grid } from './schematic/grid'
+import { applyLabels, cellAt, cellLabel, cellRect, cellTaken, freeCellNear, labelDigits, relabelMoved, rowIndex, type Cell, type Grid } from './schematic/grid'
 import { parseLabel } from './schematic/labels'
-import { outlineLike, photoCell, placeFromPhoto } from './photoGrid'
+import { outlineLike, photoCell, photoRowSlot, placeFromPhoto, placeInPhotoRow } from './photoGrid'
 import { cutByBorder, isValidQuad, orderClockwise } from './photo/geom'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, Outline, Point } from './types'
 
@@ -432,16 +432,24 @@ export function followOutline(
   const space = after.spaces.find((s) => s.spaceId === spaceId)
   const old = vBefore?.outlines[spaceId]
   const now = vAfter?.outlines[spaceId]
-  if (!vBefore || !old || !now || !space || space.retired) return unchanged
-  const m = photoToSchematic(before, vBefore)
-  const b0 = m && mappedBox(m, old)
-  const b1 = m && mappedBox(m, now)
-  if (!b0 || !b1) return unchanged
+  if (!vBefore || !vAfter || !old || !now || !space || space.retired) return unchanged
   // Move or reshape is decided on the photo itself: through a perspective map, a plain move of an
   // outline changes its mapped size a little, which must not count as a resize.
   const [w0, h0] = photoSize(old)
   const [w1, h1] = photoSize(now)
   const isMove = Math.abs(w1 - w0) <= 0.02 * w0 + 1e-4 && Math.abs(h1 - h0) <= 0.02 * h0 + 1e-4
+  // A photo whose rows and columns can't be read (rows converging) still shows which two neighbours
+  // of a row the outline now sits between: the space goes there, whatever the fit makes of it.
+  const photoTo = grid && isMove ? photoCell(after, vAfter, now, spaceId) : null
+  const inRow = grid && isMove && snap && !photoTo ? placeInPhotoRow(after, viewId, spaceId, grid) : null
+  if (inRow) {
+    if (inRow.moved.length === 0) return { ...unchanged, note: inRow.note }
+    return { ...fitSchematic(followRects(after, inRow.draft, inRow.moved, viewId)), note: inRow.note }
+  }
+  const m = photoToSchematic(before, vBefore)
+  const b0 = m && mappedBox(m, old)
+  const b1 = m && mappedBox(m, now)
+  if (!b0 || !b1) return unchanged
   const { x, y, w, h } = space.rect
   let rect: DraftRect
   if (isMove) {
@@ -465,7 +473,6 @@ export function followOutline(
     // The cell is read off the photo (photoCell) when it can be: the schematic may draw a row stretched
     // or numbered from the wrong column. Otherwise it is where the rect lands on the schematic.
     const photoFrom = photoCell(before, vBefore, old, spaceId)
-    const photoTo = photoCell(after, vAfter, now, spaceId)
     // Cells by the column the label should name (a row may be numbered one off from the lot's columns).
     const [from, to] =
       photoFrom && photoTo
@@ -578,15 +585,35 @@ export function addSpaceFromOutline(
       renumbered: placed.renumbered,
     }
   }
+  // The photo can't be read as rows and columns, but the box sits between two neighbours of a row: it
+  // goes there, and the spaces in the way move up one.
+  const slot = grid && !fromPhoto ? photoRowSlot(draft, view, outline) : null
+  if (grid && slot) {
+    const added = addSpaceAt(draft, cellRect(grid, { row: slot.row, col: slot.num - 1 }))
+    const id = added.space.spaceId
+    const shifted = { ...grid, x0: grid.x0 + added.dx, y0: grid.y0 + added.dy }
+    const inRow = placeInPhotoRow(withOutline(added.draft, viewId, id, outline), viewId, id, shifted)
+    if (inRow && inRow.moved.length > 0) {
+      const grown = fitSchematic(inRow.draft)
+      const next = proposeOutlines(grown.draft, [id])
+      return {
+        draft: next,
+        dx: added.dx + grown.dx,
+        dy: added.dy + grown.dy,
+        space: next.spaces.find((s) => s.spaceId === id)!,
+        note: inRow.note,
+        renumbered: inRow.moved.length > 1,
+      }
+    }
+  }
   const m = photoToSchematic(draft, view)
   const mapped = m && outlineToRect(m, outline)
   const rect = mapped && plausibleRect(draft, mapped) ? mapped : null
-  // Snapping on: the space fills the free cell it lands in and is named for it.
-  const cell = grid && rect ? cellAt(grid, rectCenter(rect)) : null
-  const cellName = cell && cellLabel(cell, labelDigits(draft.spaces))
-  const inCell = grid && cell && cellName && !cellTaken(grid, draft.spaces, cell, cellName)
-  const added = inCell
-    ? addSpaceAt(draft, cellRect(grid, cell), cellName)
+  // Snapping on: the space fills the free cell it lands in (the nearest free one of that row when a
+  // space is already there, or it lands just left of column 1) and is named for it.
+  const free = grid && rect ? freeCellNear(grid, draft.spaces, rectCenter(rect)) : null
+  const added = grid && free
+    ? addSpaceAt(draft, cellRect(grid, free.cell), free.label)
     : rect
       ? addSpaceAt(draft, clearOf(rect, draft.spaces))
       : addSpace(draft, nearestOutlined(draft, view, centroid(outline))?.spaceId ?? null)

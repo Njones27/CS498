@@ -254,6 +254,27 @@ export function cellTaken(g: Grid, spaces: DraftSpace[], cell: Cell, label: stri
   })
 }
 
+/**
+ * The free cell for a new space landing at `point`: the cell it is in, or when that one is taken (or is
+ * left of column 1), the nearest free cell of its row within two columns, with the cell's label. Null
+ * above row A, or with no free cell that near.
+ */
+export function freeCellNear(g: Grid, spaces: DraftSpace[], point: Point): { cell: Cell; label: string } | null {
+  const home = cellAt(g, point)
+  if (home.row < 0) return null
+  const digits = labelDigits(spaces)
+  const off = (c: Cell) => Math.abs(cellRect(g, c).x + g.boxW / 2 - point[0])
+  const options = [0, -1, 1, -2, 2]
+    .map((d) => ({ row: home.row, col: home.col + d }))
+    .filter((c) => c.col >= 0)
+    .sort((a, b) => off(a) - off(b))
+  for (const cell of options) {
+    const label = cellLabel(cell, digits)!
+    if (!cellTaken(g, spaces, cell, label)) return { cell, label }
+  }
+  return null
+}
+
 /** Whether a label may be replaced by a cell label: a row-number label or a blank one, never a name like "Gate". */
 const renamable = (label: string) => !label.trim() || parseLabel(label) !== null
 
@@ -334,6 +355,50 @@ export function insertAtRowStart(draft: DraftLayout, g: Grid, spaceId: string, r
     return p ? { ...s, label: formatLabel(p.row, p.num + 1, p.digits), rect: cellRect(g, { row, col: p.num }) } : s
   })
   return { ...draft, spaces }
+}
+
+/**
+ * `spaceId` takes number `col` + 1 of `row`, in that cell: for a space that belongs between two
+ * neighbours of a row. When another active space has that number, it and the row's spaces numbered right
+ * after it move up one number and one cell to make room, only as far as the first free number (the
+ * space's own old number counts as free). `shifted` lists those. Null when the row has no letter, or a
+ * space that doesn't shift (a name like "Gate", another row's, one numbered further on) sits in a cell
+ * that is needed.
+ */
+export function insertInRow(
+  draft: DraftLayout,
+  g: Grid,
+  spaceId: string,
+  row: number,
+  col: number,
+): { draft: DraftLayout; shifted: string[] } | null {
+  const letter = rowLetter(row)
+  const space = draft.spaces.find((s) => s.spaceId === spaceId)
+  if (!letter || !space || col < 0) return null
+  const digits = Math.max(2, parseLabel(space.label)?.digits ?? labelDigits(draft.spaces))
+  const byNumber = new Map<number, DraftSpace>()
+  for (const s of draft.spaces) {
+    const p = s.retired || s.spaceId === spaceId ? null : parseLabel(s.label)
+    if (p && p.row === letter) byNumber.set(p.num, s)
+  }
+  // The run of numbers in use from the one wanted: each moves up one, into the free number after it.
+  const shifting = new Map<string, number>()
+  for (let n = col + 1; byNumber.has(n); n++) shifting.set(byNumber.get(n)!.spaceId, n + 1)
+  const needed = new Set([col, ...[...shifting.values()].map((n) => n - 1)])
+  const blocked = draft.spaces.some((s) => {
+    if (s.retired || s.spaceId === spaceId || shifting.has(s.spaceId)) return false
+    const c = cellAt(g, center(s.rect))
+    return c.row === row && needed.has(c.col)
+  })
+  if (blocked) return null
+  const spaces = draft.spaces.map((s) => {
+    if (s.spaceId === spaceId) return { ...s, label: formatLabel(letter, col + 1, digits), rect: cellRect(g, { row, col }) }
+    const n = shifting.get(s.spaceId)
+    if (n === undefined) return s
+    const p = parseLabel(s.label)!
+    return { ...s, label: formatLabel(p.row, n, p.digits), rect: cellRect(g, { row, col: n - 1 }) }
+  })
+  return { draft: { ...draft, spaces }, shifted: [...shifting.keys()] }
 }
 
 /** The draft with `labels` (space id -> label) applied. */

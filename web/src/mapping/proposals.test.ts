@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   acceptProposals,
+  addLeftOutCars,
   alignRowsToPhoto,
   area,
   findWideStalls,
@@ -15,11 +16,12 @@ import {
   pendingProposals,
   touchesPhotoEdge,
   rejectProposals,
+  STRAY_EVIDENCE,
   type ProposedStall,
 } from './proposals'
 import { cellRect, fitGrid } from './schematic/grid'
 import { afterRectChange, photoToSchematic, proposeOutlines } from './sync'
-import { straightenFromPhoto } from './straighten'
+import { straightenFoundCars, straightenFromPhoto } from './straighten'
 import { pklotFixture } from './fixtures/pklot'
 import { PKLOT_CAR_STALLS } from './fixtures/pklotCars'
 import type { DraftLayout, DraftSpace, Outline, Point } from './types'
@@ -666,5 +668,64 @@ describe('stalls near an angled camera are not taken for wide bays', () => {
   it('an overhead photo (every stall drawn the same size) measures every stall as 1', () => {
     const sizes = groundSizes([0, 1, 2, 3].map((k) => box(0.1 + 0.05 * k, 0.1 + 0.2 * (k % 2), 0.05, 0.1)))
     for (const s of sizes) expect(s).toBeCloseTo(1, 6)
+  })
+})
+
+describe('cars left out of the rows', () => {
+  /** A new lot laid out from the cars on the UFPR04 photo: 39 cars in 7 rows, 8 left out. */
+  function laidOut() {
+    const empty: DraftLayout = {
+      lotId: 'new',
+      revision: 1,
+      basedOnVersion: null,
+      updatedAt: '2026-11-12T12:00:00Z',
+      updatedBy: null,
+      schematic: { width: 1000, height: 600 },
+      spaces: [],
+      viewpoints: [{ viewId: 'V1', name: 'Camera', referenceImage: { url: '/p', width: 1280, height: 720 }, outlines: {}, outlineReview: {} }],
+    }
+    const merged = mergeProposals(empty, 'V1', PKLOT_CAR_STALLS).draft
+    const laid = straightenFoundCars(merged, 'V1', PKLOT_CAR_STALLS.flatMap((s) => s.paint ?? []))
+    if (typeof laid === 'string') throw new Error(laid)
+    const found = merged.viewpoints[0].outlines
+    return { laid, leftOut: laid.droppedIds.map((id) => found[id]) }
+  }
+  const middle = (o: Outline) => [o.reduce((t, p) => t + p[0], 0) / 4, o.reduce((t, p) => t + p[1], 0) / 4]
+
+  it('go back where the photo puts them, as the weakest proposals, each in a grid cell', () => {
+    const { laid, leftOut } = laidOut()
+    const grid = fitGrid(laid.draft.spaces)
+    const back = addLeftOutCars(laid.draft, 'V1', leftOut, grid)
+    // Six land in a cell; the two parked along the road map above row A and stay out.
+    expect([back.added, back.skipped, back.dx, back.dy]).toEqual([6, 2, 0, 0])
+    const view = back.draft.viewpoints[0]
+    const added = back.draft.spaces.filter((sp) => !laid.draft.spaces.some((was) => was.spaceId === sp.spaceId))
+    expect(added.map((sp) => sp.label).sort()).toEqual(['B-02', 'C-01', 'D-01', 'G-09', 'H-01', 'H-02'])
+    for (const sp of added) {
+      expect(view.outlineReview[sp.spaceId]).toEqual({ source: 'proposed', status: 'pending', evidence: STRAY_EVIDENCE, newSpace: true })
+      expect([sp.rect.w, sp.rect.h]).toEqual([grid.boxW, grid.boxH])
+    }
+    // The two cars past the ends of rows B and C, the ones first drawn in by hand: B-02 and C-01,
+    // leaning like their rows.
+    const at = (x: number, y: number) =>
+      added.find((sp) => {
+        const [mx, my] = middle(view.outlines[sp.spaceId])
+        return Math.abs(mx - x) < 0.02 && Math.abs(my - y) < 0.02
+      })
+    expect(at(0.046, 0.613)).toMatchObject({ label: 'B-02', skewDeg: 45 })
+    expect(at(0.057, 0.732)).toMatchObject({ label: 'C-01', skewDeg: 45 })
+    // They head the review list, and the spaces laid out before are untouched.
+    expect(pendingProposals(view).slice(0, 6).map((p) => p.evidence)).toEqual(Array(6).fill(STRAY_EVIDENCE))
+    for (const was of laid.draft.spaces) expect(back.draft.spaces.find((sp) => sp.spaceId === was.spaceId)).toEqual(was)
+  })
+
+  it('stay out when they land in no cell, and with none to add nothing changes', () => {
+    const { laid, leftOut } = laidOut()
+    const grid = fitGrid(laid.draft.spaces)
+    const road = leftOut.filter((o) => middle(o)[1] < 0.3 && middle(o)[0] < 0.2) // the two along the road
+    expect(road).toHaveLength(2)
+    expect(addLeftOutCars(laid.draft, 'V1', road, grid)).toEqual({ draft: laid.draft, dx: 0, dy: 0, added: 0, skipped: 2 })
+    expect(addLeftOutCars(laid.draft, 'V1', [], grid)).toEqual({ draft: laid.draft, dx: 0, dy: 0, added: 0, skipped: 0 })
+    expect(addLeftOutCars(laid.draft, 'V9', leftOut, grid).added).toBe(0)
   })
 })

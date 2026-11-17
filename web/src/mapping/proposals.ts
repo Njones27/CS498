@@ -2,7 +2,7 @@ import type { components } from '../api/types.gen'
 import { MARGIN, MIN_SIDE, yBelowAll } from './schematic/geometry'
 import { addSpacesAt, deleteSpace, fitSchematic, leanLikeRows, removeSpaces, type Grown } from './schematic/edits'
 import { formatLabel, nextRowStart, parseLabel } from './schematic/labels'
-import { type Grid, shiftGrid } from './schematic/grid'
+import { cellAt, cellRect, type Grid, shiftGrid } from './schematic/grid'
 import { touchesPhotoEdge } from './photo/geom'
 import { addSpaceFromOutline, centroid, outlineToRect, photoToSchematic } from './sync'
 import type { DraftLayout, DraftRect, DraftSpace, DraftViewpoint, OutlineReview, Outline, Point } from './types'
@@ -534,6 +534,62 @@ export function mergeProposals(
   next = leanLikeRows(next, created)
   next = alignRowsToPhoto(next, viewId)
   return { draft: next, dx, dy, added: created.size, attached: found.size - created.size, skipped, rejected, wide, createdIds: created }
+}
+
+/**
+ * Evidence given to a car left out of the rows and put back: under any found car's own (those run from
+ * about 0.13 up), so these head the weakest-first review list.
+ */
+export const STRAY_EVIDENCE = 0.05
+
+/**
+ * Put the cars Find stalls left out of the rows back where the photo puts them (laying a lot out from its
+ * parked cars drops a car standing alone or in a pair: straightenFoundCars). Each goes in as a box drawn
+ * on it would (`addSpaceFromOutline`), but as a pending proposal for the admin to accept or reject, the
+ * weakest of all so these are reviewed first. The cars nearest the stalls already outlined go first, so
+ * later ones are placed against them. A car stays out when it lands in no grid cell (above row A, or
+ * with no free cell near), or when making room for it would move or rename other spaces (rejecting it
+ * later would not put those back): `skipped` counts both.
+ */
+export function addLeftOutCars(
+  draft: DraftLayout,
+  viewId: string,
+  cars: Outline[],
+  grid: Grid,
+): Grown & { added: number; skipped: number } {
+  const view = draft.viewpoints.find((v) => v.viewId === viewId)
+  if (!view || cars.length === 0) return { draft, dx: 0, dy: 0, added: 0, skipped: cars.length }
+  const outlined = Object.values(view.outlines).map((o) => centroid(o))
+  const byReach = cars
+    .map((car) => {
+      const [x, y] = centroid(car)
+      return { car, reach: outlined.reduce((best, [ox, oy]) => Math.min(best, Math.hypot(ox - x, oy - y)), Infinity) }
+    })
+    .sort((a, b) => a.reach - b.reach)
+  let next = draft
+  let moved = grid
+  let [dx, dy, added] = [0, 0, 0]
+  for (const { car } of byReach) {
+    const placed = addSpaceFromOutline(next, viewId, car, moved)
+    if (placed.renumbered) continue
+    const shifted = shiftGrid(moved, placed.dx, placed.dy)
+    const { spaceId, rect } = placed.space
+    const cell = cellAt(shifted, [rect.x + rect.w / 2, rect.y + rect.h / 2])
+    const box = cellRect(shifted, cell)
+    const inCell =
+      cell.row >= 0 && cell.col >= 0 && Math.abs(rect.x - box.x) < 0.5 && Math.abs(rect.y - box.y) < 0.5 && rect.w === box.w && rect.h === box.h
+    if (!inCell) continue
+    const review: OutlineReview = { source: 'proposed', status: 'pending', evidence: STRAY_EVIDENCE, newSpace: true }
+    next = {
+      ...placed.draft,
+      viewpoints: placed.draft.viewpoints.map((v) => (v.viewId === viewId ? { ...v, outlineReview: { ...v.outlineReview, [spaceId]: review } } : v)),
+    }
+    moved = shifted
+    dx += placed.dx
+    dy += placed.dy
+    added++
+  }
+  return { draft: next, dx, dy, added, skipped: cars.length - added }
 }
 
 /** The view's outlines still waiting for review, weakest evidence first (those without a score last). */

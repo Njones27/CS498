@@ -9,8 +9,10 @@ import {
   cellsIn,
   cellTaken,
   fitGrid,
+  freeCellNear,
   gridInView,
   insertAtRowStart,
+  insertInRow,
   gridSizes,
   labelDigits,
   relabelMoved,
@@ -149,6 +151,31 @@ describe('cells', () => {
     expect(cellTaken(G, spaces, { row: 1, col: 0 }, 'B-01', 'B-01')).toBe(false)
     expect(cellTaken(G, spaces, { row: 1, col: 2 }, 'B-03')).toBe(true)
     expect(cellTaken(G, spaces, { row: 1, col: 1 }, 'B-02')).toBe(false)
+  })
+})
+
+describe('freeCellNear', () => {
+  // Row B's cells are y 25..115; column n is x 30 + (n - 1) * 45, 45 wide. B-01 to B-05 are taken.
+  const at = (col: number): [number, number] => [30 + col * 45 + 22.5, 60]
+
+  it('is the cell a new space lands in when that is free', () => {
+    expect(freeCellNear(G, lotSpaces(), at(5))).toEqual({ cell: { row: 1, col: 5 }, label: 'B-06' })
+  })
+
+  it('is the nearest free cell of the row when the one it lands in is taken', () => {
+    expect(freeCellNear(G, lotSpaces(), at(4))).toEqual({ cell: { row: 1, col: 5 }, label: 'B-06' })
+    expect(freeCellNear(G, lotSpaces(), at(3))?.label).toBe('B-06')
+  })
+
+  it('is column 1 for a space landing just left of it', () => {
+    const noB01 = lotSpaces().filter((s) => s.label !== 'B-01')
+    expect(freeCellNear(G, noB01, [20, 60])).toEqual({ cell: { row: 1, col: 0 }, label: 'B-01' })
+  })
+
+  it('is null above row A, or with no free cell within two columns', () => {
+    expect(freeCellNear(G, lotSpaces(), [100, -100])).toBeNull()
+    expect(freeCellNear(G, lotSpaces(), at(2))).toBeNull()
+    expect(freeCellNear(G, lotSpaces(), [20, 60])).toBeNull() // B-01 and B-02 are taken
   })
 })
 
@@ -345,5 +372,39 @@ describe('insertAtRowStart', () => {
     const draft = davidFixture({ spaces: [at('x', 'D-07', 3, 6), at('a', 'B-01', 1, 0), at('g', 'Gate', 1, 1)] })
     expect(insertAtRowStart(draft, G, 'x', 1)).toBeNull()
     expect(insertAtRowStart(draft, G, 'x', -1)).toBeNull() // above row A
+  })
+})
+
+describe('insertInRow', () => {
+  const at = (id: string, label: string, row: number, col: number) => space(id, 0, 0, { label, rect: cellRect(G, { row, col }) })
+  const rowB = () => [at('a', 'B-01', 1, 0), at('b', 'B-02', 1, 1), at('c', 'B-03', 1, 2)]
+  const labels = (d: { spaces: { spaceId: string; label: string }[] }) => Object.fromEntries(d.spaces.map((s) => [s.spaceId, s.label]))
+
+  it('takes a free number and its cell, moving nothing else', () => {
+    const draft = davidFixture({ spaces: [...rowB(), at('x', 'D-07', 3, 6)] })
+    const { draft: next, shifted } = insertInRow(draft, G, 'x', 1, 3)!
+    expect(shifted).toEqual([])
+    expect(next.spaces.find((s) => s.spaceId === 'x')).toMatchObject({ label: 'B-04', rect: cellRect(G, { row: 1, col: 3 }) })
+  })
+
+  it('moves the spaces in the way up one, only as far as the first free number', () => {
+    const draft = davidFixture({ spaces: [...rowB(), at('e', 'B-05', 1, 4), at('x', 'D-07', 3, 6)] })
+    const { draft: next, shifted } = insertInRow(draft, G, 'x', 1, 1)!
+    expect(shifted).toEqual(['b', 'c'])
+    expect(labels(next)).toEqual({ a: 'B-01', x: 'B-02', b: 'B-03', c: 'B-04', e: 'B-05' })
+    expect(next.spaces.find((s) => s.spaceId === 'c')!.rect).toEqual(cellRect(G, { row: 1, col: 3 }))
+  })
+
+  it("counts the space's own old number as free", () => {
+    const draft = davidFixture({ spaces: [...rowB(), at('d', 'B-04', 1, 3)] })
+    const { draft: next, shifted } = insertInRow(draft, G, 'd', 1, 1)!
+    expect(shifted).toEqual(['b', 'c'])
+    expect(labels(next)).toEqual({ a: 'B-01', d: 'B-02', b: 'B-03', c: 'B-04' })
+  })
+
+  it('refuses when a space that does not shift sits in a cell that is needed', () => {
+    const draft = davidFixture({ spaces: [...rowB(), at('g', 'Gate', 1, 3), at('x', 'D-07', 3, 6)] })
+    expect(insertInRow(draft, G, 'x', 1, 1)).toBeNull()
+    expect(insertInRow(draft, G, 'x', -1, 1)).toBeNull() // above row A
   })
 })

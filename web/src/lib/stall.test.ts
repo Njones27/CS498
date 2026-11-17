@@ -30,7 +30,14 @@ describe('rowEnds', () => {
       { spaceId: 'c', rect: { x: 60, y: 80, w: 40, h: 80 } },
     ])
     expect(ends.get('a')).toEqual([20, 100])
-    expect(ends.get('c')).toEqual([60, 100])
+    expect(ends.get('b')).toEqual([20, 100])
+  })
+
+  it('gives a stall on its own no ends, so it is drawn whole rather than cut on both sides', () => {
+    const lone = { spaceId: 'c', rect: { x: 60, y: 80, w: 40, h: 80 } }
+    const ends = rowEnds([{ spaceId: 'a', rect: { x: 20, y: 0, w: 40, h: 80 } }, { spaceId: 'b', rect: { x: 60, y: 0, w: 40, h: 80 } }, lone])
+    expect(ends.has('c')).toBe(false)
+    expect(stallPoints(lone.rect, 45, ends.get('c'))).toBe('100,80 140,80 60,160 20,160')
   })
 })
 
