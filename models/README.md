@@ -24,7 +24,9 @@ Ultralytics' own downloader, so they need the `vision` extra installed. Every fi
 after download; a mismatch is deleted and reported.
 
 `MODELS_DIR` (default `models`) points the worker at this directory. Docker Compose mounts
-`./models` read-only at `/app/models`; the image never contains weights.
+`./models` read-only at `/app/models`; the image never contains weights. The one exception is the
+AWS Lambda image (`worker/Dockerfile`, target `lambda`): a Lambda has nothing to mount, so that build runs
+`download_weights.py` itself and the same SHA-256 pins apply.
 
 ## NFR-1 timing (2 CPU / 4 GB)
 

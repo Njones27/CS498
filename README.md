@@ -15,6 +15,7 @@ Design docs live in `Docs/` (High-Level Design v0.3, Milestone 1 user stories, d
 | `eval/` | Fixture photos and the benchmark script |
 | `models/` | Weight manifest (SHA-256 pins); the weights are downloaded, not committed |
 | `scripts/` | Dev runner and the weight downloader |
+| `infra/` | AWS CDK app, deploy scripts (Phase 2); `infra/local/` is the local queue's config |
 | `contract/openapi.json` | API contract exported from FastAPI; `web/` generates its types from it |
 
 ## Local development (Phase 1)
@@ -36,6 +37,21 @@ Without Docker you can still run everything in-process against in-memory adapter
 uv sync
 APP_ENV=test uv run uvicorn parking_api.main:create_app --factory --reload --port 8000
 cd web && npm install && npm run dev
+```
+
+## AWS (Phase 2)
+
+The same code runs on AWS, picked by `APP_ENV=aws`: CloudFront and S3 for the web app, API Gateway and a Lambda
+for the API, an SQS-fed Lambda container image with the real detector for the worker, DynamoDB, and Cognito for
+sign-in. It is defined with AWS CDK in [`infra/`](infra/README.md), which also covers setup, cost and teardown.
+
+Every push to `main` deploys once CI passes, through `.github/workflows/deploy.yml` (GitHub OIDC, no stored
+keys); pull requests are only checked. From a laptop with the account's credentials:
+
+```bash
+infra/script/deploy_stacks.sh config/app-config-prod.json
+infra/script/create_user.sh config/app-config-prod.json you@example.edu --admin   # a sign-in for /admin
+infra/script/seed.sh config/app-config-prod.json --lot pklot-ufpr04               # optional sample lot
 ```
 
 ## Model weights and detector
