@@ -12,6 +12,8 @@ dependencies = [
 [project.optional-dependencies]
 # The real detector (DETECTOR=acpds_yolo). The stub worker and CI unit tests run without it.
 vision = ["torch>=2.4", "torchvision>=0.19", "ultralytics>=8.4.0,<9"]
+# The Lambda runtime interface client, for the `lambda` target of worker/Dockerfile.
+lambda = ["awslambdaric>=3.0"]
 
 [build-system]
 requires = ["hatchling"]

@@ -44,6 +44,8 @@ class ProposalResult:
     outcome: Outcome
     error: str | None = None
     stalls: int = 0
+    message_kept: bool = False
+    """As `ProcessResult.message_kept`."""
 
 
 def is_proposal_message(body: str) -> bool:
@@ -99,14 +101,16 @@ def process_proposal(
     except PermanentJobError as exc:
         log.warning("Proposal run %s failed permanently: %s", job.run_id, exc)
         moved = finish(ProposalStatus.FAILED, error=str(exc), completed_at=now())
-        _settle(adapters, msg, job, moved)
-        return ProposalResult(job.run_id, "failed_permanent", str(exc))
+        kept = not _settle(adapters, msg, job, moved)
+        return ProposalResult(job.run_id, "failed_permanent", str(exc), message_kept=kept)
     except Exception as exc:
         if msg.receive_count >= MAX_ATTEMPTS:
             log.exception("Proposal run %s exhausted retries; last error: %s", job.run_id, exc)
             moved = finish(ProposalStatus.FAILED, error=EXHAUSTED_ERROR, completed_at=now())
-            _settle(adapters, msg, job, moved)
-            return ProposalResult(job.run_id, "failed_exhausted", EXHAUSTED_ERROR)
+            kept = not _settle(adapters, msg, job, moved)
+            return ProposalResult(
+                job.run_id, "failed_exhausted", EXHAUSTED_ERROR, message_kept=kept
+            )
         log.warning("Proposal run %s attempt %d failed: %s", job.run_id, msg.receive_count, exc)
         finish(ProposalStatus.PROCESSING, error=str(exc))
         return ProposalResult(job.run_id, "failed_retryable", str(exc))
@@ -120,14 +124,14 @@ def process_proposal(
     )
     if not moved:
         log.warning("Proposal run %s changed under us; COMPLETE rejected", job.run_id)
-    _settle(adapters, msg, job, moved)
+    kept = not _settle(adapters, msg, job, moved)
     log.info(
         "Proposal run %s complete: %d stalls in %.1f s",
         job.run_id,
         len(stalls),
         time.monotonic() - started,
     )
-    return ProposalResult(job.run_id, "completed", stalls=len(stalls))
+    return ProposalResult(job.run_id, "completed", stalls=len(stalls), message_kept=kept)
 
 
 def _reference_photo(adapters: Adapters, run: ProposalRun) -> bytes:
@@ -145,12 +149,13 @@ def _reference_photo(adapters: Adapters, run: ProposalRun) -> bytes:
         raise PermanentJobError(PHOTO_MISSING) from exc
 
 
-def _settle(adapters: Adapters, msg: Message, job: ProposalJobMessage, transitioned: bool) -> None:
+def _settle(adapters: Adapters, msg: Message, job: ProposalJobMessage, transitioned: bool) -> bool:
     """Delete the message once the run is finished. If our final transition lost a race,
-    keep the message unless the run is gone, replaced or finished by someone else."""
-    if transitioned:
-        adapters.queue.delete(msg.receipt)
-        return
-    run = adapters.repository.get_proposal_run(job.lot_id, job.view_id)
-    if run is None or run.run_id != job.run_id or run.status in _DONE:
-        adapters.queue.delete(msg.receipt)
+    keep the message unless the run is gone, replaced or finished by someone else.
+    True when the message was deleted."""
+    if not transitioned:
+        run = adapters.repository.get_proposal_run(job.lot_id, job.view_id)
+        if run is not None and run.run_id == job.run_id and run.status not in _DONE:
+            return False
+    adapters.queue.delete(msg.receipt)
+    return True

@@ -26,8 +26,9 @@ from pydantic import BaseModel
 from pydantic.alias_generators import to_camel
 
 from .. import keys as k
-from ..auth import HS256Verifier
+from ..auth import CognitoVerifier, HS256Verifier
 from ..errors import NotPublishedError
+from ..interfaces import AuthVerifier
 from ..models import (
     CarBox,
     ClaimResult,
@@ -249,7 +250,13 @@ def is_conditional_failure(exc: ClientError) -> bool:
 
 class S3ObjectStore:
     def __init__(self, settings: Settings) -> None:
-        cfg = Config(signature_version="s3v4", s3={"addressing_style": "path"})
+        # The emulators want path-style URLs. Real S3 gets virtual-hosted ones (bucket in the
+        # hostname), the only style AWS promises to keep serving.
+        emulated = settings.s3_endpoint_url or settings.s3_public_endpoint_url
+        cfg = Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path" if emulated else "virtual"},
+        )
         self._bucket = settings.bucket_name
         self._client = boto3.client(
             "s3", region_name=settings.aws_region, endpoint_url=settings.s3_endpoint_url, config=cfg
@@ -339,6 +346,11 @@ class SqsJobQueue:
 
     def delete(self, receipt: str) -> None:
         self._client.delete_message(QueueUrl=self._url, ReceiptHandle=receipt)
+
+    def release(self, receipt: str, delay_seconds: int = 0) -> None:
+        self._client.change_message_visibility(
+            QueueUrl=self._url, ReceiptHandle=receipt, VisibilityTimeout=max(0, delay_seconds)
+        )
 
 
 SQS_MAX_WAIT_SECONDS = 20
@@ -751,14 +763,17 @@ def viewpoint_update(fields: dict[str, object]) -> dict[str, Any]:
 
 
 def build_aws_adapters(settings: Settings) -> Adapters:
-    if settings.auth_mode == "cognito":
-        raise NotImplementedError("Cognito verifier arrives in Phase 2")
+    verifier: AuthVerifier = (
+        CognitoVerifier.from_settings(settings)
+        if settings.auth_mode == "cognito"
+        else HS256Verifier(settings.jwt_secret)
+    )
     store = S3ObjectStore(settings)
     return Adapters(
         object_store=store,
         queue=SqsJobQueue(settings),
         repository=DynamoRepository(settings, store),
-        auth_verifier=HS256Verifier(settings.jwt_secret),
+        auth_verifier=verifier,
     )
 
 

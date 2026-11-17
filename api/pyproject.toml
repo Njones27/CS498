@@ -8,6 +8,7 @@ dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.32",
   "python-multipart>=0.0.12",
+  "mangum>=0.19",  # ASGI adapter for the Lambda entry point (parking_api.lambda_handler)
 ]
 
 [build-system]

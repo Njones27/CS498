@@ -56,6 +56,9 @@ class ProcessResult:
     outcome: Outcome
     error: str | None = None
     spaces_written: int = 0
+    message_kept: bool = False
+    """The job reached this outcome but its message was left on the queue on purpose (see
+    `_settle`). The poller simply does not delete it; the Lambda entry point has to say so."""
 
 
 def process_message(
@@ -97,8 +100,8 @@ def process_message(
             attempts=msg.receive_count,
             completed_at=now(),
         )
-        _settle(adapters, msg, image_id, moved)
-        return ProcessResult(image_id, "failed_permanent", str(exc))
+        kept = not _settle(adapters, msg, image_id, moved)
+        return ProcessResult(image_id, "failed_permanent", str(exc), message_kept=kept)
     except Exception as exc:
         if msg.receive_count >= MAX_ATTEMPTS:
             log.exception("Job %s exhausted retries; last error: %s", image_id, exc)
@@ -111,8 +114,8 @@ def process_message(
                 attempts=msg.receive_count,
                 completed_at=now(),
             )
-            _settle(adapters, msg, image_id, moved)
-            return ProcessResult(image_id, "failed_exhausted", EXHAUSTED_ERROR)
+            kept = not _settle(adapters, msg, image_id, moved)
+            return ProcessResult(image_id, "failed_exhausted", EXHAUSTED_ERROR, message_kept=kept)
         log.warning("Job %s attempt %d failed, will retry: %s", image_id, msg.receive_count, exc)
         repo.transition_job(
             image_id,
@@ -141,20 +144,21 @@ def process_message(
         # Another worker changed the job while we ran (visibility timeout expired). Our
         # observation/status writes were idempotent and conditional, so nothing is lost.
         log.warning("Job %s changed under us; final COMPLETE transition rejected", image_id)
-    _settle(adapters, msg, image_id, moved)
+    kept = not _settle(adapters, msg, image_id, moved)
     log.info("Job %s complete: %d spaces", image_id, written)
-    return ProcessResult(image_id, "completed", spaces_written=written)
+    return ProcessResult(image_id, "completed", spaces_written=written, message_kept=kept)
 
 
-def _settle(adapters: Adapters, msg: Message, image_id: str, transitioned: bool) -> None:
+def _settle(adapters: Adapters, msg: Message, image_id: str, transitioned: bool) -> bool:
     """Delete the message once the job is finished. If our final transition lost a race,
-    re-read the job and keep the message unless someone else finished it."""
-    if transitioned:
-        adapters.queue.delete(msg.receipt)
-        return
-    snapshot = adapters.repository.get_snapshot(image_id)
-    if snapshot is None or snapshot.finished:
-        adapters.queue.delete(msg.receipt)
+    re-read the job and keep the message unless someone else finished it.
+    True when the message was deleted."""
+    if not transitioned:
+        snapshot = adapters.repository.get_snapshot(image_id)
+        if snapshot is not None and not snapshot.finished:
+            return False
+    adapters.queue.delete(msg.receipt)
+    return True
 
 
 def _claim(adapters: Adapters, image_id: str) -> Literal["claimed", "skip", "defer"]:

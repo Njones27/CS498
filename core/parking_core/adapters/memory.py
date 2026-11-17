@@ -154,6 +154,12 @@ class MemoryJobQueue:
         with self._lock:
             self._messages = [m for m in self._messages if m.receipt != receipt]
 
+    def release(self, receipt: str, delay_seconds: int = 0) -> None:
+        with self._lock:
+            for m in self._messages:
+                if m.receipt == receipt:
+                    m.invisible_until = self._now() + max(0, delay_seconds)
+
     # --- test helpers ---------------------------------------------------------
     def advance(self, seconds: float) -> None:
         """Move the queue's clock forward (visibility timeouts expire)."""

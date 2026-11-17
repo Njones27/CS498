@@ -1,4 +1,6 @@
-"""Dev sign-in (AUTH_MODE=dev). Cognito handles sign-in in Phase 2, so this route 404s there."""
+"""Sign-in. AUTH_MODE=dev: the API checks the password and signs the token itself. With
+AUTH_MODE=cognito the user pool does both, so /auth/login 404s and the web app reads
+/auth/config to learn where to sign in."""
 
 from __future__ import annotations
 
@@ -8,9 +10,20 @@ from fastapi import APIRouter
 from parking_core.auth import DevJwtSigner, dev_users
 
 from ..deps import NowDep, SettingsDep, error
-from ..schemas import ErrorResponse, LoginRequest, LoginResponse
+from ..schemas import AuthConfigResponse, ErrorResponse, LoginRequest, LoginResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/config", response_model=AuthConfigResponse, summary="How the web app signs in")
+def auth_config(settings: SettingsDep) -> AuthConfigResponse:
+    if settings.auth_mode == "cognito":
+        return AuthConfigResponse(
+            mode="cognito",
+            region=settings.aws_region,
+            user_pool_client_id=settings.cognito_client_id,
+        )
+    return AuthConfigResponse(mode="dev")
 
 
 @router.post(

@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     dev_user_email: str = "viewer@example.edu"
     dev_user_password: str = "viewer-password"
 
+    cognito_user_pool_id: str | None = None
+    cognito_client_id: str | None = None
+    """AUTH_MODE=cognito: the user pool whose ID tokens the API accepts, and the web client."""
+
     cutoff_low: float = 0.3
     cutoff_high: float = 0.7
     cutoff_overlap: float = 0.30
@@ -83,10 +87,13 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _guard_production(self) -> Settings:
         if self.app_env == "aws":
+            # The dev signer's secret and users are public in this repository.
             if self.auth_mode == "dev":
                 raise ValueError("AUTH_MODE=dev is not allowed with APP_ENV=aws")
-            if self.jwt_secret == "dev-only-change-me":
-                raise ValueError("JWT_SECRET must be set when APP_ENV=aws")
+            if not (self.cognito_user_pool_id and self.cognito_client_id):
+                raise ValueError(
+                    "COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID must be set when APP_ENV=aws"
+                )
         if not self.cutoff_low < self.cutoff_high:
             raise ValueError("CUTOFF_LOW must be below CUTOFF_HIGH")
         if not 0 < self.yolo_conf <= 1:

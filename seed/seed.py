@@ -1,6 +1,7 @@
 """Seed CLI: create local resources and load a lot.
 
 uv run python seed/seed.py [--lot test-lot]
+infra/script/seed.sh config/app-config-prod.json [--lot test-lot]   # the deployed AWS stage
 """
 
 from __future__ import annotations
@@ -18,7 +19,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     settings = get_settings()
-    if settings.app_env != "test":
+    # On AWS the CDK stacks own the table, bucket and queues (infra/): creating them here
+    # would overwrite the bucket's CORS rules and the queue's settings with the local ones.
+    if settings.app_env == "local":
         from parking_core.adapters.aws import ensure_resources
 
         ensure_resources(settings)
