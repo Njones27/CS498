@@ -1,0 +1,155 @@
+# Deploys one stage to AWS. Called by deploy.yml once CI has passed on main; pull requests never get here (ci.yml
+# only synthesizes, with no AWS access). Everything stage-specific comes from the GitHub environment's variables, set
+# once with the commands infra/script/setup_initial.sh prints (see infra/README.md):
+#   AWS_DEPLOY_ROLE_ARN, AWS_REGION, AWS_ACCOUNT_ID, APP_CONFIG
+# There are no secrets: the job trades GitHub's OIDC token for short-lived credentials of the deploy role.
+name: Deploy stage
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub environment to deploy
+        type: string
+        required: true
+      ref:
+        description: Commit to deploy
+        type: string
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ steps.smoke.outputs.url }}
+    # One deploy per environment at a time, never cancelled half-way. If several queue up behind it, GitHub keeps
+    # only the newest.
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      APP_CONFIG: ${{ vars.APP_CONFIG }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+    steps:
+      - name: Check environment variables
+        run: |
+          missing=0
+          for name in AWS_DEPLOY_ROLE_ARN AWS_REGION AWS_ACCOUNT_ID APP_CONFIG; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Variable $name is not set on the '$DEPLOY_ENVIRONMENT' environment (see infra/README.md)."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: "0.12.23"
+          enable-cache: true
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: infra/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            infra/package-lock.json
+            web/package-lock.json
+
+      - name: Read stage from config
+        working-directory: infra
+        run: |
+          node -e '
+            const fs = require("fs");
+            const c = require(require("path").resolve(process.env.APP_CONFIG));
+            if (c.Project.Account !== process.env.AWS_ACCOUNT_ID) {
+              console.log(`::error::${process.env.APP_CONFIG} targets account ${c.Project.Account}, but AWS_ACCOUNT_ID is ${process.env.AWS_ACCOUNT_ID}.`);
+              process.exit(1);
+            }
+            if (c.Project.Region !== process.env.AWS_REGION) {
+              console.log(`::error::${process.env.APP_CONFIG} targets region ${c.Project.Region}, but AWS_REGION is ${process.env.AWS_REGION}.`);
+              process.exit(1);
+            }
+            const prefix = `${c.Project.Name}${c.Project.Stage}`;
+            fs.appendFileSync(process.env.GITHUB_ENV, `STACK_PREFIX=${prefix}\n`);
+            console.log(`Deploying ${prefix} from ${process.env.APP_CONFIG}`);
+          '
+
+      - name: Build the web app
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build the API Lambda code
+        run: infra/script/build_api.sh
+
+      - name: Install the CDK app
+        working-directory: infra
+        run: npm ci
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: parking-${{ inputs.environment }}-${{ github.run_id }}
+
+      # Cicd (the role this job runs as) is deliberately not deployed here: only script/setup_initial.sh changes it.
+      # Same stack list as infra/script/lib.sh. The worker image (torch, the models) is rebuilt and pushed only when
+      # core/, worker/ or the lockfile changed; otherwise the image already in the account is reused.
+      - name: cdk deploy
+        working-directory: infra
+        env:
+          # Lambda only accepts a plain image manifest, not the attestation index buildx adds by default.
+          BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
+        run: |
+          npx cdk deploy \
+            "$STACK_PREFIX-Data" "$STACK_PREFIX-Auth" "$STACK_PREFIX-Api" "$STACK_PREFIX-Worker" \
+            "$STACK_PREFIX-Web" "$STACK_PREFIX-Ops" \
+            --require-approval never --notices false -c APP_CONFIG="$APP_CONFIG"
+
+      - name: Smoke test
+        id: smoke
+        run: |
+          domain="$(aws ssm get-parameter --name "$STACK_PREFIX-DistributionDomain" --query Parameter.Value --output text)"
+          echo "url=https://$domain" >> "$GITHUB_OUTPUT"
+
+          health="$(curl -fsS --retry 5 --retry-delay 10 --retry-all-errors "https://$domain/api/health")"
+          echo "GET /api/health -> $health"
+          if ! grep -q '"status":"ok"' <<< "$health"; then
+            echo "::error::/api/health did not report status ok"
+            exit 1
+          fi
+
+          mode="$(curl -fsS --retry 3 --retry-delay 5 --retry-all-errors "https://$domain/api/auth/config")"
+          echo "GET /api/auth/config -> $mode"
+          if ! grep -q '"mode":"cognito"' <<< "$mode"; then
+            echo "::error::the deployed API is not in cognito mode"
+            exit 1
+          fi
+
+          curl -fsS --retry 3 --retry-delay 5 --retry-all-errors -o /dev/null "https://$domain/api/lots"
+          echo "GET /api/lots -> 200 (the API reads the table)"
+
+          for page in / /admin; do
+            status="$(curl -fsSI --retry 5 --retry-delay 10 --retry-all-errors -o /dev/null -w '%{http_code}' "https://$domain$page")"
+            echo "HEAD $page -> $status"
+            if [ "$status" != "200" ]; then
+              echo "::error::https://$domain$page returned $status"
+              exit 1
+            fi
+          done
