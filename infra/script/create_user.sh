@@ -42,6 +42,10 @@ fi
 
 if LOOKUP="$(aws cognito-idp admin-get-user --user-pool-id "$POOL_ID" --username "$EMAIL" 2>&1)"; then
   echo "$EMAIL already has an account in $PREFIX-Users; updating it."
+  # The API accepts only tokens whose email is verified. Someone who changed their own address lost that mark
+  # and cannot sign in until an administrator vouches for the address again, which is what running this is.
+  aws cognito-idp admin-update-user-attributes --user-pool-id "$POOL_ID" --username "$EMAIL" \
+    --user-attributes Name=email_verified,Value=true
 elif [[ "$LOOKUP" == *UserNotFoundException* ]]; then
   # SUPPRESS: no invitation email with a temporary password; the password is set below. The API accepts only
   # tokens whose email is verified, and an administrator typing the address here is that verification.
@@ -54,12 +58,13 @@ else
 fi
 # Through a file only this user can read, deleted on the way out, not as an argument: arguments show in the
 # machine's process list. (The AWS CLI cannot read --cli-input-json from a pipe.)
-REQUEST="$(umask 077 && mktemp)"
+REQUEST=""
 trap 'rm -f "$REQUEST"' EXIT
 # bash skips the EXIT trap when a signal kills it (Ctrl-C, a closed terminal): turn those into exits.
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
+REQUEST="$(umask 077 && mktemp)"
 POOL_ID="$POOL_ID" EMAIL="$EMAIL" PASSWORD="$PASSWORD" node -e '
   const { POOL_ID, EMAIL, PASSWORD } = process.env;
   process.stdout.write(JSON.stringify({ UserPoolId: POOL_ID, Username: EMAIL, Password: PASSWORD, Permanent: true }));

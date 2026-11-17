@@ -4,9 +4,13 @@
 Those functions delete a finished job's message themselves and return normally for a job that
 must be tried again. Lambda deletes every message of a batch that returns normally, so the
 ones to retry are reported back as partial batch failures (the event source mapping needs
-`ReportBatchItemFailures`) and handed back to the queue for redelivery in under a minute or
-two instead of after the whole visibility timeout. An invocation that is killed (timeout,
-out of memory) hands nothing back: its message returns when the visibility timeout ends.
+`ReportBatchItemFailures`).
+
+A job that failed is also handed back to the queue for redelivery in a minute or so. A job
+that could not be claimed, or whose message was kept because another worker changed it, is
+not: that worker may still be running it, and the queue's visibility timeout (longer than
+the function's own timeout) is what keeps the job from being run twice. The same wait
+applies after an invocation that was killed (timeout, out of memory).
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 from parking_core.interfaces import Aligner, LayoutProposer, SpaceScorer
 from parking_core.models import Cutoffs, Message
@@ -25,10 +29,14 @@ from .proposals import ProposalResult, is_proposal_message, process_proposal
 
 log = logging.getLogger(__name__)
 
-RETRY_OUTCOMES = frozenset({"deferred", "failed_retryable"})
 RETRY_DELAY_SECONDS = 30
 """Times the delivery count: 30 s before the second attempt, 60 s before the third, so a
 short outage of DynamoDB or S3 does not use up every attempt at once."""
+
+Verdict = Literal["done", "retry_soon", "retry_later"]
+"""What becomes of a record's message. `done`: Lambda may delete it (the job code already
+has). `retry_soon`: the job ran and failed; redeliver after `RETRY_DELAY_SECONDS`.
+`retry_later`: someone else may hold the job; redeliver when the visibility timeout ends."""
 
 
 @dataclass
@@ -66,8 +74,11 @@ def handle(event: dict[str, Any], runtime: Runtime) -> dict[str, Any]:
             receipt=record["receiptHandle"],
             receive_count=int(record.get("attributes", {}).get("ApproximateReceiveCount", 1)),
         )
-        if _retry(msg, runtime):
-            failures.append({"itemIdentifier": record["messageId"]})
+        verdict = _run(msg, runtime)
+        if verdict == "done":
+            continue
+        failures.append({"itemIdentifier": record["messageId"]})
+        if verdict == "retry_soon":
             try:
                 runtime.adapters.queue.release(msg.receipt, RETRY_DELAY_SECONDS * msg.receive_count)
             except Exception:  # redelivered after the visibility timeout instead
@@ -75,8 +86,8 @@ def handle(event: dict[str, Any], runtime: Runtime) -> dict[str, Any]:
     return {"batchItemFailures": failures}
 
 
-def _retry(msg: Message, runtime: Runtime) -> bool:
-    """Run one job. True when its message must stay on the queue."""
+def _run(msg: Message, runtime: Runtime) -> Verdict:
+    """Run one job and say what becomes of its message."""
     result: ProcessResult | ProposalResult
     try:
         if is_proposal_message(msg.body):
@@ -87,8 +98,12 @@ def _retry(msg: Message, runtime: Runtime) -> bool:
             )
     except Exception:  # a failure outside the job itself (DynamoDB, S3): try again
         log.exception("Job message failed outside the job: %r", msg.body[:200])
-        return True
-    return result.outcome in RETRY_OUTCOMES or result.message_kept
+        return "retry_soon"
+    if result.outcome == "failed_retryable":
+        return "retry_soon"
+    if result.outcome == "deferred" or result.message_kept:
+        return "retry_later"
+    return "done"
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:

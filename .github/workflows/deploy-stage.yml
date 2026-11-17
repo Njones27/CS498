@@ -60,7 +60,12 @@ jobs:
       # A CI run that is re-run or finishes late must not put an older commit back over a newer deploy.
       - name: Deploy only the tip of main
         run: |
-          tip="$(git ls-remote origin refs/heads/main | cut -f1)"
+          tip="$(git ls-remote origin refs/heads/main)"
+          tip="${tip%%[[:space:]]*}"
+          if [ -z "$tip" ]; then
+            echo "::error::Could not read the tip of main from origin."
+            exit 1
+          fi
           if [ "$(git rev-parse HEAD)" != "$tip" ]; then
             echo "::error::$(git rev-parse --short HEAD) is no longer the tip of main (${tip:0:7}); that commit's own run deploys it."
             exit 1

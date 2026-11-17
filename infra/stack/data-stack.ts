@@ -12,9 +12,11 @@ import { BaseStack } from '../lib/base-stack';
 import { configBoolean, configNumber, configStringList } from '../lib/config-values';
 
 /**
- * Deliveries before SQS sets a message aside. More than the worker's own limit (MAX_ATTEMPTS = 3 in
- * worker/parking_worker/handler.py), which marks a job failed and deletes its message: a delivery that never ran
- * the job (not claimable yet, a killed invocation) counts here too and must not cost the job its last attempt.
+ * Deliveries before SQS sets a message aside. The worker itself gives up on its third delivery or later
+ * (MAX_ATTEMPTS = 3 in worker/parking_worker/handler.py): it marks the job failed and deletes the message, so a
+ * job that keeps failing never gets this far. The two extra deliveries are headroom for the ones that did not end
+ * that way (the job was not claimable yet, the worker was killed), so such a job can still finish on delivery 4
+ * or 5 instead of being set aside unfinished. They still count as attempts: a failure there is final.
  */
 export const MAX_RECEIVE_COUNT = 5;
 

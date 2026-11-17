@@ -147,7 +147,7 @@ was marked failed), `JobsDeadLettered` (a job's message was set aside after five
 ## Security notes
 
 - The API verifies Cognito ID tokens itself (`core/parking_core/auth.py`): signature against the pool's keys,
-  issuer, audience, `token_use`, and a verified email (`create_user.sh` marks it verified). The dev login and its public secret cannot run here: `APP_ENV=aws` refuses
+  issuer, audience, `token_use`, and a verified email (`create_user.sh` marks it verified, also when re-run for an existing account). The dev login and its public secret cannot run here: `APP_ENV=aws` refuses
   `AUTH_MODE=dev`, and `/auth/login` answers 404.
 - Accounts are created by an administrator only. The web client has no secret and allows the password flow only.
   The `admin` group is read from the token, so removing someone from it (or disabling them) takes effect when

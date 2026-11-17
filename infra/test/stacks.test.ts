@@ -92,6 +92,8 @@ describe('the prod stage', () => {
         const maxAttempts = Number(/^MAX_ATTEMPTS = (\d+)$/m.exec(worker)?.[1]);
         expect(maxAttempts).toBeGreaterThan(0);
         expect(MAX_RECEIVE_COUNT).toBeGreaterThan(maxAttempts);
+        // Headroom, not more work: a worker killed on every delivery runs the job this many times.
+        expect(MAX_RECEIVE_COUNT).toBeLessThanOrEqual(maxAttempts + 2);
     });
 
     it('has no self sign-up and a password-only web client without a secret', () => {

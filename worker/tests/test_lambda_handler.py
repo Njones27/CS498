@@ -100,9 +100,16 @@ def test_a_message_the_job_code_kept_is_not_deleted_by_lambda(world: World, monk
         return real(image_id, expected, to, **fields)
 
     monkeypatch.setattr(world.repo, "transition_job", lose_the_final_transition)
+    world.queue.visibility_timeout = 300  # as deployed: longer than a worker can run
     result = handle(sqs_event(world), runtime(world))
     assert result == {"batchItemFailures": [{"itemIdentifier": "m-0"}]}
     assert len(world.queue) == 1
+    # The other worker may still be running the job: no early redelivery, only the queue's own
+    # visibility timeout (longer than a worker can run) brings the message back.
+    world.queue.advance(4 * RETRY_DELAY_SECONDS)
+    assert world.queue.receive() == []
+    world.queue.advance(world.queue.visibility_timeout)
+    assert len(world.queue.receive()) == 1
 
 
 def test_only_the_failed_records_of_a_batch_are_reported(world: World):
@@ -204,10 +211,9 @@ def test_kept_flag_on_the_results_themselves(world: World, monkeypatch):
             False if to is JobStatus.FAILED else real(image_id, expected, to, **f)
         ),
     )
-    event = sqs_event(world)
-    assert handle(event, runtime(world, aligner=Misaligned())) == {
-        "batchItemFailures": [{"itemIdentifier": "m-0"}]
-    }
+    [msg] = world.queue.receive()
+    result = process_message(msg, world.adapters, Misaligned(), StubScorer(), Cutoffs())
+    assert (result.outcome, result.message_kept) == ("failed_permanent", True)
     assert world.repo.get_snapshot("img-2").job_status is JobStatus.PROCESSING
     assert len(world.queue) == 1
 
