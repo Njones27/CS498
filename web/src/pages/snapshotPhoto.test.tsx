@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SnapshotDetail } from '../api/schemas'
 import { ADMIN, mockFetch, renderApp } from '../test/helpers'
-import { classBreakdown } from '../lib/detections'
+import { carCount } from '../lib/detections'
 import { POLL_MS } from './SnapshotPhotoPage'
 
 const URL = '/admin/snapshots/img-1/photo'
@@ -100,7 +100,7 @@ describe('snapshot photo page', () => {
     const overlay = screen.getByTestId('photo-overlay')
     expect(overlay).toHaveAttribute('viewBox', '0 0 4000 3000')
     expect(overlay.querySelectorAll('polygon.photo-space__line')).toHaveLength(3)
-    expect(overlay.querySelectorAll('rect.photo-box__rect')).toHaveLength(4)
+    expect(overlay.querySelectorAll('rect.photo-box__rect')).toHaveLength(3)
 
     const b17 = screen.getByTestId('outline-B-17')
     expect(b17).toHaveClass('space--occupied')
@@ -112,21 +112,19 @@ describe('snapshot photo page', () => {
     expect(screen.getByTestId('outline-B-19').querySelector('title')).toHaveTextContent('partly out of frame')
     expect(overlay.querySelectorAll('text.photo-box__label')).toHaveLength(0)
     const titles = Array.from(overlay.querySelectorAll('[data-testid="detection-box"] title'), (t) => t.textContent)
-    expect(titles).toEqual(['car 0.90', 'car 0.42', 'car 0.90', 'cell phone 0.66'])
-    // A non-car class is drawn, labelled with its class, and styled apart from cars.
-    const phone = overlay.querySelector('[data-class="cell phone"]')
-    expect(phone).toHaveClass('photo-box--other')
-    expect(phone).toHaveTextContent('cell phone 0.66')
+    expect(titles).toEqual(['car 0.90', 'car 0.42', 'car 0.90'])
+    // A non-car class (the drone photo's "cell phone" hits) is not drawn at all.
+    expect(overlay.querySelector('[data-class="cell phone"]')).toBeNull()
     expect(overlay.querySelectorAll('.photo-box--car')).toHaveLength(3)
 
     const counts = screen.getByRole('region', { name: 'Counts' })
     expect(counts).toHaveTextContent('1 Free')
     expect(counts).toHaveTextContent('1 Occupied')
     expect(counts).toHaveTextContent('1 Unknown')
-    expect(counts).toHaveTextContent('YOLO: 3 car, 1 cell phone')
+    expect(counts).toHaveTextContent('YOLO: 3 cars')
     const legend = screen.getByRole('region', { name: 'Legend' })
     expect(legend).toHaveTextContent('Car box')
-    expect(legend).toHaveTextContent('Other detection (not counted)')
+    expect(legend).not.toHaveTextContent('Other detection')
     expect(screen.getByText(/Model: acpds_yolo/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '← Admin' })).toHaveAttribute('href', '/admin')
   })
@@ -154,11 +152,11 @@ describe('snapshot photo page', () => {
     const overlay = () => screen.getByTestId('photo-overlay')
 
     expect(screen.queryByRole('checkbox', { name: 'Detections' })).not.toBeInTheDocument()
-    expect(overlay().querySelectorAll('rect.photo-box__rect')).toHaveLength(4)
+    expect(overlay().querySelectorAll('rect.photo-box__rect')).toHaveLength(3)
 
     await user.click(screen.getByRole('checkbox', { name: 'Outlines' }))
     expect(overlay().querySelectorAll('polygon')).toHaveLength(0)
-    expect(overlay().querySelectorAll('rect.photo-box__rect')).toHaveLength(4)
+    expect(overlay().querySelectorAll('rect.photo-box__rect')).toHaveLength(3)
   })
 
   it('shows Processing… and polls until the job finishes', async () => {
@@ -176,7 +174,7 @@ describe('snapshot photo page', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(POLL_MS)
     })
-    expect(await screen.findByRole('region', { name: 'Counts' })).toHaveTextContent('YOLO: 3 car, 1 cell phone')
+    expect(await screen.findByRole('region', { name: 'Counts' })).toHaveTextContent('YOLO: 3 cars')
     expect(screen.queryByText('Processing…')).not.toBeInTheDocument()
     expect(calls).toBe(2)
     await act(async () => {
@@ -225,12 +223,12 @@ describe('snapshot photo page', () => {
   })
 })
 
-describe('classBreakdown', () => {
-  it('counts detections per class, most frequent first', () => {
+describe('carCount', () => {
+  it('counts car, truck and bus as cars and leaves every other class out', () => {
     const phones = Array.from({ length: 3 }, () => box(0, 0, 1, 1, 0.5, 'cell phone'))
-    expect(classBreakdown([box(0, 0, 1, 1), ...phones, box(0, 0, 1, 1, 0.5, 'truck')])).toBe(
-      '3 cell phone, 1 car, 1 truck',
-    )
-    expect(classBreakdown([])).toBe('')
+    expect(carCount([box(0, 0, 1, 1), ...phones, box(0, 0, 1, 1, 0.5, 'truck')])).toBe('2 cars')
+    expect(carCount([box(0, 0, 1, 1)])).toBe('1 car')
+    expect(carCount(phones)).toBe('no cars')
+    expect(carCount([])).toBe('no cars')
   })
 })

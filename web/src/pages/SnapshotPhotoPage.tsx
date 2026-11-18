@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import type { CarBoxOut, LotDetail, ObservationOut, SnapshotDetail, SpaceState } from '../api/schemas'
 import { Main } from '../components/Main'
 import { StateIconSvg } from '../components/StateIcon'
-import { CAR_CLASSES, classBreakdown } from '../lib/detections'
+import { carBoxes, carCount } from '../lib/detections'
 import { dateTime } from '../lib/relativeTime'
 import { STATE_ORDER, visualFor } from '../lib/status'
 import { useFetch } from '../lib/useFetch'
@@ -97,7 +97,7 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
           Processing failed: {data.error ?? 'unknown error'}
         </p>
       )}
-      {data && complete && <Counts observations={data.observations} boxes={data.detections} />}
+      {data && complete && <Counts observations={data.observations} boxes={carBoxes(data.detections)} />}
       {data && complete && (
         <div className="photo-toggles" role="group" aria-label="Layers">
           <label>
@@ -124,7 +124,7 @@ function SnapshotPhoto({ imageId }: { imageId: string }) {
             <Overlay
               size={size}
               observations={showOutlines ? data.observations : []}
-              boxes={data.detections}
+              boxes={carBoxes(data.detections)}
               labels={labels}
             />
           )}
@@ -147,7 +147,7 @@ function Overlay({ size, observations, boxes, labels }: { size: Size; observatio
       viewBox={`0 0 ${w} ${h}`}
       preserveAspectRatio="none"
       role="img"
-      aria-label={`${observations.length} outlines, ${boxes.length} detections`}
+      aria-label={`${observations.length} outlines, ${boxes.length} cars`}
       data-testid="photo-overlay"
     >
       <g className="photo-outlines">
@@ -176,7 +176,7 @@ function Overlay({ size, observations, boxes, labels }: { size: Size; observatio
           return (
             <g
               key={i}
-              className={`photo-box ${CAR_CLASSES.has(b.clsName) ? 'photo-box--car' : 'photo-box--other'}`}
+              className="photo-box photo-box--car"
               data-testid="detection-box"
               data-class={b.clsName}
             >
@@ -259,7 +259,7 @@ function Counts({ observations, boxes }: { observations: ObservationOut[]; boxes
         })}
         <li>
           <BoxSwatch />
-          <span>YOLO: {boxes.length ? classBreakdown(boxes) : 'no detections'}</span>
+          <span>YOLO: {carCount(boxes)}</span>
         </li>
       </ul>
     </section>
@@ -284,28 +284,24 @@ function Legend() {
           <BoxSwatch />
           Car box
         </li>
-        <li>
-          <BoxSwatch other />
-          Other detection (not counted)
-        </li>
       </ul>
       <p className="hint">
-        Outlines differ by line as well as colour: solid is free, double is occupied, dotted is unknown. Detections are
-        dashed boxes; only car, truck and bus count towards a space&apos;s car overlap. Hover an outline for its scores
+        Outlines differ by line as well as colour: solid is free, double is occupied, dotted is unknown. Cars YOLO found
+        are dashed boxes (trucks and buses count as cars). Hover an outline for its scores
         or a box for its class and confidence.
       </p>
     </section>
   )
 }
 
-function BoxSwatch({ other = false }: { other?: boolean }) {
+function BoxSwatch() {
   return (
     <svg
       viewBox="0 0 24 24"
       width="22"
       height="22"
       aria-hidden="true"
-      className={`legend-swatch box-swatch ${other ? 'photo-box--other' : 'photo-box--car'}`}
+      className="legend-swatch box-swatch photo-box--car"
     >
       <rect x="2" y="4" width="20" height="16" className="photo-box__rect" />
     </svg>
