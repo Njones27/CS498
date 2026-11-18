@@ -7,3 +7,5 @@ web/dist
 models/**/*.pt
 models/**/*.part
 eval/data
+infra/cdk.out
+infra/.build

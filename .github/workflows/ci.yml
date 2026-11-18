@@ -57,6 +57,62 @@ jobs:
           npm test
           npm run build
 
+  # The AWS infrastructure (infra/, HDD §8), checked with no AWS credentials: `cdk synth` resolves nothing in the
+  # account, so this is safe for pull requests from forks. Deploying happens only from main (deploy.yml).
+  infra:
+    name: CDK typecheck, tests, synth
+    # Pinned: the import check below runs the API code with the system python3.12, the Lambda runtime's version.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.23"
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: infra/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            infra/package-lock.json
+            web/package-lock.json
+      - name: Install the CDK app
+        working-directory: infra
+        run: npm ci
+      - name: Typecheck and test
+        working-directory: infra
+        run: |
+          npm run typecheck
+          npm test
+      - name: Infra scripts parse
+        run: for script in infra/script/*.sh; do bash -n "$script"; done
+      # Synth packages web/dist and the API code, so both are built first, the way the deploy does it.
+      - name: Build the web app
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Build the API Lambda code
+        run: infra/script/build_api.sh
+      - name: The API code imports on its own (no project virtualenv)
+        run: |
+          cd infra/.build/api
+          APP_ENV=test python3.12 -S -c "
+          import sys; sys.path.insert(0, '.')
+          from parking_api.lambda_handler import handler
+          event = {'version': '2.0', 'routeKey': 'ANY /api/{proxy+}', 'rawPath': '/api/health', 'rawQueryString': '',
+                   'headers': {}, 'isBase64Encoded': False,
+                   'requestContext': {'http': {'method': 'GET', 'path': '/api/health', 'sourceIp': '127.0.0.1'}}}
+          response = handler(event, None)
+          assert response['statusCode'] == 200, response
+          print(response['body'])
+          "
+      - name: cdk synth
+        working-directory: infra
+        run: npx cdk synth --quiet --notices false -c APP_CONFIG=config/app-config-prod.json
+      # The Dockerfile's `lambda` target is built and smoke-tested by the worker-vision-image job below.
+
   worker-vision-image:
     name: Worker image with the vision extra
     runs-on: ubuntu-latest
@@ -73,6 +129,18 @@ jobs:
         run: uv run pytest -q worker/tests/test_acpds_yolo.py
       - name: Build (torch CPU wheels, torchvision, ultralytics)
         run: docker build --build-arg WORKER_EXTRAS=vision -f worker/Dockerfile -t parking-worker:vision .
+      # The Phase 2 image (infra/stack/worker-stack.ts): same layers plus the Lambda runtime client and the
+      # weights. Checked here so a broken Dockerfile fails a pull request, not the deploy after the merge.
+      - name: Build the Lambda target (vision + lambda extras, weights baked in)
+        run: >
+          docker build --target lambda --build-arg WORKER_EXTRAS="vision lambda"
+          -f worker/Dockerfile -t parking-worker:lambda .
+      # Read-only with only /tmp writable and no network, like Lambda.
+      - name: The Lambda image carries verified weights and imports its handler
+        run: >
+          docker run --rm --network none --read-only --tmpfs /tmp --entrypoint sh parking-worker:lambda -c
+          "python scripts/download_weights.py --check &&
+          python -c 'import awslambdaric, parking_worker.lambda_handler; print(\"handler ok\")'"
       - name: Imports work in the image
         run: >
           docker run --rm parking-worker:vision python -c

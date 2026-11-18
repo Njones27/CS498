@@ -41,6 +41,15 @@ class LoginResponse(CamelModel):
     groups: list[str]
 
 
+class AuthConfigResponse(CamelModel):
+    """How the web app signs in: the dev form posts to /auth/login, `cognito` goes to the user
+    pool's own endpoint in `region` as `userPoolClientId`."""
+
+    mode: Literal["dev", "cognito"]
+    region: str | None = None
+    user_pool_client_id: str | None = None
+
+
 # --- public lots ------------------------------------------------------------
 
 

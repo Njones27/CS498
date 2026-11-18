@@ -98,6 +98,26 @@ def test_login_404_in_cognito_mode(adapters):
     assert r.status_code == 404
 
 
+def test_auth_config_tells_the_web_app_where_to_sign_in(client, adapters):
+    assert client.get("/auth/config").json() == {
+        "mode": "dev",
+        "region": None,
+        "userPoolClientId": None,
+    }
+    s = Settings(  # type: ignore[call-arg]
+        app_env="test",
+        auth_mode="cognito",
+        aws_region="us-east-2",
+        cognito_user_pool_id="us-east-2_Example",
+        cognito_client_id="client-123",
+        _env_file=None,
+    )
+    r = TestClient(create_app(s, adapters)).get("/auth/config")
+    assert r.status_code == 200
+    # The pool id stays on the server: signing in needs only the region and the client id.
+    assert r.json() == {"mode": "cognito", "region": "us-east-2", "userPoolClientId": "client-123"}
+
+
 # --- public -----------------------------------------------------------------
 
 

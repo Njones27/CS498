@@ -13,11 +13,21 @@ export const ADMIN: Session = {
 }
 
 type Reply = { status?: number; body: unknown }
-/** A fixed reply, or a function of the request; a function may return a promise to hold the response. */
+/**
+ * A fixed reply, or a function of the request; a function may return a promise to hold the
+ * response, or throw to simulate a network failure.
+ */
 type Handler = Reply | ((init?: RequestInit) => Reply | Promise<Reply>)
 
-/** Install a fetch mock keyed by "METHOD /path" (path after API_BASE). */
+/** Local-dev sign-in, answered by default so sign-in tests only mock what they care about. */
+export const DEV_AUTH_CONFIG: Reply = { body: { mode: 'dev', region: null, userPoolClientId: null } }
+
+/**
+ * Install a fetch mock keyed by "METHOD /path" (path after API_BASE). Absolute URLs off the API
+ * (e.g. "POST https://cognito-idp.us-east-1.amazonaws.com/") are keyed as-is.
+ */
 export function mockFetch(routes: Record<string, Handler>) {
+  routes = { 'GET /auth/config': DEV_AUTH_CONFIG, ...routes }
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input).replace(/^\/api/, '')
     const key = `${init?.method ?? 'GET'} ${url}`
@@ -28,6 +38,16 @@ export function mockFetch(routes: Record<string, Handler>) {
   })
   vi.stubGlobal('fetch', fn)
   return fn
+}
+
+/** An unsigned JWT carrying these claims; the client reads claims but never checks signatures. */
+export function fakeIdToken(claims: Record<string, unknown>): string {
+  const b64url = (s: string) =>
+    btoa(String.fromCharCode(...new TextEncoder().encode(s)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '')
+  return `${b64url('{"alg":"RS256"}')}.${b64url(JSON.stringify(claims))}.sig`
 }
 
 function LocationProbe() {

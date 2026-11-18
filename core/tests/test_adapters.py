@@ -527,10 +527,30 @@ def test_sqs_receive_falls_back_to_attribute_names(aws_creds):
     assert calls[-1]["WaitTimeSeconds"] == 20
 
 
-def test_build_aws_adapters_rejects_cognito():
-    s = Settings(app_env="local", auth_mode="cognito", _env_file=None)  # type: ignore[call-arg]
-    with pytest.raises(NotImplementedError, match="Phase 2"):
-        aws.build_aws_adapters(s)
+def test_sqs_release_hands_the_message_back_after_a_delay(aws_creds):
+    q = aws.SqsJobQueue(AWS_SETTINGS)
+    with Stubber(q._client) as stub:
+        for delay in (30, 0):
+            expected = {"QueueUrl": "http://sqs.local/q", "ReceiptHandle": "r"}
+            stub.add_response(
+                "change_message_visibility", {}, {**expected, "VisibilityTimeout": delay}
+            )
+        q.release("r", 30)
+        q.release("r", -5)  # never negative
+        stub.assert_no_pending_responses()
+
+
+def test_memory_queue_release():
+    q = MemoryJobQueue(visibility_timeout=120)
+    q.send("job")
+    [first] = q.receive()
+    assert q.receive() == []  # invisible while a worker holds it
+    q.release(first.receipt, 30)
+    assert q.receive() == []
+    q.advance(31)
+    [again] = q.receive()
+    assert (again.body, again.receive_count) == ("job", 2)
+    q.release("unknown-receipt")  # a no-op, like deleting an unknown receipt
 
 
 def _versioned(observed_at, version, state=SpaceState.FREE):

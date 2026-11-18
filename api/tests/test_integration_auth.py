@@ -30,6 +30,7 @@ PUBLIC = {
     ("get", "/lots"),
     ("get", "/lots/{lot_id}"),
     ("get", "/lots/{lot_id}/status"),
+    ("get", "/auth/config"),
     ("post", "/auth/login"),
 }
 PATH_PARAMS = {

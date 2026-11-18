@@ -84,6 +84,46 @@
         "title": "AdminLotOut",
         "type": "object"
       },
+      "AuthConfigResponse": {
+        "description": "How the web app signs in: the dev form posts to /auth/login, `cognito` goes to the user\npool's own endpoint in `region` as `userPoolClientId`.",
+        "properties": {
+          "mode": {
+            "enum": [
+              "dev",
+              "cognito"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "userPoolClientId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Userpoolclientid"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "AuthConfigResponse",
+        "type": "object"
+      },
       "CarBoxOut": {
         "properties": {
           "box": {
@@ -5057,6 +5097,37 @@
         "summary": "Confirm the file arrived and queue the job",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/auth/config": {
+      "get": {
+        "operationId": "auth_config_auth_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error"
+          }
+        },
+        "summary": "How the web app signs in",
+        "tags": [
+          "auth"
         ]
       }
     },

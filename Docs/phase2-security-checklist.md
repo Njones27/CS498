@@ -11,21 +11,30 @@ digits, `-` or `_`, along with labels over 40 characters and viewpoint names ove
 
 ## 1. Replace the dev JWT secret with Cognito
 
-- [ ] Implement the Cognito verifier that `build_aws_adapters` in
-  `core/parking_core/adapters/aws.py` currently stubs with `NotImplementedError`.
-- [ ] Remove the dev signer and the dev users from any image that is deployed.
+- [x] Implement the Cognito verifier that `build_aws_adapters` in
+  `core/parking_core/adapters/aws.py` stubbed with `NotImplementedError`. Done: `CognitoVerifier` in
+  `core/parking_core/auth.py`; the user pool is `infra/stack/auth-stack.ts`.
+- [ ] Remove the dev signer and the dev users from any image that is deployed. Not removed, but
+  unreachable on AWS: `APP_ENV=aws` refuses `AUTH_MODE=dev` at startup, the verifier in use
+  rejects HS256 tokens, and `/auth/login` answers 404.
 
 **Why it matters.** The default secret `dev-only-change-me` is public in this repository. Anyone
 can use it to sign a token with the `admin` group, and the API accepts that token as a real
-admin. The startup check in `core/parking_core/settings.py` only refuses the default secret when
-`APP_ENV=aws`. Until Cognito is in place, never run the stack with `APP_ENV=local` on a machine
-that other people can reach.
+admin. On AWS that secret is never used: the startup check in `core/parking_core/settings.py`
+refuses `AUTH_MODE=dev` when `APP_ENV=aws` and requires the user pool's ids. It still applies to
+the local stack, so never run it with `APP_ENV=local` on a machine that other people can reach.
 
 ## 2. Throttle sign-in attempts
 
-- [ ] Confirm `/auth/login` returns 404 once `AUTH_MODE=cognito`, so the dev route is gone.
-- [ ] Turn on Cognito's built-in protection against repeated failed sign-ins.
-- [ ] Add API Gateway throttling on the public routes, since `GET /lots` reads every lot.
+- [x] Confirm `/auth/login` returns 404 once `AUTH_MODE=cognito`, so the dev route is gone
+  (`test_login_404_in_cognito_mode`; the deploy's smoke test checks the mode).
+- [x] Turn on Cognito's built-in protection against repeated failed sign-ins. A user pool locks an
+  account out for a growing time after five wrong passwords; that is always on. The web app shows
+  "Too many failed sign-in attempts". Threat protection (the paid Plus tier) is not enabled.
+- [x] Add API Gateway throttling on the public routes, since `GET /lots` reads every lot
+  (`Api.ThrottleRateLimit` 20 requests a second, burst 40, in `infra/config/app-config-prod.json`).
+  This is one limit for all callers together, so it bounds cost and load but lets one client crowd
+  out the rest. A per-client limit needs AWS WAF and is not set up.
 
 **Why it matters.** The dev login has no rate limit or lockout. A review sent 200 wrong
 passwords in a row and every one returned an ordinary 401.
@@ -48,5 +57,5 @@ of any size in the bucket. Both risks need admin access, which is why they waite
 - [ ] Access today is all or nothing. Any admin can edit, close or republish any lot. If some
   admins should manage only their own lots, the API needs a per-lot check alongside `AdminDep`
   in `api/parking_api/deps.py`.
-- [ ] Give the API and the worker separate IAM roles that can reach only their own table,
-  bucket and queue.
+- [x] Give the API and the worker separate IAM roles that can reach only their own table,
+  bucket and queue (`infra/lib/app-environment.ts`, checked in `infra/test/stacks.test.ts`).

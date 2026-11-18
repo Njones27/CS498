@@ -1,0 +1,63 @@
+{
+  "Project": {
+    "Name": "Parking",
+    "Stage": "Prod",
+    "Account": "444138913700",
+    "Region": "us-east-1",
+    "Profile": "cs498"
+  },
+  "Stack": {
+    "Cicd": {
+      "Name": "Cicd",
+      "GitHubRepo": "Njones27/CS498",
+      "GitHubEnvironment": "prod",
+      "GitHubSubjectPrefix": "repo:Njones27@153565100/CS498@1407666926"
+    },
+    "Data": {
+      "Name": "Data",
+      "RetainOnDelete": true,
+      "PointInTimeRecovery": true,
+      "JobVisibilityTimeoutSeconds": 300,
+      "PhotoCorsOrigins": ["https://d31w1oaukjrnn.cloudfront.net"],
+      "RawPhotoExpiryDays": 0
+    },
+    "Auth": {
+      "Name": "Auth",
+      "RetainOnDelete": true,
+      "SessionMinutes": 60
+    },
+    "Api": {
+      "Name": "Api",
+      "MemoryMb": 1024,
+      "TimeoutSeconds": 29,
+      "ThrottleRateLimit": 20,
+      "ThrottleBurstLimit": 40,
+      "LogRetentionDays": 30
+    },
+    "Worker": {
+      "Name": "Worker",
+      "MemoryMb": 3008,
+      "TimeoutSeconds": 240,
+      "MaxConcurrency": 2,
+      "LogRetentionDays": 30,
+      "Environment": {
+        "DETECTOR": "acpds_yolo",
+        "ALIGNER": "identity",
+        "YOLO_IMGSZ": "1280",
+        "YOLO_OVERLAP_MODE": "box"
+      }
+    },
+    "Web": {
+      "Name": "Web",
+      "DistPath": "../web/dist",
+      "CspReportOnly": false
+    },
+    "Ops": {
+      "Name": "Ops",
+      "MonthlyBudgetsUsd": [10, 25],
+      "WorkerErrorThreshold": 1,
+      "ApiErrorThreshold": 3,
+      "Api5xxThreshold": 5
+    }
+  }
+}
